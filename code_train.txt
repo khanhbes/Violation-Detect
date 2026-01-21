@@ -1,0 +1,163 @@
+!pip install ultralytics
+'''
+# Copy dowloadcode on Roboflow
+!pip install roboflow
+from roboflow import Roboflow
+rf = Roboflow(api_key="xoNzVN4PxIdhCJt7K6nL")
+project = rf.workspace("nckh2026").project("nckh26-hloi9")
+version = project.version(1)
+dataset = version.download("yolov12")
+'''
+
+from google.colab import drive
+
+# Mount Google Drive
+drive.mount('/content/drive')
+
+# TẠO THƯ MỤC NÀY TRƯỚC TRÊN GOOGLE DRIVE CỦA BẠN: "YOLOv12_Project"
+ROOT_DIR = '/content/drive/MyDrive/YOLOv12_Project'
+
+# Tạo folder nếu chưa tồn tại
+!mkdir -p "{ROOT_DIR}"
+%cd "{ROOT_DIR}"
+
+from ultralytics import YOLO
+
+# 1. Load model YOLOv12s-seg (Instance Segmentation)
+# Thư viện sẽ tự động tải weights nếu chưa có
+model = YOLO('/content/yolov12s-seg.pt') #Fix name of Model--
+
+# 2. Tiến hành Train
+results = model.train(
+    data='/content/NCKH26-1/data.yaml',  # Đường dẫn data.yaml đã định nghĩa
+    task='segment',       # Quan trọng: chỉ định task là segmentation
+    epochs=70,            # Số epoch (tùy chỉnh)
+    imgsz=640,            # Kích thước ảnh
+    batch=16,             # Batch size (tùy chỉnh theo GPU)
+    name='yolov12s_seg_colab', # Tên folder lưu kết quả trong runs/segment/
+    project=f'{ROOT_DIR}/runs/segment', # ĐƯỜNG DẪN LƯU VÀO GOOGLE DRIVE
+    exist_ok=True
+)
+
+import os
+import glob
+import random
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from IPython.display import Image, display
+from ultralytics import YOLO
+
+# =================================================================
+# 1. ĐỊNH NGHĨA ĐƯỜNG DẪN (Cần kiểm tra lại nếu bạn đặt tên khác)
+# =================================================================
+ROOT_DIR = '/content/drive/MyDrive/YOLOv12_Project'
+# Tên folder kết quả train đã lưu trong Drive (Bước 3)
+TRAIN_RESULT_NAME = 'yolov12s_seg_colab'
+RESULT_FOLDER = f'{ROOT_DIR}/runs/segment/{TRAIN_RESULT_NAME}'
+BEST_MODEL_PATH = f'{RESULT_FOLDER}/weights/best.pt'
+
+# Đường dẫn đến folder ảnh test (THAY THẾ ĐƯỜNG DẪN NÀY VỚI CỦA BẠN)
+TEST_SOURCE_PATH = '/content/NCKH26-1/test/images'
+INFERENCE_OUTPUT_FOLDER = f'{ROOT_DIR}/runs/segment/predict_test'
+
+
+# =================================================================
+# 2. HIỂN THỊ BIỂU ĐỒ KẾT QUẢ TRAIN (Đã lưu trong Drive)
+# =================================================================
+print("=========================================================")
+print("             📈 PHÂN TÍCH KẾT QUẢ HUẤN LUYỆN 📈           ")
+print("=========================================================")
+
+# Hiển thị Biểu đồ Loss và Metrics (results.png)
+print("\n--- Biểu đồ Tổng hợp Loss và Metrics (mAP) ---")
+try:
+    display(Image(filename=f'{RESULT_FOLDER}/results.png'))
+    
+except FileNotFoundError:
+    print(f"Lỗi: Không tìm thấy results.png tại {RESULT_FOLDER}")
+# Hiển thị Ma trận nhầm lẫn (Confusion Matrix)
+print("\n--- Ma trận Nhầm lẫn (Confusion Matrix Normalized) ---")
+try:
+    # Thường là file normalized cho dễ đọc
+    display(Image(filename=f'{RESULT_FOLDER}/confusion_matrix_normalized.png', width=800))
+except FileNotFoundError:
+    try:
+        display(Image(filename=f'{RESULT_FOLDER}/confusion_matrix.png', width=800))
+    except FileNotFoundError:
+        print("Lỗi: Không tìm thấy Confusion Matrix.")
+
+# Hiển thị Ảnh Validation mẫu (Ground Truth vs Prediction)
+print("\n--- Ảnh Validation Mẫu (Prediction trên tập Val) ---")
+try:
+    val_images = glob.glob(f'{RESULT_FOLDER}/val_batch*_pred.jpg')
+    if val_images:
+        display(Image(filename=val_images[0], width=800))
+except Exception:
+    print("Lỗi: Không tìm thấy ảnh Val mẫu.")
+
+
+# =================================================================
+# 3. ĐÁNH GIÁ VÀ XUẤT CHỈ SỐ TEST CUỐI CÙNG (VAL)
+# =================================================================
+print("\n=========================================================")
+print("            📊 CHỈ SỐ ĐÁNH GIÁ (Final Metrics) 📊          ")
+print("=========================================================")
+
+try:
+    # Load model tốt nhất đã lưu vào Drive
+    best_model = YOLO(BEST_MODEL_PATH)
+    print(f"Đã load model tốt nhất từ: {BEST_MODEL_PATH}")
+    
+    # Chạy Validation/Test trên tập Validation đã cấu hình trong data.yaml
+    val_metrics = best_model.val()
+
+    print("\n--- KẾT QUẢ CHÍNH TRÊN TẬP VALIDATION ---")
+    print(f"✅ mAP50 (Mask/Segmentation): {val_metrics.seg.map50:.4f}")
+    print(f"✅ mAP50-95 (Mask/Segmentation): {val_metrics.seg.map:.4f}")
+    print(f"mAP50 (Box/Detection): {val_metrics.box.map50:.4f}")
+    print(f"mAP50-95 (Box/Detection): {val_metrics.box.map:.4f}")
+    
+except FileNotFoundError:
+    print(f"\n❌ Lỗi: Không tìm thấy model {BEST_MODEL_PATH}. Vui lòng kiểm tra lại đường dẫn.")
+except Exception as e:
+    print(f"\n❌ Lỗi trong quá trình đánh giá: {e}")
+
+
+# =================================================================
+# 4. CHẠY INFERENCE VÀ HIỂN THỊ KẾT QUẢ TEST
+# =================================================================
+print("\n=========================================================")
+print("            📸 KẾT QUẢ DỰ ĐOÁN TRÊN ẢNH TEST 📸           ")
+print("=========================================================")
+
+try:
+    if 'best_model' in locals():
+        # Chạy dự đoán trên tập ảnh TEST (kết quả được lưu vào Drive)
+        print(f"Đang chạy dự đoán trên ảnh Test từ {TEST_SOURCE_PATH}...")
+        best_model.predict(
+            source=TEST_SOURCE_PATH,
+            save=True,
+            conf=0.5,
+            iou=0.6,
+            project=f'{ROOT_DIR}/runs/segment',
+            name='predict_test', # Tên folder mới trong Drive
+exist_ok=True
+        )
+
+        # Hiển thị 3 ảnh ngẫu nhiên đã được predict và lưu trong Drive
+        pred_test_images = glob.glob(f'{INFERENCE_OUTPUT_FOLDER}/*.jpg') + glob.glob(f'{INFERENCE_OUTPUT_FOLDER}/*.png')
+        print(f"Đã lưu {len(pred_test_images)} ảnh kết quả dự đoán vào Drive tại: {INFERENCE_OUTPUT_FOLDER}")
+        
+        if pred_test_images:
+            for img_path in random.sample(pred_test_images, min(len(pred_test_images), 3)):
+                img = mpimg.imread(img_path)
+                plt.figure(figsize=(10, 10))
+                plt.imshow(img)
+                plt.axis('off')
+                plt.title(f"Ảnh Test: {os.path.basename(img_path)}")
+                plt.show()
+        else:
+            print("Không tìm thấy ảnh kết quả dự đoán nào để hiển thị.")
+            
+except Exception as e:
+    print(f"\n❌ Lỗi trong quá trình Inference: {e}")

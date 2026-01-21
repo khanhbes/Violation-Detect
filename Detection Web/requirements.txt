@@ -1,0 +1,11 @@
+# Thư viện lõi để chạy mô hình YOLO (Model detection & segmentation)
+ultralytics>=8.3.0
+
+# Thư viện xử lý ảnh và video (OpenCV)
+opencv-python>=4.10.0
+
+# Thư viện toán học xử lý mảng (dùng để xử lý tọa độ box)
+numpy>=1.24.0
+
+# Thư viện hỗ trợ thuật toán Tracking (Linear Assignment Problem)
+lapx>=0.5.5
