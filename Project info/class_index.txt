@@ -1,0 +1,40 @@
+0 : ambulance
+1 : arrow_left
+2 : arrow_right
+3 : arrow_straight
+4 : arrow_straight_and_left
+5 : arrow_straight_and_right
+6 : car
+7 : dashed_white_line
+8 : dashed_yellow_line
+9 : fire_truck
+10: light_left_green
+11: light_left_red
+12: light_left_yellow
+13: light_right_green
+14: light_straight_arrow_green
+15: light_straight_arrow_red
+16: light_straight_arrow_yellow
+17: light_straight_circle_green
+18: light_straight_circle_red
+19: light_straight_circle_yellow
+20: median
+21: motorcycle
+22: pedestrian_crossing
+23: person
+24: person_no_helmet
+25: person_with_helmet
+26: police_car
+27: sidewalk
+28: sign_no_car
+29: sign_no_entry
+30: sign_no_left_and_return
+31: sign_no_left_turn
+32: sign_no_parking
+33: sign_no_return
+34: sign_no_right_and_return
+35: sign_no_right_turn
+36: sign_no_stopping
+37: solid_white_line
+38: solid_yellow_line
+39: stop_line

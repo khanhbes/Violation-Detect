@@ -1,0 +1,86 @@
+Đề tài nghiên cứu khoa học: "Multi-Class Traffic Violation Detection in Vietnam using Instance Segmentation"
+
+Model: YOLO version 12 (yolov12s-seg)
+
+Dataset: Đã train xong. Thông tin chi tiết Class ID (0-39):
+0 : ambulance
+1 : arrow_left
+2 : arrow_right
+3 : arrow_straight
+4 : arrow_straight_and_left
+5 : arrow_straight_and_right
+6 : car
+7 : dashed_white_line
+8 : dashed_yellow_line
+9 : fire_truck
+10: light_left_green
+11: light_left_red
+12: light_left_yellow
+13: light_right_green
+14: light_straight_arrow_green
+15: light_straight_arrow_red
+16: light_straight_arrow_yellow
+17: light_straight_circle_green
+18: light_straight_circle_red
+19: light_straight_circle_yellow
+20: median
+21: motorcycle
+22: pedestrian_crossing
+23: person
+24: person_no_helmet
+25: person_with_helmet
+26: police_car
+27: sidewalk
+28: sign_no_car
+29: sign_no_entry
+30: sign_no_left_and_return
+31: sign_no_left_turn
+32: sign_no_parking
+33: sign_no_return
+34: sign_no_right_and_return
+35: sign_no_right_turn
+36: sign_no_stopping
+37: solid_white_line
+38: solid_yellow_line
+39: stop_line
+
+YÊU CẦU CHI TIẾT:
+Hãy viết code Python đầy đủ sử dụng thư viện `ultralytics`, `opencv` và `numpy` để phát hiện lỗi vượt đèn đỏ/đèn vàng với các logic nghiệp vụ xử lý nhiễu nâng cao (RANSAC + Bottom Edge) như sau:
+
+1. Cấu hình & Hiển thị (UI):
+   - Tham số Inference: `imgsz=1280` (để nhận diện rõ đèn tín hiệu ở xa).
+   - Mapping Class:
+     * Vehicles: car (6), motorcycle (21), ambulance (0), fire_truck (9), police_car (26).
+     * Traffic Lights: Chỉ tập trung vào nhóm đèn tròn: `light_straight_circle_red` (18), `_yellow` (19), `_green` (17). Sử dụng ngưỡng Confidence thấp (**0.25**) để bắt nhạy.
+     * Stopline: `stop_line` (39).
+   - Thông tin trên màn hình: Hiển thị khung thông tin gồm: FPS, Signal Status (Trạng thái đèn), Vehicles Count, Violations (Số xe vượt đèn đỏ), Warnings (Số xe vượt đèn vàng).
+
+2. Thuật toán Calibration Stopline (Logic RANSAC + Bottom-Edge):
+   - Vấn đề: Mask của vạch stopline thường bị cong lên ở 2 đầu do dính vào vỉa hè, và nếu lấy tâm mask thì đường kẻ bị lệch so với vạch trắng thực tế.
+   - Giải pháp - Bước 1 (Thu thập): Trong 5 giây đầu, thu thập toàn bộ điểm mask của class `stop_line`.
+   - Giải pháp - Bước 2 (Lọc nhiễu RANSAC): Sử dụng thuật toán **RANSAC** để xác định đường xu hướng chính và loại bỏ các điểm nhiễu cong vênh (Outliers) do vỉa hè/bó vỉa.
+   - Giải pháp - Bước 3 (Viền dưới - Bottom Edge): Để đường kẻ trùng khít với mép dưới của vạch sơn trắng (nơi xe chạm bánh vào đầu tiên). Logic: Với mỗi tọa độ `x` duy nhất trong tập Inliers, tìm điểm có `y` LỚN NHẤT (tức là thấp nhất trên ảnh).
+   - Kết quả: Vẽ một đường thẳng cố định đi qua 2 điểm mút (trái nhất và phải nhất) của tập điểm Bottom-Edge đã lọc sạch.
+
+3. Logic Đèn Giao Thông (Priority & Memory):
+   - Cơ chế Priority (Ưu tiên): Quét toàn bộ khung hình. Logic: RED > YELLOW > GREEN. Nếu có bất kỳ đèn Đỏ nào → Trạng thái chung là RED.
+   - Cơ chế Memory (Bộ nhớ đệm): Để chống hiện tượng đèn bị nhấp nháy hoặc mất dấu trong tích tắc: Nếu frame hiện tại không thấy đèn, hệ thống phải giữ nguyên trạng thái đèn cuối cùng trong khoảng thời gian **2.0 giây**.
+
+4. Logic Phát hiện Vi phạm (Hệ trục tọa độ):
+   - Vehicle Tracking: Sử dụng `model.track(persist=True)` với ngưỡng Confidence cao (**0.50**) để tracking ổn định.
+   - Hệ trục tọa độ tương đối:
+     * Lấy đường Stopline đã calibrate ($ax+by+c=0$) làm mốc chuẩn.
+     * Tính vị trí tương đối của điểm đáy xe (bánh xe sau) so với đường Stopline.
+     * Quy định: Vùng dưới vạch (xe đang tới) là **Âm (Negative)**, Vùng trên vạch (xe đã qua) là **Dương (Positive)**.
+   - Điều kiện Vi phạm:
+     * Xe được tính là vi phạm/cảnh báo KHI VÀ CHỈ KHI trạng thái vị trí chuyển từ **Âm → Dương** (cắt qua vạch).
+     * Tại thời điểm cắt qua:
+       + Nếu đèn **ĐỎ**: Gán nhãn "VIOLATION", box màu đỏ, tăng biến đếm Violations.
+       + Nếu đèn **VÀNG**: Gán nhãn "WARNING", box màu vàng, tăng biến đếm Warnings.
+       + Nếu đèn **XANH**: Gán nhãn "Safe", box màu xanh.
+     * Ngoại lệ: Xe mới xuất hiện lần đầu (mất tracking rồi có lại) mà đã ở vùng Dương thì mặc định là Safe.
+
+5. Yêu cầu Code:
+   - Code cần cài đặt hàm `ransac_filter_stopline` (sử dụng numpy thuần hoặc sklearn).
+   - Vẽ bounding box gọn gàng, có nền background cho chữ.
+   - Tránh vẽ chồng chéo, chỉ vẽ các đối tượng quan trọng (Xe, Đèn, Stopline đã calibrate).
