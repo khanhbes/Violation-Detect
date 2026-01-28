@@ -15,7 +15,7 @@ MODEL_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/ass
 VIDEO_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
 
 IMG_SIZE = 1280
-CONF_THRESHOLD_CALIBRATION = 0.20  # Conf thấp để thu thập nhiều mask
+CONF_THRESHOLD_CALIBRATION = 0.30  # Conf thấp để thu thập nhiều mask
 CONF_THRESHOLD_TRACKING = 0.45     # Conf cao để tracking chính xác
 IOU_THRESHOLD = 0.5
 
@@ -30,7 +30,7 @@ sidewalk_mask_accumulated = []
 median_mask_accumulated = []
 is_calibrated = False
 calibration_start_time = None
-CALIBRATION_DURATION = 5.0  # 5 giây
+CALIBRATION_DURATION = 10.0  # 10 giây
 
 # Forbidden zones (sau khi lock)
 forbidden_zones = []  # List các polygon

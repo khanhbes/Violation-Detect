@@ -45,22 +45,19 @@ Dataset: Đã train xong. Thông tin chi tiết Class ID (0-39):
 39: stop_line
 
 YÊU CẦU CHI TIẾT:
-Hãy viết code Python đầy đủ sử dụng thư viện `ultralytics`, `opencv` và `numpy` để phát hiện lỗi vượt đèn đỏ/đèn vàng với các logic nghiệp vụ xử lý nhiễu nâng cao (RANSAC + Bottom Edge) như sau:
+Hãy viết code Python đầy đủ để phát hiện lỗi vượt đèn đỏ/đèn vàng với các logic nghiệp vụ xử lý nhiễu nâng cao như sau:
 
 1. Cấu hình & Hiển thị (UI):
    - Tham số Inference: `imgsz=1280` (để nhận diện rõ đèn tín hiệu ở xa).
    - Mapping Class:
      * Vehicles: car (6), motorcycle (21), ambulance (0), fire_truck (9), police_car (26).
-     * Traffic Lights: Chỉ tập trung vào nhóm đèn tròn: `light_straight_circle_red` (18), `_yellow` (19), `_green` (17). Sử dụng ngưỡng Confidence thấp (**0.25**) để bắt nhạy.
      * Stopline: `stop_line` (39).
    - Thông tin trên màn hình: Hiển thị khung thông tin gồm: FPS, Signal Status (Trạng thái đèn), Vehicles Count, Violations (Số xe vượt đèn đỏ), Warnings (Số xe vượt đèn vàng).
 
-2. Thuật toán Calibration Stopline (Logic RANSAC + Bottom-Edge):
-   - Vấn đề: Mask của vạch stopline thường bị cong lên ở 2 đầu do dính vào vỉa hè, và nếu lấy tâm mask thì đường kẻ bị lệch so với vạch trắng thực tế.
-   - Giải pháp - Bước 1 (Thu thập): Trong 5 giây đầu, thu thập toàn bộ điểm mask của class `stop_line`.
-   - Giải pháp - Bước 2 (Lọc nhiễu RANSAC): Sử dụng thuật toán **RANSAC** để xác định đường xu hướng chính và loại bỏ các điểm nhiễu cong vênh (Outliers) do vỉa hè/bó vỉa.
-   - Giải pháp - Bước 3 (Viền dưới - Bottom Edge): Để đường kẻ trùng khít với mép dưới của vạch sơn trắng (nơi xe chạm bánh vào đầu tiên). Logic: Với mỗi tọa độ `x` duy nhất trong tập Inliers, tìm điểm có `y` LỚN NHẤT (tức là thấp nhất trên ảnh).
-   - Kết quả: Vẽ một đường thẳng cố định đi qua 2 điểm mút (trái nhất và phải nhất) của tập điểm Bottom-Edge đã lọc sạch.
+2.  Giai đoạn 1: Calibration Stopline (5 giây đầu)
+   - Thu thập tất cả các điểm pixel thuộc mask "stopline" từ kết quả segmentation trong 5 giây đầu.
+   - Sử dụng giải thuật RANSAC (thay vì Linear Regression thường) để fit một đường thẳng tối ưu $ax + by + c = 0$ loại bỏ nhiễu.
+   - Sau 5 giây: Cố định phương trình đường thẳng này, không update nữa và vẽ lên màn hình
 
 3. Logic Đèn Giao Thông (Priority & Memory):
    - Cơ chế Priority (Ưu tiên): Quét toàn bộ khung hình. Logic: RED > YELLOW > GREEN. Nếu có bất kỳ đèn Đỏ nào → Trạng thái chung là RED.
@@ -80,7 +77,124 @@ Hãy viết code Python đầy đủ sử dụng thư viện `ultralytics`, `ope
        + Nếu đèn **XANH**: Gán nhãn "Safe", box màu xanh.
      * Ngoại lệ: Xe mới xuất hiện lần đầu (mất tracking rồi có lại) mà đã ở vùng Dương thì mặc định là Safe.
 
-5. Yêu cầu Code:
-   - Code cần cài đặt hàm `ransac_filter_stopline` (sử dụng numpy thuần hoặc sklearn).
-   - Vẽ bounding box gọn gàng, có nền background cho chữ.
-   - Tránh vẽ chồng chéo, chỉ vẽ các đối tượng quan trọng (Xe, Đèn, Stopline đã calibrate).
+---
+1. INPUT & CẤU HÌNH
+---
+- Model: Ultralytics YOLOv8 (segmentation) để detect "car", "bus", "truck", "motorcycle" và "stopline".
+- Tracking: `model.track(persist=True)` để duy trì ID.
+- Biến giả lập tín hiệu đèn: Dictionary `traffic_light_states` (Ví dụ: `circle_red`: True/False).
+
+---
+2. GIAI ĐOẠN 1: CALIBRATION STOPLINE (5 GIÂY ĐẦU)
+---
+- Input: Mask segmentation của class "stopline".
+- Xử lý:
+  1. Lấy tập hợp tất cả điểm (x, y) thuộc mask stopline trong 5s.
+  2. Sử dụng RANSAC để fit đường thẳng phương trình tổng quát: $Ax + By + C = 0$.
+  3. Chuẩn hóa vector pháp tuyến $(A, B)$ sao cho $A^2 + B^2 = 1$.
+  4. Xác định chiều mũi tên pháp tuyến:
+     - Chọn một điểm $P_{check}$ ở giữa đáy màn hình (vùng xe xuất phát).
+     - Tính $D = A*x_{check} + B*y_{check} + C$.
+     - Nếu $D > 0$, đảo dấu toàn bộ $(A, B, C) \rightarrow (-A, -B, -C)$ để đảm bảo vùng xe đang tới luôn có giá trị Âm ($D < 0$).
+- Output: Cố định 3 tham số $(A, B, C)$ cho toàn bộ video còn lại.
+
+---
+3. GIAI ĐOẠN 2: LOGIC TRACKING & CROSSING EVENT (CHI TIẾT)
+---
+Đây là phần quan trọng nhất để xác định xe có vượt vạch hay không.
+
+A. Điểm Tham Chiếu (Reference Point):
+   - Với mỗi box xe detected, lấy điểm đáy-giữa: $P_{car} = (\frac{x_{min}+x_{max}}{2}, y_{max})$.
+
+B. Tính Signed Distance (Khoảng cách có dấu):
+   - Tại mỗi frame $t$, với mỗi xe $ID_i$, tính: 
+     $$dist_t = A * x_{P} + B * y_{P} + C$$
+   - Ý nghĩa:
+     + $dist_t < -threshold$: Xe đang ở vùng tiếp cận (Approach Zone).
+     + $dist_t > +threshold$: Xe đã vượt qua vạch (Violated Zone).
+     + $|dist_t| \le threshold$: Xe đang đè vạch.
+
+C. Logic "Crossing Event" (Chuyển trạng thái):
+   - Duy trì một Dictionary lưu trạng thái frame trước đó: `prev_status = {ID: distance_t-1}`.
+   - Điều kiện kích hoạt sự kiện "Vừa Vượt Qua" (Just Crossed):
+     IF ( `prev_status[ID]` < 0 ) AND ( `dist_t` >= 0 ):
+         -> RETURN TRUE (Sự kiện Crossing xảy ra tại frame này).
+   a. Logic Đèn Giao Thông (Priority & Memory):
+   - Cơ chế Priority (Ưu tiên): Quét toàn bộ khung hình. Logic: RED > YELLOW > GREEN. Nếu có bất kỳ đèn Đỏ nào → Trạng thái chung là RED.
+   - Cơ chế Memory (Bộ nhớ đệm): Để chống hiện tượng đèn bị nhấp nháy hoặc mất dấu trong tích tắc: Nếu frame hiện tại không thấy đèn, hệ thống phải giữ nguyên trạng thái đèn cuối cùng trong khoảng thời gian **2.0 giây**.
+
+   b. Logic Phát hiện Vi phạm (Hệ trục tọa độ):
+   - Vehicle Tracking: Sử dụng `model.track(persist=True)` với ngưỡng Confidence cao (**0.50**) để tracking ổn định.
+   - Hệ trục tọa độ tương đối:
+     * Lấy đường Stopline đã calibrate ($ax+by+c=0$) làm mốc chuẩn.
+     * Tính vị trí tương đối của điểm đáy xe (bánh xe sau) so với đường Stopline.
+     * Quy định: Vùng dưới vạch (xe đang tới) là **Âm (Negative)**, Vùng trên vạch (xe đã qua) là **Dương (Positive)**.
+   - Điều kiện Vi phạm:
+     * Xe được tính là vi phạm/cảnh báo KHI VÀ CHỈ KHI trạng thái vị trí chuyển từ **Âm → Dương** (cắt qua vạch).
+     * Tại thời điểm cắt qua:
+       + Nếu đèn **ĐỎ**: Gán nhãn "VIOLATION", box màu đỏ, tăng biến đếm Violations.
+       + Nếu đèn **VÀNG**: Gán nhãn "WARNING", box màu vàng, tăng biến đếm Warnings.
+       + Nếu đèn **XANH**: Gán nhãn "Safe", box màu xanh.
+     * Ngoại lệ: Xe mới xuất hiện lần đầu (mất tracking rồi có lại) mà đã ở vùng Dương thì mặc định là Safe.
+   
+D. Bộ lọc nhiễu (Safety Filters):
+   1. Ignored Objects: Nếu một ID mới xuất hiện (new track) mà ngay lập tức có $dist_t > 0$ (xe sinh ra ở phía sau vạch stopline), gán nhãn `IGNORE` và không bao giờ xét vi phạm cho ID này nữa (tránh lỗi tracking bị mất rồi nhận lại).
+   2. Jitter Buffer: Chỉ xác nhận Crossing nếu xe di chuyển với tốc độ dương (đang tiến tới), tránh trường hợp xe dừng ngay mép vạch và điểm pixel nhảy qua nhảy lại do rung nhiễu camera.
+
+---
+4. GIAI ĐOẠN 3: KIỂM TRA ĐÈN & BẮT LỖI
+---
+Ngay tại thời điểm "Crossing Event" trả về TRUE, kiểm tra ngay trạng thái đèn `traffic_light_states`:
+
+A. Logic Đèn Đỏ (Cơ bản):
+   - Điều kiện: Nếu `circle_red` == True.
+   - Hành động: Gán nhãn "VIOLATION" cho ID đó. Vẽ Bounding Box màu ĐỎ.
+
+B. Logic Đèn Vàng:
+   - Điều kiện: Nếu `circle_yellow` == True.
+   - Hành động: Gán nhãn "WARNING". Vẽ Bounding Box màu VÀNG.
+
+C. Logic Đèn Xanh:
+   - Điều kiện: Nếu `circle_green` == True.
+   - Hành động: Gán nhãn "SAFE".
+
+5. GIAI ĐOẠN 4: Logic Đèn Đỏ & Mũi tên (Phức hợp):
+   Kiểm tra trạng thái đèn tại thời điểm Crossing.
+   
+   1. Đèn Tròn ĐỎ + Mũi tên Phải XANH (`circle_red` + `light_right_green`):
+      - Xe Rẽ Phải -> SAFE (Hợp lệ).
+      - Xe Đi Thẳng / Rẽ Trái -> VIOLATION (Vi phạm).
+
+   2. Đèn Tròn XANH + Mũi tên Trái ĐỎ (`circle_green` + `light_left_red`):
+      - Xe Đi Thẳng / Rẽ Phải -> SAFE.
+      - Xe Rẽ Trái -> VIOLATION.
+
+   3. Đèn Tròn ĐỎ + Mũi tên Trái XANH (`circle_red` + `light_left_green`):
+      - Xe Rẽ Trái -> SAFE.
+      - Xe Đi Thẳng / Rẽ Phải -> VIOLATION.
+
+   4. Cấm đi thẳng + Được rẽ (`light_straight_arrow_red` + `light_left_green`):
+      - Xe Rẽ Trái/Phải -> SAFE.
+      - Xe Đi Thẳng -> VIOLATION.
+
+   5. Chỉ cấm đi thẳng (`light_straight_arrow_red` sáng, các đèn rẽ không đỏ):
+      - Xe Đi Thẳng -> VIOLATION.
+      - Xe Rẽ Trái/Phải -> SAFE (Miễn là đèn hướng rẽ đó không đỏ).
+
+   6. Đèn Tròn XANH + Mũi tên Phải ĐỎ (`circle_green` + `light_right_red`):
+      - Xe Đi Thẳng -> SAFE.
+      - Xe Rẽ Phải -> VIOLATION.
+
+   7. ĐỎ TOÀN BỘ (`circle_red` sáng và KHÔNG CÓ mũi tên xanh nào):
+      - Mọi hành vi vượt Stopline -> VIOLATION.
+
+   8. Đèn Tròn ĐỎ + Mũi tên Đi Thẳng XANH:
+      - Xe Đi Thẳng -> SAFE (Ưu tiên mũi tên).
+---
+6. YÊU CẦU OUTPUT
+---
+- Hiển thị dòng chữ trạng thái của xe trên đầu box: 
+  + Ví dụ: "ID: 12 | Dist: -5.4" (Xe đang tới).
+  + Ví dụ: "ID: 12 | VIOLATION" (Xe đã vượt).
+- Code Python chia tách hàm logic toán học (`calculate_signed_distance`) và logic nghiệp vụ (`check_crossing_event`).
+

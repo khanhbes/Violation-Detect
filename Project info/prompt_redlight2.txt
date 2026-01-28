@@ -1,0 +1,52 @@
+# Yêu cầu: Viết script Python phát hiện vi phạm vượt đèn đỏ (Red Light Violation)
+**Công nghệ sử dụng:** YOLOv8 Segmentation và Object Tracking.
+
+---
+
+## 1. Input & Cấu hình
+- **Model:** Sử dụng `ultralytics` YOLOv8 (segmentation) để detect phương tiện và stopline.
+- **Tracking:** Sử dụng `model.track(persist=True)` để duy trì ID đối tượng.
+- **Biến giả lập:** Giả định có biến `traffic_light_state` (RED/GREEN/YELLOW) thay đổi theo thời gian.
+
+---
+
+## 2. Giai đoạn 1: Calibration Stopline (5 giây đầu)
+1. **Thu thập dữ liệu:** Thu thập tất cả các điểm pixel thuộc mask "stopline" từ kết quả segmentation trong 5 giây đầu.
+2. **Xử lý nhiễu (RANSAC):** Sử dụng giải thuật **RANSAC** (thay vì Linear Regression thường) để fit một đường thẳng tối ưu $ax + by + c = 0$ nhằm loại bỏ nhiễu.
+3. **Cố định:** Sau 5 giây, cố định phương trình đường thẳng này, không update nữa và vẽ lên màn hình.
+
+---
+
+## 3. Giai đoạn 2: Logic Theo Dõi & Hệ Tọa Độ
+- **Điểm tham chiếu:** Lấy điểm đáy-giữa (bottom-center) của bounding box xe: 
+  $$P = \left(\frac{x_1+x_2}{2}, y_2\right)$$
+  
+- **Hệ tọa độ tương đối (Signed Distance):**
+  - Tính khoảng cách có dấu từ điểm $P$ đến đường thẳng.
+  - **Auto-Orientation:** Tự động xác định dấu âm/dương dựa trên vị trí xe trong 5 giây đầu. 
+  - **Quy ước bắt buộc:** 
+    - Xe đang đi tới (Approach) = **Âm (Negative)**
+    - Xe đã qua vạch = **Dương (Positive)**
+
+- **Xử lý Overlap:** Nếu các box chồng lấn nhau, ưu tiên giữ box có tracking ID ổn định hoặc confidence cao nhất, nhưng đảm bảo không xóa nhầm các xe khác nhau (Non-Maximum Suppression thông minh).
+
+---
+
+## 4. Giai đoạn 3: Logic Phát Hiện Vi Phạm
+- **Điều kiện:** Chỉ bắt lỗi khi thỏa mãn điều kiện chuyển trạng thái: Track chuyển từ vùng **Âm** sang vùng **Dương** (**Crossing Event**).
+- **Tránh lỗi:** Không bắt lỗi xe vừa xuất hiện đã ở vùng Dương (tránh lỗi khi tracking bị mất rồi có lại).
+- **Trigger:**
+  - Nếu `Crossing` + Đèn **RED** $\rightarrow$ Gán nhãn **VIOLATION** (Box Đỏ), tăng đếm.
+  - Nếu `Crossing` + Đèn **YELLOW** $\rightarrow$ Gán nhãn **WARNING** (Box Vàng).
+  - Khác $\rightarrow$ **Safe** (Box Xanh).
+
+---
+
+## 5. Yêu cầu Code
+- **Cấu trúc:** Tách hàm rõ ràng:
+  - `fit_stopline_ransac`
+  - `get_signed_distance`
+  - `check_violation`
+- **Hiển thị:** 
+  - Không vẽ quỹ đạo (trajectory) gây rối mắt.
+  - Hiển thị bộ đếm vi phạm trên frame.

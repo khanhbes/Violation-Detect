@@ -54,8 +54,8 @@ print(">>> Hoàn tất quá trình vá lỗi. Đang load model...\n")
 # ====================================================
 
 # 2. CẤU HÌNH
-IMAGE_PATH = "Detection Web/assets/anh2.png" 
-MODEL_PATH = "Detection Web/assets/best_yolo12s_seg.pt"
+MODEL_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
+IMAGE_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/image/Screenshot 2026-01-26 150959.png"
 
 def main():
     try:
