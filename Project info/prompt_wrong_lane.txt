@@ -1,0 +1,83 @@
+Title: Yêu cầu viết Code Python Phát hiện Vi phạm Làn đường (Lane Violation Detection)
+
+BỐI CẢNH VÀ VAI TRÒ:
+Bạn là một Chuyên gia Kỹ sư Thị giác máy tính (Senior Computer Vision Engineer). Nhiệm vụ của bạn là viết một chương trình Python hoàn chỉnh, tối ưu hóa để xử lý video giao thông, sử dụng YOLOv12-seg (Segmentation) để phát hiện lỗi đi sai làn đường.
+
+YÊU CẦU VỀ THƯ VIỆN:
+- Ultralytics (YOLO), OpenCV, NumPy, Scikit-learn (để tính toán hình học).
+
+--------------------------------------------------------------------------------
+PHẦN 1: ĐỊNH NGHĨA DỮ LIỆU ĐẦU VÀO (CLASS MAPPING)
+--------------------------------------------------------------------------------
+Dựa trên file cấu hình class_index.txt, sử dụng các ID sau:
+
+1. Nhóm Mũi tên chỉ dẫn (LANE RULES):
+   - 1: arrow_left (Bắt buộc rẽ trái)
+   - 2: arrow_right (Bắt buộc rẽ phải)
+   - 3: arrow_straight (Bắt buộc đi thẳng)
+   - 4: arrow_straight_and_left
+   - 5: arrow_straight_and_right
+
+2. Nhóm Vạch kẻ đường (LANE MARKINGS):
+   - 7: dashed_white_line (Vạch đứt trắng - Được đè)
+   - 8: dashed_yellow_line (Vạch đứt vàng - Được đè)
+   - 37: solid_white_line (Vạch liền trắng - Cấm đè)
+   - 38: solid_yellow_line (Vạch liền vàng - Cấm đè)
+   - 39: stop_line (Vạch dừng - Trigger Line để bắt lỗi)
+
+3. Nhóm Phương tiện (VEHICLES):
+   - 6: car, 21: motorcycle, 0: ambulance, 9: fire_truck, 26: police_car.
+
+--------------------------------------------------------------------------------
+PHẦN 2: LOGIC XỬ LÝ (PROCESSING PIPELINE)
+--------------------------------------------------------------------------------
+
+Hệ thống hoạt động theo 2 giai đoạn chính:
+
+GIAI ĐOẠN 1: KHỞI TẠO & MÔ HÌNH HÓA MÔI TRƯỜNG (0s - 5s)
+Mục tiêu: Tạo ra một bản đồ số cố định (Static Map) từ các mask rung nhiễu của AI.
+Logic:
+1. Trong 5 giây đầu, chạy model YOLO Segmentation nhưng KHÔNG bắt lỗi.
+2. Tích lũy (Accumulate) các điểm pixel từ mask của các class Vạch kẻ (Lines) và Mũi tên (Arrows).
+3. Tại giây thứ 5, thực hiện "ĐÓNG BĂNG" (Freeze) và xử lý hình học:
+   A. Xử lý Vạch kẻ (Line Fitting):
+      - Với mỗi nhóm điểm mask của vạch kẻ và stopline: Sử dụng thuật toán RANSAC (hoặc PCA) để tìm ra đường thẳng trung bình tốt nhất (y = ax + b) đi qua đám mây điểm đó.
+      - Giới hạn đoạn vẽ: Chỉ vẽ đoạn thẳng nằm trong phạm vi (y_min, y_max) của mask gốc.
+      - Màu sắc hiển thị cố định:
+        + Solid lines (37, 38): Màu ĐỎ.
+        + Dashed lines (7, 8): Màu VÀNG.
+        + Stopline (39): Màu XANH DƯƠNG (Blue).
+   B. Xử lý Làn đường & Gán luật (Lane Mapping):
+      - Xác định "Làn đường" (Lane Area) là vùng không gian nằm giữa 2 đường kẻ dọc.
+      - Kiểm tra tọa độ tâm (Centroid) của các mask Mũi tên (Class 1-5).
+      - Logic gán luật: Nếu Tâm mũi tên nằm trong Làn đường nào -> Làn đó nhận luật tương ứng (Ví dụ: Mũi tên thẳng nằm trong Làn 2 -> Làn 2 có luật "ONLY_STRAIGHT").
+      - Hiển thị Text luật (VD: "MUST_LEFT") ngay trên làn đường đó.
+
+GIAI ĐOẠN 2: GIÁM SÁT VI PHẠM (SAU 5s - REALTIME)
+Mục tiêu: Bắt lỗi dựa trên bản đồ cố định đã tạo ở Giai đoạn 1.
+Logic:
+1. Tracking: Sử dụng Tracker (như ByteTrack) để theo dõi phương tiện.
+2. Điểm tham chiếu: Sử dụng điểm giữa cạnh đáy (Bottom-Center) của Bounding Box xe (đại diện cho bánh xe).
+3. Sự kiện kích hoạt (Trigger Event):
+   - Chỉ kiểm tra lỗi KHI VÀ CHỈ KHI điểm Bottom-Center của xe cắt qua đường "stop_line" (Class 39) theo hướng đi lên (hoặc đi vào giao lộ).
+4. Phân tích hành vi (Action Analysis):
+   - Khi xe vượt Stopline, tính toán Vector di chuyển (Trajectory) dựa trên vị trí quá khứ và hiện tại.
+   - Xác định hướng thực tế của xe: ACTION_LEFT, ACTION_RIGHT, hoặc ACTION_STRAIGHT.
+5. Đối chiếu luật (Violation Logic):
+   - So sánh Action thực tế vs. Luật của làn (Lane Rule) mà xe đang đi.
+   - Ví dụ: Làn có luật "arrow_straight" (Class 3) nhưng xe có Action là "Rẽ Trái" -> VI PHẠM.
+   - Ngoại lệ: Xe ưu tiên (ambulance, fire_truck, police_car) được bỏ qua lỗi.
+
+--------------------------------------------------------------------------------
+PHẦN 3: YÊU CẦU OUTPUT VISUALIZATION
+--------------------------------------------------------------------------------
+1. Vẽ các đường vạch kẻ (Line Fitting) trơn tru, mượt mà (không vẽ mask nham nhở).
+2. Vẽ Text luật lên từng làn đường.
+3. Khi phát hiện xe vi phạm:
+   - Đổi màu Bounding Box xe sang ĐỎ.
+   - Hiển thị dòng chữ "WRONG LANE" trên đầu xe.
+   - Lưu vết (Snapshot) hoặc in log ra terminal.
+
+--------------------------------------------------------------------------------
+HÃY VIẾT CODE PYTHON ĐẦY ĐỦ CHO LOGIC TRÊN.
+Tách riêng các hàm xử lý hình học (fit_line, check_point_in_lane) để code dễ đọc.

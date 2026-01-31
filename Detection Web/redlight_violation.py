@@ -608,9 +608,27 @@ def run(
         model_path: Đường dẫn model YOLO
         show_preview: Có hiển thị preview không
     """
+    import os
+    from datetime import datetime
+    from pathlib import Path
+    
     video_path = video_path or config.DEFAULT_VIDEO
-    output_path = output_path or config.OUTPUT_VIDEO
     model_path = model_path or config.MODEL_PATH
+    
+    # Tự động tạo output folder nếu chưa có
+    output_dir = Path(config.OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Tạo tên file với timestamp để không bị ghi đè
+    if output_path is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"redlight_violation_{timestamp}.mp4"
+        output_path = str(output_dir / output_filename)
+    else:
+        # Đảm bảo output_path nằm trong output folder
+        output_path = str(output_dir / Path(output_path).name)
+    
+    print(f"[INFO] Output will be saved to: {output_path}")
     
     # Mở video
     cap = cv2.VideoCapture(video_path)
@@ -628,6 +646,9 @@ def run(
         fps,
         (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
     )
+    
+    if not writer.isOpened():
+        raise RuntimeError(f"Cannot create video writer: {output_path}")
     
     # Load model
     print(f"[INIT] Loading model: {model_path}")
