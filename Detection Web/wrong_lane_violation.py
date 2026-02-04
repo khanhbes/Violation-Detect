@@ -1,7 +1,7 @@
 """
 wrong_lane.py (FULL) - Minimize false positives in real traffic
 ===============================================================
-Mục tiêu: hạn chế phạt sai nhất có thể trong thực tế, dựa trên yêu cầu của bạn:
+Mục tiêu: hạn chế phạt sai nhất có thể trong thực tế
 
 A) 5 giây đầu: HIỂN THỊ HẾT MASK (giống detect_sidewalk_violation.py)
 B) Sau 5 giây: FREEZE
@@ -26,7 +26,7 @@ Phím:
 - q : quit
 - d : toggle debug
 
-Yêu cầu: pip install ultralytics opencv-python numpy
+Uses shared Config class from config/config.py
 """
 
 from __future__ import annotations
@@ -39,20 +39,16 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-
-# =========================
-# PATHS (fixed per user)
-# =========================
-MODEL_PATH: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
-VIDEO_PATH: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
+# Import shared config
+from config.config import config
 
 
 # =========================
-# CONFIG
+# LANE-SPECIFIC CONFIG
 # =========================
-IMG_SIZE = 1280
-TRACKER = "bytetrack.yaml"
-IOU_THRESHOLD = 0.5
+IOU_THRESHOLD = config.IOU_THRESHOLD
+IMG_SIZE = config.IMG_SIZE
+TRACKER = config.TRACKER
 
 CALIBRATION_DURATION_SEC = 5.0
 CONF_CALIB = 0.25
@@ -60,29 +56,29 @@ CONF_TRACK = 0.45
 
 WINDOW_NAME = "Wrong Lane Detection"
 
-# Seg classes (dataset)
-DASH_WHITE = 7
-DASH_YELLOW = 8
-SOLID_WHITE = 37
-SOLID_YELLOW = 38
-STOPLINE_ID = 39
+# Seg classes from config
+DASH_WHITE = config.DASHED_WHITE_LINE[0] if config.DASHED_WHITE_LINE else 7
+DASH_YELLOW = config.DASHED_YELLOW_LINE[0] if config.DASHED_YELLOW_LINE else 8
+SOLID_WHITE = config.SOLID_WHITE_LINE[0] if config.SOLID_WHITE_LINE else 37
+SOLID_YELLOW = config.SOLID_YELLOW_LINE[0] if config.SOLID_YELLOW_LINE else 38
+STOPLINE_ID = config.STOPLINE_CLASS[0] if config.STOPLINE_CLASS else 39
 
 # Arrows (dataset)
 ARROW_CLASSES = {1, 2, 3, 4, 5}
 
-# Vehicles (dataset)
-VEHICLE_CLASSES = {0, 6, 9, 21, 26}      # car, bus, motorbike, ...
-PRIORITY_VEHICLES = {0, 9, 26}          # optional ignore some classes for violation
+# Vehicles from config
+VEHICLE_CLASSES = set(config.VEHICLE_CLASSES)
+PRIORITY_VEHICLES = {0, 9, 26}  # ambulance, fire_truck, police_car
 
-# Colors (BGR)
-COLOR_DASH_WHITE = (0, 255, 255)
-COLOR_DASH_YELLOW = (0, 200, 255)
-COLOR_SOLID_WHITE = (0, 0, 255)
-COLOR_SOLID_YELLOW = (0, 140, 255)
-COLOR_STOPLINE = (255, 0, 0)
-COLOR_ARROW = (255, 0, 255)
-COLOR_SAFE = (0, 255, 0)
-COLOR_VIOLATION = (0, 0, 255)
+# Colors (BGR) - Lane-specific colors hardcoded
+COLOR_DASH_WHITE = (255, 255, 200)     # Light cyan
+COLOR_DASH_YELLOW = (0, 200, 255)      # Yellow
+COLOR_SOLID_WHITE = (255, 255, 255)    # White
+COLOR_SOLID_YELLOW = (0, 140, 255)     # Orange-yellow
+COLOR_STOPLINE = config.COLOR_STOPLINE # From config
+COLOR_ARROW = (255, 0, 255)            # Magenta
+COLOR_SAFE = config.COLOR_SAFE         # From config
+COLOR_VIOLATION = config.COLOR_VIOLATION # From config
 
 # Cham vach thresholds (px)
 LINE_TOUCH_DIST_PX = 6.0
@@ -656,7 +652,13 @@ def draw_info_panel(frame, status: str, fps: float, wrong: int, cham: int,
 # =========================
 # MAIN
 # =========================
-def run(video_path: str = VIDEO_PATH, model_path: str = MODEL_PATH):
+def run(video_path: str = None, model_path: str = None):
+    # Use config paths if not specified
+    if video_path is None:
+        video_path = config.DEFAULT_VIDEO
+    if model_path is None:
+        model_path = config.MODEL_PATH
+    
     model = YOLO(model_path)
 
     cap = cv2.VideoCapture(video_path)

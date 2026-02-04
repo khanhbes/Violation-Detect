@@ -1,66 +1,61 @@
 """
-UPDATE per request:
-- Default motorcycle label: "Motorcycle ID <id> ..."
-- If helmet detected ONCE for that track => latch SAFE:
-    - Motorcycle box turns GREEN
-    - Label becomes: "Helmet ID <id>"
-- Rider boxes still shown:
-    - Helmet (25) green, NoHelmet (24) red
+Helmet Violation Detection (Motorcycle - No Helmet)
+Uses shared Config class from config/config.py
 
-Violation snapshot:
-- If NoHelmet detected and NOT helmet-latched yet => save screenshot immediately (cooldown).
+Features:
+- Motorcycle detection with rider association
+- Helmet detection (latch SAFE when helmet detected once)
+- Violation snapshot saving
 """
 
 import cv2
 import time
 import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-# ================= USER CONFIG =================
-MODEL_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
-VIDEO_PATH = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
-IMG_SIZE = 1280
+# Import shared config
+from config.config import config
 
-SNAPSHOT_DIR = "snapshots"
-os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-
-# ================= CLASSES =================
+# ================= HELMET-SPECIFIC CONFIG =================
+# These class IDs are specific to helmet detection and not in shared config
 CLS_MOTORCYCLE = 21
-CLS_PERSON = 23
+CLS_PERSON = 23  
 CLS_PERSON_NO_HELMET = 24
 CLS_PERSON_WITH_HELMET = 25
 
-# ================= THRESHOLDS =================
+# Confidence thresholds
 CONF_MOTORCYCLE = 0.35
 CONF_RIDER_NO_HELMET = 0.30
 CONF_RIDER_WITH_HELMET = 0.30
 CONF_RIDER_FALLBACK = 0.35
 
-# ================= ASSOCIATION =================
+# Association parameters
 MOTO_BOX_EXPAND_RATIO = 0.20
 MIN_IOU_RIDER_MOTO = 0.02
 MAX_CENTER_DIST_RATIO = 1.30
 CENTER_INSIDE_BONUS = 0.35
 VERTICAL_GATE_TOP_RATIO = 0.85
 
-# ================= EVENT COOLDOWN =================
+# Event cooldown
 EVENT_COOLDOWN_SEC = 2.0
 
-# ================= UI / COLORS (BGR) =================
+# Snapshot directory
+SNAPSHOT_DIR = str(config.OUTPUT_DIR / "snapshots")
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
+# Colors (BGR)
 C_BG = (20, 20, 20)
 C_BORDER = (230, 230, 230)
-
-C_GREEN = (60, 220, 60)
-C_RED = (50, 50, 255)
-C_ORANGE = (255, 180, 80)
-
+C_GREEN = config.COLOR_SAFE
+C_RED = config.COLOR_VIOLATION
+C_ORANGE = config.COLOR_STOPLINE
 C_HELMET = C_GREEN
 C_NO_HELMET = C_RED
-C_PERSON = (0, 220, 255)
+C_PERSON = config.COLOR_WARNING
 
 DRAW_DEBUG_ASSOC = False
 
@@ -150,7 +145,7 @@ class TrackState:
 # ================ ASSOCIATION ================
 def associate_rider_to_motorcycle(
     moto_bbox: Tuple[float, float, float, float],
-    riders: List[Tuple[Tuple[float, float, float, float], int, float]],  # (bbox, cls, conf)
+    riders: List[Tuple[Tuple[float, float, float, float], int, float]],
     frame_w: int,
     frame_h: int,
 ) -> Optional[Tuple[Tuple[float, float, float, float], int, float]]:
@@ -222,11 +217,13 @@ def main():
             f"Import error: {e}"
         )
 
-    model = YOLO(MODEL_PATH)
+    print(f"[INFO] Loading model: {config.MODEL_PATH}")
+    model = YOLO(config.MODEL_PATH)
 
-    cap = cv2.VideoCapture(VIDEO_PATH)
+    print(f"[INFO] Opening video: {config.DEFAULT_VIDEO}")
+    cap = cv2.VideoCapture(config.DEFAULT_VIDEO)
     if not cap.isOpened():
-        raise SystemExit(f"Cannot open video: {VIDEO_PATH}")
+        raise SystemExit(f"Cannot open video: {config.DEFAULT_VIDEO}")
 
     prev_time = time.time()
     fps_smooth = 0.0
@@ -245,12 +242,12 @@ def main():
 
         results = model.track(
             source=frame,
-            imgsz=IMG_SIZE,
+            imgsz=config.IMG_SIZE,
             conf=0.25,
-            iou=0.5,
+            iou=config.IOU_THRESHOLD,
             persist=True,
             verbose=False,
-            tracker="bytetrack.yaml",
+            tracker=config.TRACKER,
         )
         r0 = results[0]
 
@@ -318,9 +315,7 @@ def main():
                         total_violations += 1
                         print(f"[SNAPSHOT] {out_path}")
 
-            # ======== YOUR DISPLAY RULE ========
-            # Default: "Motorcycle ID ..."
-            # If helmet detected once: GREEN + "Helmet ID ..."
+            # Display rule
             if state.safe_latched:
                 live_safe += 1
                 draw_box_tag(frame, moto_bbox, f"Helmet ID {moto_id}", C_GREEN, thickness=3)

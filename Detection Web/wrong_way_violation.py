@@ -9,6 +9,7 @@ Core Innovation: Multi-Modal Direction Detection
 - Method 3: Deep Trajectory Pattern Recognition with Kalman Filtering
 - Method 4: Inter-Vehicle Relative Motion Analysis
 =====================================================================================
+Uses shared Config class from config/config.py
 """
 
 import cv2
@@ -22,9 +23,12 @@ from typing import Optional, Tuple, List, Dict, Set
 from dataclasses import dataclass, field
 from enum import Enum
 
+# Import shared config
+from config.config import config
+
 
 # =====================================================================================
-# CONFIGURATION
+# WRONG-WAY SPECIFIC CONFIGURATION
 # =====================================================================================
 
 class FlowDirection(Enum):
@@ -36,73 +40,62 @@ class FlowDirection(Enum):
     UNDEFINED = "undefined"
 
 
-@dataclass
-class SystemConfig:
-    """System configuration parameters"""
-    
-    # Model Configuration
-    model_path: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
-    video_path: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
-    img_size: int = 1280
-    confidence: float = 0.3
-    iou_threshold: float = 0.5
-    
-    # Vehicle Classes
-    vehicle_classes: Dict[int, str] = field(default_factory=lambda: {
-        0: 'ambulance',
-        6: 'car', 
-        9: 'fire_truck',
-        21: 'motorcycle',
-        26: 'police_car'
-    })
-    
-    # Learning Phase
-    learning_duration: int = 250        # Extended learning
-    min_samples_required: int = 30      # Per lane
-    
-    # Spatial Division
-    num_vertical_lanes: int = 5         # Vertical lanes
-    num_horizontal_zones: int = 3       # Horizontal zones
-    
-    # Tracking Parameters  
-    max_position_history: int = 60      # Position memory
-    kalman_process_noise: float = 0.01  # Process noise
-    kalman_measurement_noise: float = 0.1  # Measurement noise
-    
-    # Motion Analysis
-    min_speed_threshold: float = 2.0    # Minimum speed (px/frame)
-    max_speed_threshold: float = 70.0   # Maximum speed
-    stationary_threshold: float = 1.5   # Stationary detection
-    trajectory_smoothing_sigma: float = 2.0  # Gaussian smoothing
-    
-    # Optical Flow
-    optical_flow_enabled: bool = True
-    flow_magnitude_threshold: float = 3.0
-    flow_angle_bins: int = 8            # Direction quantization
-    
-    # Detection Thresholds
-    direction_confidence_threshold: float = 0.75    # 75% confidence
-    opposite_angle_threshold: float = 135.0         # Degrees
-    consistency_threshold: float = 0.70             # 70% consistency
-    
-    # Violation Confirmation
-    violation_consecutive_frames: int = 8           # Reduced for faster detection
-    violation_ratio_threshold: float = 0.85         # 85% of recent history
-    violation_history_window: int = 12              # History size
-    
-    # Spatial Filters
-    boundary_margin: int = 80                       # Edge margin
-    entry_grace_period: int = 20                    # Frames to stabilize
-    min_tracking_frames: int = 30                   # Minimum track length
-    
-    # Aspect Ratio Analysis (NEW)
-    enable_bbox_orientation: bool = True
-    aspect_ratio_weight: float = 0.3                # Weight in ensemble
-    
-    # Inter-Vehicle Analysis (NEW)
-    enable_peer_comparison: bool = True
-    peer_comparison_radius: float = 200.0           # Pixels
-    peer_agreement_threshold: float = 0.6           # 60% agreement
+# Learning Phase
+LEARNING_DURATION = 250          # Extended learning
+MIN_SAMPLES_REQUIRED = 30        # Per lane
+
+# Spatial Division
+NUM_VERTICAL_LANES = 5           # Vertical lanes
+NUM_HORIZONTAL_ZONES = 3         # Horizontal zones
+
+# Tracking Parameters  
+MAX_POSITION_HISTORY = 60        # Position memory
+KALMAN_PROCESS_NOISE = 0.01      # Process noise
+KALMAN_MEASUREMENT_NOISE = 0.1   # Measurement noise
+
+# Motion Analysis
+MIN_SPEED_THRESHOLD = 2.0        # Minimum speed (px/frame)
+MAX_SPEED_THRESHOLD = 70.0       # Maximum speed
+STATIONARY_THRESHOLD = 1.5       # Stationary detection
+TRAJECTORY_SMOOTHING_SIGMA = 2.0 # Gaussian smoothing
+
+# Optical Flow
+OPTICAL_FLOW_ENABLED = True
+FLOW_MAGNITUDE_THRESHOLD = 3.0
+FLOW_ANGLE_BINS = 8              # Direction quantization
+
+# Detection Thresholds
+DIRECTION_CONFIDENCE_THRESHOLD = 0.75    # 75% confidence
+OPPOSITE_ANGLE_THRESHOLD = 135.0         # Degrees
+CONSISTENCY_THRESHOLD = 0.70             # 70% consistency
+
+# Violation Confirmation
+VIOLATION_CONSECUTIVE_FRAMES = 8         # Reduced for faster detection
+VIOLATION_RATIO_THRESHOLD = 0.85         # 85% of recent history
+VIOLATION_HISTORY_WINDOW = 12            # History size
+
+# Spatial Filters
+BOUNDARY_MARGIN = 80                     # Edge margin
+ENTRY_GRACE_PERIOD = 20                  # Frames to stabilize
+MIN_TRACKING_FRAMES = 30                 # Minimum track length
+
+# Aspect Ratio Analysis
+ENABLE_BBOX_ORIENTATION = True
+ASPECT_RATIO_WEIGHT = 0.3                # Weight in ensemble
+
+# Inter-Vehicle Analysis
+ENABLE_PEER_COMPARISON = True
+PEER_COMPARISON_RADIUS = 200.0           # Pixels
+PEER_AGREEMENT_THRESHOLD = 0.6           # 60% agreement
+
+# Vehicle class names mapping
+VEHICLE_CLASS_NAMES = {
+    0: 'ambulance',
+    6: 'car', 
+    9: 'fire_truck',
+    21: 'motorcycle',
+    26: 'police_car'
+}
 
 
 # =====================================================================================
@@ -115,7 +108,7 @@ class KalmanTracker:
     Reduces noise and provides accurate predictions
     """
     
-    def __init__(self, initial_position: np.ndarray, config: SystemConfig):
+    def __init__(self, initial_position: np.ndarray):
         """
         Initialize Kalman Filter
         State: [x, y, vx, vy]
@@ -145,11 +138,11 @@ class KalmanTracker:
         ])
         
         # Process noise covariance
-        q = config.kalman_process_noise
+        q = KALMAN_PROCESS_NOISE
         self.Q = np.eye(4) * q
         
         # Measurement noise covariance
-        r = config.kalman_measurement_noise
+        r = KALMAN_MEASUREMENT_NOISE
         self.R = np.eye(2) * r
         
         # State covariance
@@ -359,16 +352,15 @@ class PrecisionVehicleTracker:
     High-precision vehicle tracking with multiple direction estimation methods
     """
     
-    def __init__(self, track_id: int, config: SystemConfig):
+    def __init__(self, track_id: int):
         self.track_id = track_id
-        self.config = config
         
         # Kalman filter (initialized on first update)
         self.kalman: Optional[KalmanTracker] = None
         
         # Position and velocity
-        self.raw_positions: deque = deque(maxlen=config.max_position_history)
-        self.filtered_positions: deque = deque(maxlen=config.max_position_history)
+        self.raw_positions: deque = deque(maxlen=MAX_POSITION_HISTORY)
+        self.filtered_positions: deque = deque(maxlen=MAX_POSITION_HISTORY)
         self.velocities: deque = deque(maxlen=30)
         
         # Bounding box history (for orientation analysis)
@@ -388,7 +380,7 @@ class PrecisionVehicleTracker:
         # Violation status
         self.is_wrong_way: bool = False
         self.is_confirmed_violator: bool = False
-        self.violation_evidence: deque = deque(maxlen=config.violation_history_window)
+        self.violation_evidence: deque = deque(maxlen=VIOLATION_HISTORY_WINDOW)
         self.consecutive_violations: int = 0
         
         # Metadata
@@ -411,7 +403,7 @@ class PrecisionVehicleTracker:
         
         # Initialize Kalman on first update
         if self.kalman is None:
-            self.kalman = KalmanTracker(position, self.config)
+            self.kalman = KalmanTracker(position)
             
         # Kalman prediction and update
         self.kalman.predict()
@@ -448,8 +440,8 @@ class PrecisionVehicleTracker:
         positions = np.array(list(self.filtered_positions))
         
         # Apply Gaussian smoothing
-        smoothed_x = gaussian_filter1d(positions[:, 0], sigma=self.config.trajectory_smoothing_sigma)
-        smoothed_y = gaussian_filter1d(positions[:, 1], sigma=self.config.trajectory_smoothing_sigma)
+        smoothed_x = gaussian_filter1d(positions[:, 0], sigma=TRAJECTORY_SMOOTHING_SIGMA)
+        smoothed_y = gaussian_filter1d(positions[:, 1], sigma=TRAJECTORY_SMOOTHING_SIGMA)
         self.smoothed_trajectory = np.column_stack([smoothed_x, smoothed_y])
         
         # Calculate overall direction (start to end)
@@ -519,7 +511,7 @@ class PrecisionVehicleTracker:
         if not zone.is_reliable or self.current_velocity is None:
             return False, 0.0
             
-        if self.current_speed < self.config.min_speed_threshold:
+        if self.current_speed < MIN_SPEED_THRESHOLD:
             return False, 0.0
             
         # === METHOD 1: Vector Angle Comparison ===
@@ -527,7 +519,7 @@ class PrecisionVehicleTracker:
         angle_diff = self._angular_difference(vehicle_angle, zone.dominant_angle)
         angle_diff_deg = np.degrees(abs(angle_diff))
         
-        method1_opposite = angle_diff_deg > self.config.opposite_angle_threshold
+        method1_opposite = angle_diff_deg > OPPOSITE_ANGLE_THRESHOLD
         method1_confidence = min(angle_diff_deg / 180.0, 1.0)
         
         # === METHOD 2: Direction Classification ===
@@ -546,11 +538,11 @@ class PrecisionVehicleTracker:
             method2_opposite = (self.trajectory_direction == expected_opposite)
             method2_confidence = self.direction_confidence if method2_opposite else 0.0
             
-        # === METHOD 3: Bounding Box Orientation (NEW) ===
+        # === METHOD 3: Bounding Box Orientation ===
         method3_opposite = False
         method3_confidence = 0.0
         
-        if self.config.enable_bbox_orientation:
+        if ENABLE_BBOX_ORIENTATION:
             bbox_direction = self.estimate_direction_from_bbox()
             if bbox_direction is not None:
                 opposite_map = {
@@ -575,7 +567,7 @@ class PrecisionVehicleTracker:
                 total_confidence += w * c
                 
         # Decision threshold
-        is_opposite = total_confidence > self.config.direction_confidence_threshold
+        is_opposite = total_confidence > DIRECTION_CONFIDENCE_THRESHOLD
         
         return is_opposite, total_confidence
         
@@ -608,11 +600,11 @@ class PrecisionVehicleTracker:
     def _check_confirmation(self) -> bool:
         """Check if violation should be confirmed"""
         # Criterion 1: Consecutive frames
-        if self.consecutive_violations >= self.config.violation_consecutive_frames:
+        if self.consecutive_violations >= VIOLATION_CONSECUTIVE_FRAMES:
             return True
             
         # Criterion 2: Weighted evidence ratio
-        if len(self.violation_evidence) >= self.config.violation_history_window // 2:
+        if len(self.violation_evidence) >= VIOLATION_HISTORY_WINDOW // 2:
             violations = [v for v, c in self.violation_evidence]
             confidences = [c for v, c in self.violation_evidence if v]
             
@@ -622,7 +614,7 @@ class PrecisionVehicleTracker:
                 
                 # High confidence and high ratio
                 if (avg_confidence > 0.8 and 
-                    violation_ratio >= self.config.violation_ratio_threshold):
+                    violation_ratio >= VIOLATION_RATIO_THRESHOLD):
                     return True
                     
         return False
@@ -631,25 +623,25 @@ class PrecisionVehicleTracker:
         """Check if vehicle is valid for violation detection"""
         
         # Need sufficient history
-        if self.total_frames < self.config.min_tracking_frames:
+        if self.total_frames < MIN_TRACKING_FRAMES:
             return False
             
         # Grace period for new entries
-        if (current_frame - self.first_frame) < self.config.entry_grace_period:
+        if (current_frame - self.first_frame) < ENTRY_GRACE_PERIOD:
             return False
             
         # Must be moving
-        if self.current_speed < self.config.min_speed_threshold:
+        if self.current_speed < MIN_SPEED_THRESHOLD:
             return False
             
         # Filter tracking errors
-        if self.current_speed > self.config.max_speed_threshold:
+        if self.current_speed > MAX_SPEED_THRESHOLD:
             return False
             
         # Not at boundary
         if len(self.raw_positions) > 0:
             x, y = self.raw_positions[-1]
-            margin = self.config.boundary_margin
+            margin = BOUNDARY_MARGIN
             
             if (x < margin or x > frame_width - margin or
                 y < margin or y > frame_height - margin):
@@ -659,7 +651,7 @@ class PrecisionVehicleTracker:
 
 
 # =====================================================================================
-# PEER COMPARISON ANALYZER (NEW)
+# PEER COMPARISON ANALYZER
 # =====================================================================================
 
 class PeerComparisonAnalyzer:
@@ -668,8 +660,8 @@ class PeerComparisonAnalyzer:
     Identifies outliers moving against traffic flow
     """
     
-    def __init__(self, config: SystemConfig):
-        self.config = config
+    def __init__(self):
+        pass
         
     def analyze_peer_consistency(
         self, 
@@ -680,7 +672,7 @@ class PeerComparisonAnalyzer:
         Check if target vehicle is moving differently from nearby peers
         Returns: (is_inconsistent, peer_disagreement_score)
         """
-        if not self.config.enable_peer_comparison:
+        if not ENABLE_PEER_COMPARISON:
             return False, 0.0
             
         if target_tracker.current_velocity is None:
@@ -713,7 +705,7 @@ class PeerComparisonAnalyzer:
             peer_pos = np.array(tracker.raw_positions[-1])
             distance = np.linalg.norm(target_pos - peer_pos)
             
-            if distance < self.config.peer_comparison_radius:
+            if distance < PEER_COMPARISON_RADIUS:
                 peer_angles.append(tracker.current_angle)
                 
         # Need at least 3 peers
@@ -755,12 +747,10 @@ class PrecisionWrongWayDetector:
     High-precision wrong-way detection system
     """
     
-    def __init__(self, config: Optional[SystemConfig] = None):
-        self.config = config or SystemConfig()
-        
-        # Load model
-        print(f"🚀 Loading YOLO model: {self.config.model_path}")
-        self.model = YOLO(self.config.model_path)
+    def __init__(self):
+        # Load model using shared config
+        print(f"🚀 Loading YOLO model: {config.MODEL_PATH}")
+        self.model = YOLO(config.MODEL_PATH)
         
         # System state
         self.current_frame: int = 0
@@ -775,7 +765,7 @@ class PrecisionWrongWayDetector:
         self.trackers: Dict[int, PrecisionVehicleTracker] = {}
         
         # Peer analyzer
-        self.peer_analyzer = PeerComparisonAnalyzer(self.config)
+        self.peer_analyzer = PeerComparisonAnalyzer()
         
         # Statistics
         self.total_vehicles: int = 0
@@ -792,13 +782,13 @@ class PrecisionWrongWayDetector:
         """Setup spatial zones"""
         self.frame_height, self.frame_width = frame_shape[:2]
         
-        lane_width = self.frame_width / self.config.num_vertical_lanes
-        zone_height = self.frame_height / self.config.num_horizontal_zones
+        lane_width = self.frame_width / NUM_VERTICAL_LANES
+        zone_height = self.frame_height / NUM_HORIZONTAL_ZONES
         
-        print(f"\n📐 Setting up {self.config.num_vertical_lanes}x{self.config.num_horizontal_zones} grid")
+        print(f"\n📐 Setting up {NUM_VERTICAL_LANES}x{NUM_HORIZONTAL_ZONES} grid")
         
-        for v_lane in range(self.config.num_vertical_lanes):
-            for h_zone in range(self.config.num_horizontal_zones):
+        for v_lane in range(NUM_VERTICAL_LANES):
+            for h_zone in range(NUM_HORIZONTAL_ZONES):
                 x1 = int(v_lane * lane_width)
                 x2 = int((v_lane + 1) * lane_width)
                 y1 = int(h_zone * zone_height)
@@ -824,11 +814,11 @@ class PrecisionWrongWayDetector:
         # YOLO tracking
         results = self.model.track(
             frame,
-            imgsz=self.config.img_size,
-            conf=self.config.confidence,
-            iou=self.config.iou_threshold,
+            imgsz=config.IMG_SIZE,
+            conf=0.3,
+            iou=config.IOU_THRESHOLD,
             persist=True,
-            classes=list(self.config.vehicle_classes.keys()),
+            classes=config.VEHICLE_CLASSES,
             verbose=False
         )
         
@@ -844,7 +834,7 @@ class PrecisionWrongWayDetector:
                 self._detection_phase(boxes, track_ids, classes, frame)
                 
         # Finalize learning
-        if self.is_learning and self.current_frame >= self.config.learning_duration:
+        if self.is_learning and self.current_frame >= LEARNING_DURATION:
             self._finalize_learning()
             
         # Visualization
@@ -866,14 +856,14 @@ class PrecisionWrongWayDetector:
             
             # Update tracker
             if tid not in self.trackers:
-                self.trackers[tid] = PrecisionVehicleTracker(tid, self.config)
+                self.trackers[tid] = PrecisionVehicleTracker(tid)
                 
             tracker = self.trackers[tid]
-            vehicle_class = self.config.vehicle_classes.get(cls, "unknown")
+            vehicle_class = VEHICLE_CLASS_NAMES.get(cls, "unknown")
             tracker.update(position, box, self.current_frame, vehicle_class)
             
             # Add to zone
-            if tracker.current_velocity is not None and tracker.current_speed > self.config.min_speed_threshold:
+            if tracker.current_velocity is not None and tracker.current_speed > MIN_SPEED_THRESHOLD:
                 zone = self.get_zone(cx, cy)
                 if zone:
                     bbox_aspect = None
@@ -890,11 +880,11 @@ class PrecisionWrongWayDetector:
             
             # Update tracker
             if tid not in self.trackers:
-                self.trackers[tid] = PrecisionVehicleTracker(tid, self.config)
+                self.trackers[tid] = PrecisionVehicleTracker(tid)
                 self.total_vehicles += 1
                 
             tracker = self.trackers[tid]
-            vehicle_class = self.config.vehicle_classes.get(cls, "unknown")
+            vehicle_class = VEHICLE_CLASS_NAMES.get(cls, "unknown")
             tracker.update(position, box, self.current_frame, vehicle_class)
             
             # Validate
@@ -910,7 +900,7 @@ class PrecisionWrongWayDetector:
                 is_opposite, confidence = tracker.is_opposite_direction(zone)
                 
                 # Peer comparison (optional boost)
-                if self.config.enable_peer_comparison:
+                if ENABLE_PEER_COMPARISON:
                     is_inconsistent, peer_score = self.peer_analyzer.analyze_peer_consistency(
                         tracker, self.trackers
                     )
@@ -956,13 +946,13 @@ class PrecisionWrongWayDetector:
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
         
         if tracker.is_confirmed_violator:
-            color = (0, 0, 255)
+            color = config.COLOR_VIOLATION
             label = f"🚨 WRONG WAY #{tracker.track_id}"
         elif tracker.is_wrong_way:
-            color = (0, 165, 255)
+            color = config.COLOR_WARNING
             label = f"⚠ WARNING #{tracker.track_id}"
         else:
-            color = (0, 255, 0)
+            color = config.COLOR_SAFE
             label = f"#{tracker.track_id}"
             
         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
@@ -993,7 +983,7 @@ class PrecisionWrongWayDetector:
         ]
         
         if self.is_learning:
-            progress = (self.current_frame / self.config.learning_duration) * 100
+            progress = (self.current_frame / LEARNING_DURATION) * 100
             texts.append(f">>> LEARNING: {progress:.0f}% <<<")
         else:
             texts.append("Status: ACTIVE DETECTION")
@@ -1022,11 +1012,9 @@ def main():
     print("    Advanced Multi-Modal Direction Analysis")
     print("="*80 + "\n")
     
-    config = SystemConfig()
-    detector = PrecisionWrongWayDetector(config)
+    detector = PrecisionWrongWayDetector()
     
-    video_path = config.video_path  # Use configured path
-    # video_path = 'traffic_video.mp4'  # Or set custom path
+    video_path = config.DEFAULT_VIDEO
     cap = cv2.VideoCapture(video_path)
     
     if not cap.isOpened():
@@ -1038,7 +1026,7 @@ def main():
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     print(f"📹 Video: {width}x{height} @ {fps} FPS")
-    print(f"⏳ Learning: {config.learning_duration} frames")
+    print(f"⏳ Learning: {LEARNING_DURATION} frames")
     print(f"⌨️  Press 'q' to quit\n")
     
     try:

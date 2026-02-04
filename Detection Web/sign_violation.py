@@ -3,6 +3,7 @@ Traffic Sign Violation Detection System
 Detects vehicles violating traffic sign rules (turn restrictions, directional signs)
 
 Model: YOLOv12s-seg (Instance Segmentation)
+Uses shared Config class from config/config.py
 """
 
 import cv2
@@ -14,63 +15,32 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-
+# Import shared config
+from config.config import config
 
 
 # =====================================================================================
-# CONFIGURATION
+# SIGN-SPECIFIC CONFIGURATION
 # =====================================================================================
 
-@dataclass
-class DetectionConfig:
-    """System configuration"""
-    
-    # Paths
-    model_path: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
-    video_path: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
-    
-    # Model parameters
-    img_size: int = 1280
-    confidence: float = 0.3
-    iou_threshold: float = 0.5
-    
-    # Vehicle classes (COCO format)
-    vehicle_classes: Dict[int, str] = None
-    
-    # Traffic sign classes
-    sign_classes: Dict[int, str] = None
-    
-    # Calibration
-    calibration_frames: int = 100  # Frames to learn sign positions
-    sign_confidence_threshold: float = 0.5
-    
-    # Tracking
-    max_history: int = 50
-    min_track_length: int = 20
-    
-    # Detection thresholds
-    min_speed: float = 2.0
-    violation_consecutive_frames: int = 10
-    
-    def __post_init__(self):
-        if self.vehicle_classes is None:
-            self.vehicle_classes = {
-                0: 'ambulance',
-                6: 'car',
-                9: 'fire_truck',
-                21: 'motorcycle',
-                26: 'police_car'
-            }
-        
-        if self.sign_classes is None:
-            self.sign_classes = {
-                1: 'no_left_turn',
-                2: 'no_right_turn',
-                3: 'no_straight',
-                4: 'turn_left_only',
-                5: 'turn_right_only',
-                6: 'straight_only'
-            }
+# Sign class IDs (specific to this detection type)
+SIGN_CLASSES = {
+    1: 'arrow_left',
+    2: 'arrow_right',
+    3: 'arrow_straight',
+    4: 'arrow_straight_left',
+    5: 'arrow_straight_right',
+}
+
+# Calibration parameters
+CALIBRATION_FRAMES = 100
+SIGN_CONFIDENCE_THRESHOLD = 0.5
+
+# Tracking parameters
+MAX_HISTORY = 50
+MIN_TRACK_LENGTH = 20
+MIN_SPEED = 2.0
+VIOLATION_CONSECUTIVE_FRAMES = 10
 
 
 class SignType(Enum):
@@ -149,9 +119,7 @@ class VehicleTracker:
 class TrafficSignDetector:
     """Detect and track traffic signs"""
     
-    def __init__(self, config: DetectionConfig):
-        self.config = config
-        
+    def __init__(self):
         # Sign memory (learned during calibration)
         self.detected_signs: Dict[int, List[Tuple]] = defaultdict(list)  # sign_class: [(bbox, conf)]
         self.active_signs: List[Dict] = []  # Finalized signs with zones
@@ -166,14 +134,14 @@ class TrafficSignDetector:
             return
             
         for class_id, confidence, bbox in detections:
-            if class_id in self.config.sign_classes:
-                if confidence > self.config.sign_confidence_threshold:
+            if class_id in SIGN_CLASSES:
+                if confidence > SIGN_CONFIDENCE_THRESHOLD:
                     self.detected_signs[class_id].append((bbox, confidence))
         
         self.calibration_count += 1
         
         # Finalize calibration
-        if self.calibration_count >= self.config.calibration_frames:
+        if self.calibration_count >= CALIBRATION_FRAMES:
             self._finalize_calibration()
             
     def _finalize_calibration(self):
@@ -193,7 +161,7 @@ class TrafficSignDetector:
             # Create sign zone
             sign_info = {
                 'class_id': sign_class,
-                'sign_type': self.config.sign_classes[sign_class],
+                'sign_type': SIGN_CLASSES[sign_class],
                 'bbox': tuple(avg_bbox),
                 'detection_count': len(detections),
                 'enforcement_zone': self._create_enforcement_zone(avg_bbox)
@@ -297,16 +265,23 @@ class TrafficSignDetector:
 class TrafficSignViolationDetector:
     """Main detection system"""
     
-    def __init__(self, config: Optional[DetectionConfig] = None):
-        self.config = config or DetectionConfig()
-        
+    def __init__(self):
         # Load model
-        print(f"🚀 Loading model: {self.config.model_path}")
-        self.model = YOLO(self.config.model_path)
+        print(f"🚀 Loading model: {config.MODEL_PATH}")
+        self.model = YOLO(config.MODEL_PATH)
         
         # Components
-        self.sign_detector = TrafficSignDetector(self.config)
+        self.sign_detector = TrafficSignDetector()
         self.trackers: Dict[int, VehicleTracker] = {}
+        
+        # Vehicle class names mapping from config
+        self.vehicle_class_names = {
+            0: 'ambulance',
+            6: 'car',
+            9: 'fire_truck',
+            21: 'motorcycle',
+            26: 'police_car'
+        }
         
         # State
         self.current_frame = 0
@@ -326,9 +301,9 @@ class TrafficSignViolationDetector:
         # Run YOLO tracking
         results = self.model.track(
             frame,
-            imgsz=self.config.img_size,
-            conf=self.config.confidence,
-            iou=self.config.iou_threshold,
+            imgsz=config.IMG_SIZE,
+            conf=0.3,
+            iou=config.IOU_THRESHOLD,
             persist=True,
             verbose=False
         )
@@ -355,15 +330,15 @@ class TrafficSignViolationDetector:
                 classes = results[0].boxes.cls.cpu().numpy().astype(int)
                 
                 for box, tid, cls in zip(boxes, track_ids, classes):
-                    if cls not in self.config.vehicle_classes:
+                    if cls not in config.VEHICLE_CLASSES:
                         continue
                         
                     # Update tracker
                     if tid not in self.trackers:
                         self.trackers[tid] = VehicleTracker(
                             track_id=tid,
-                            vehicle_class=self.config.vehicle_classes[cls],
-                            positions=deque(maxlen=self.config.max_history),
+                            vehicle_class=self.vehicle_class_names.get(cls, 'vehicle'),
+                            positions=deque(maxlen=MAX_HISTORY),
                             first_frame=self.current_frame,
                             last_frame=self.current_frame
                         )
@@ -373,13 +348,13 @@ class TrafficSignViolationDetector:
                     tracker.update_position((cx, cy), self.current_frame)
                     
                     # Check violation
-                    if len(tracker.positions) >= self.config.min_track_length:
+                    if len(tracker.positions) >= MIN_TRACK_LENGTH:
                         violation_type = self.sign_detector.check_violation(tracker)
                         tracker.update_violation(violation_type is not None, violation_type)
                         
                         # Confirm violation
                         if (not tracker.is_confirmed and 
-                            tracker.violation_frames >= self.config.violation_consecutive_frames):
+                            tracker.violation_frames >= VIOLATION_CONSECUTIVE_FRAMES):
                             tracker.is_confirmed = True
                             self.total_violations += 1
                             if violation_type:
@@ -404,7 +379,7 @@ class TrafficSignViolationDetector:
     
     def _draw_calibration(self, frame):
         """Draw calibration progress"""
-        progress = (self.sign_detector.calibration_count / self.config.calibration_frames) * 100
+        progress = (self.sign_detector.calibration_count / CALIBRATION_FRAMES) * 100
         
         overlay = frame.copy()
         cv2.rectangle(overlay, (10, 10), (500, 100), (0, 0, 0), -1)
@@ -420,13 +395,13 @@ class TrafficSignViolationDetector:
         x1, y1, x2, y2 = box
         
         if tracker.is_confirmed:
-            color = (0, 0, 255)  # Red
+            color = config.COLOR_VIOLATION
             label = f"🚨 VIOLATION #{tracker.track_id}"
         elif tracker.is_violating:
-            color = (0, 165, 255)  # Orange
+            color = config.COLOR_WARNING
             label = f"⚠ #{tracker.track_id}"
         else:
-            color = (0, 255, 0)  # Green
+            color = config.COLOR_SAFE
             label = f"#{tracker.track_id}"
         
         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
@@ -471,7 +446,7 @@ class TrafficSignViolationDetector:
         ]
         
         if self.sign_detector.is_calibrating:
-            progress = (self.sign_detector.calibration_count / self.config.calibration_frames) * 100
+            progress = (self.sign_detector.calibration_count / CALIBRATION_FRAMES) * 100
             texts.append(f">>> CALIBRATING: {progress:.0f}% <<<")
         else:
             texts.append(f"Active Signs: {len(self.sign_detector.active_signs)}")
@@ -490,10 +465,9 @@ def main():
     print("    TRAFFIC SIGN VIOLATION DETECTION SYSTEM")
     print("="*80 + "\n")
     
-    config = DetectionConfig()
-    detector = TrafficSignViolationDetector(config)
+    detector = TrafficSignViolationDetector()
     
-    video_path = config.video_path
+    video_path = config.DEFAULT_VIDEO
     cap = cv2.VideoCapture(video_path)
     
     if not cap.isOpened():
@@ -505,7 +479,7 @@ def main():
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     print(f"📹 Video: {width}x{height} @ {fps} FPS")
-    print(f"⏳ Calibration: {config.calibration_frames} frames")
+    print(f"⏳ Calibration: {CALIBRATION_FRAMES} frames")
     print(f"⌨️  Press 'q' to quit\n")
     
     try:
