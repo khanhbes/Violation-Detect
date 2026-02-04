@@ -1,832 +1,1023 @@
 """
-Lane Violation Detection System
-Using YOLOv12-seg for traffic video processing
-Author: Senior Computer Vision Engineer
+wrong_lane.py (FULL) - Minimize false positives in real traffic
+===============================================================
+Mục tiêu: hạn chế phạt sai nhất có thể trong thực tế, dựa trên yêu cầu của bạn:
+
+A) 5 giây đầu: HIỂN THỊ HẾT MASK (giống detect_sidewalk_violation.py)
+B) Sau 5 giây: FREEZE
+   - Stopline vẽ cố định khớp mask (giống redlight_violation.py): fit line bằng RANSAC từ mask stopline
+   - Vạch lane cố định: dash_white_line + solid_white_line (giữ như bản bạn đã ổn)
+   - Lane = khoảng giữa các vạch biên (dash/solid)
+   - Luật lane: lấy từ arrow masks (1..5), 4/5 ưu tiên "Straight_Or_Left"/"Straight_Or_Right"
+C) Khi xe đang đi trong lane: KHÔNG phạt WrongDir
+D) Chỉ khi xe CẮT stopline mới xét WrongDir so với luật của lane BEFORE crossing
+E) ChamVach:
+   - solid_white_line & solid_yellow_line: 2 bánh (2 góc đáy bbox) chạm vạch => "Cham Vach"
+   - dash_*: chạm không lỗi
+F) Hạn chế phạt sai:
+   - Không dùng slope. Dùng VECTOR/ANGLE.
+   - Reference hướng đi thẳng dùng theo "trục lane" (lane centerline from fixed boundaries), fallback stopline normal.
+   - "Straight" cho phép lệch một chút: STRAIGHT_ANGLE_DEG.
+   - Vùng mơ hồ giữa STRAIGHT_ANGLE và TURN_ANGLE => ưu tiên STRAIGHT (giảm false)
+   - Thêm safeguard: nếu luật có STRAIGHT và góc < SAFE_STRAIGHT_MAX thì ép STRAIGHT (tránh phạt sai lane ngoài)
+   - Debug overlay + console để truy lỗi.
+
+Phím:
+- q : quit
+- d : toggle debug
+
+Yêu cầu: pip install ultralytics opencv-python numpy
 """
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple, Set
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from sklearn.linear_model import RANSACRegressor
-from sklearn.decomposition import PCA
-from collections import defaultdict, deque
-import math
 
-# ============================================================================
-# CONFIGURATION - CLASS MAPPING
-# ============================================================================
 
-# Lane Rules (Arrows)
-ARROW_LEFT = 1
-ARROW_RIGHT = 2
-ARROW_STRAIGHT = 3
-ARROW_STRAIGHT_AND_LEFT = 4
-ARROW_STRAIGHT_AND_RIGHT = 5
+# =========================
+# PATHS (fixed per user)
+# =========================
+MODEL_PATH: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/model/best_yolo12s_seg.pt"
+VIDEO_PATH: str = "C:/Users/khanh/OneDrive/Desktop/Violation Detect/Detection Web/assets/video/test_2.mp4"
 
-# Lane Markings
-DASHED_WHITE_LINE = 7
-DASHED_YELLOW_LINE = 8
-SOLID_WHITE_LINE = 37
-SOLID_YELLOW_LINE = 38
-STOP_LINE = 39
 
-# Vehicles
-CAR = 6
-MOTORCYCLE = 21
-AMBULANCE = 0
-FIRE_TRUCK = 9
-POLICE_CAR = 26
+# =========================
+# CONFIG
+# =========================
+IMG_SIZE = 1280
+TRACKER = "bytetrack.yaml"
+IOU_THRESHOLD = 0.5
 
-# Priority vehicles (exempt from violations)
-PRIORITY_VEHICLES = {AMBULANCE, FIRE_TRUCK, POLICE_CAR}
+CALIBRATION_DURATION_SEC = 5.0
+CONF_CALIB = 0.25
+CONF_TRACK = 0.45
 
-# Color definitions for visualization
-LINE_COLORS = {
-    SOLID_WHITE_LINE: (0, 0, 255),      # Red
-    SOLID_YELLOW_LINE: (0, 0, 255),     # Red
-    DASHED_WHITE_LINE: (0, 255, 255),   # Yellow
-    DASHED_YELLOW_LINE: (0, 255, 255),  # Yellow
-    STOP_LINE: (255, 0, 0)              # Blue
-}
+WINDOW_NAME = "Wrong Lane Detection"
 
-ARROW_NAMES = {
-    ARROW_LEFT: "MUST_LEFT",
-    ARROW_RIGHT: "MUST_RIGHT",
-    ARROW_STRAIGHT: "ONLY_STRAIGHT",
-    ARROW_STRAIGHT_AND_LEFT: "STRAIGHT_OR_LEFT",
-    ARROW_STRAIGHT_AND_RIGHT: "STRAIGHT_OR_RIGHT"
-}
+# Seg classes (dataset)
+DASH_WHITE = 7
+DASH_YELLOW = 8
+SOLID_WHITE = 37
+SOLID_YELLOW = 38
+STOPLINE_ID = 39
 
-# ============================================================================
-# GEOMETRIC PROCESSING FUNCTIONS
-# ============================================================================
+# Arrows (dataset)
+ARROW_CLASSES = {1, 2, 3, 4, 5}
 
-def cluster_line_points(points, eps=30, min_samples=50):
-    """
-    Cluster points into separate line groups using DBSCAN
-    This separates multiple lines of the same class (e.g., 2 solid white lines)
-    
-    Args:
-        points: List of (x, y) tuples
-        eps: Maximum distance between points in same cluster
-        min_samples: Minimum points to form a cluster
-    
-    Returns:
-        List of point arrays, each representing one line
-    """
-    if len(points) < min_samples:
-        return [np.array(points)] if len(points) > 10 else []
-    
-    from sklearn.cluster import DBSCAN
-    
-    points_array = np.array(points)
-    
-    # Use DBSCAN clustering based on x-coordinate primarily
-    # Since lane lines are roughly vertical, cluster by x position
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points_array)
-    
-    labels = clustering.labels_
-    unique_labels = set(labels)
-    
-    # Remove noise label (-1)
-    unique_labels.discard(-1)
-    
-    clusters = []
-    for label in unique_labels:
-        mask = labels == label
-        cluster_points = points_array[mask]
-        if len(cluster_points) >= 10:
-            clusters.append(cluster_points)
-    
-    # Sort clusters by their mean x-position (left to right)
-    clusters.sort(key=lambda c: np.mean(c[:, 0]))
-    
-    return clusters
+# Vehicles (dataset)
+VEHICLE_CLASSES = {0, 6, 9, 21, 26}      # car, bus, motorbike, ...
+PRIORITY_VEHICLES = {0, 9, 26}          # optional ignore some classes for violation
 
-def fit_line_ransac(points):
-    """
-    Fit a line through points using RANSAC algorithm
-    Returns: slope (a), intercept (b) for y = ax + b, and y_min, y_max
-    """
-    if len(points) < 10:
+# Colors (BGR)
+COLOR_DASH_WHITE = (0, 255, 255)
+COLOR_DASH_YELLOW = (0, 200, 255)
+COLOR_SOLID_WHITE = (0, 0, 255)
+COLOR_SOLID_YELLOW = (0, 140, 255)
+COLOR_STOPLINE = (255, 0, 0)
+COLOR_ARROW = (255, 0, 255)
+COLOR_SAFE = (0, 255, 0)
+COLOR_VIOLATION = (0, 0, 255)
+
+# Cham vach thresholds (px)
+LINE_TOUCH_DIST_PX = 6.0
+LINE_TOUCH_Y_MARGIN = 15
+
+# Motion window (used only when cross stopline)
+ACTION_WINDOW = 30
+MIN_ACTION_FRAMES = 12
+STEP_DMIN = 2.0
+MIN_MOVE_MAG_SUM = 80.0
+
+# Direction thresholds (degrees)
+# "vuông góc hoặc sai lệch 1 chút thì vẫn tính thẳng"
+STRAIGHT_ANGLE_DEG = 26.0
+TURN_ANGLE_DEG = 34.0
+SAFE_STRAIGHT_MAX = 40.0   # safeguard: if lane rule allows STRAIGHT and angle < this => treat STRAIGHT
+
+DEBUG_DEFAULT = True
+
+
+# =========================
+# UTILITIES
+# =========================
+def mask_data_to_binary(mask_2d: np.ndarray, w: int, h: int, thr: float = 0.5) -> np.ndarray:
+    m = mask_2d.astype(np.float32)
+    if m.shape[0] != h or m.shape[1] != w:
+        m = cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
+    return (m > thr).astype(np.uint8)
+
+
+def smooth_binary(mask01: np.ndarray) -> np.ndarray:
+    m = (mask01 * 255).astype(np.uint8)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k, iterations=2)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k, iterations=1)
+    _, m = cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)
+    return (m > 0).astype(np.uint8)
+
+
+def polygon_centroid(poly_xy: np.ndarray) -> Optional[Tuple[float, float]]:
+    if poly_xy is None or len(poly_xy) < 3:
         return None
-    
-    points = np.array(points)
-    x = points[:, 0].reshape(-1, 1)
-    y = points[:, 1]
-    
-    try:
-        ransac = RANSACRegressor(random_state=42, min_samples=2, 
-                                 residual_threshold=5.0, max_trials=100)
-        ransac.fit(x, y)
-        
-        slope = ransac.estimator_.coef_[0]
-        intercept = ransac.estimator_.intercept_
-        
-        y_min = np.min(y)
-        y_max = np.max(y)
-        
-        return {
-            'slope': slope,
-            'intercept': intercept,
-            'y_min': y_min,
-            'y_max': y_max
-        }
-    except:
+    pts = poly_xy.astype(np.float32)
+    return float(np.mean(pts[:, 0])), float(np.mean(pts[:, 1]))
+
+
+def draw_polygon_overlay(frame: np.ndarray, poly: np.ndarray,
+                         fill_color: Tuple[int, int, int],
+                         alpha: float = 0.30,
+                         border_color: Tuple[int, int, int] = (255, 255, 255),
+                         border_thickness: int = 2) -> np.ndarray:
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [poly.astype(np.int32)], fill_color)
+    out = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+    cv2.polylines(out, [poly.astype(np.int32)], True, border_color, border_thickness)
+    return out
+
+
+# =========================
+# LINE FIT (RANSAC)
+# =========================
+def fit_line_ransac(points_xy: np.ndarray,
+                    max_iters: int = 600,
+                    inlier_thresh: float = 3.5,
+                    min_inliers: int = 220) -> Optional[Tuple[float, float, float]]:
+    if points_xy is None or len(points_xy) < 2:
         return None
 
+    pts = points_xy.astype(np.float32)
+    n = len(pts)
+    if n > 25000:
+        idx = np.random.choice(n, size=25000, replace=False)
+        pts = pts[idx]
+        n = len(pts)
 
-def draw_fitted_line(frame, line_params, color, thickness=3):
-    """
-    Draw a fitted line segment on the frame
-    """
-    if line_params is None:
-        return
-    
-    slope = line_params['slope']
-    intercept = line_params['intercept']
-    y_min = int(line_params['y_min'])
-    y_max = int(line_params['y_max'])
-    
-    # Calculate x coordinates for y_min and y_max
-    if abs(slope) < 0.001:  # Nearly horizontal line
-        return
-    
-    x_min = int((y_min - intercept) / slope)
-    x_max = int((y_max - intercept) / slope)
-    
-    # Clip to frame boundaries
+    rng = np.random.default_rng(42)
+    best_inliers = 0
+    best_abc = None
+
+    for _ in range(max_iters):
+        i1, i2 = rng.integers(0, n, size=2)
+        if i1 == i2:
+            continue
+        x1, y1 = pts[i1]
+        x2, y2 = pts[i2]
+        if abs(x2 - x1) + abs(y2 - y1) < 1e-6:
+            continue
+
+        a = (y1 - y2)
+        b = (x2 - x1)
+        c = (x1 * y2 - x2 * y1)
+
+        norm = float(np.sqrt(a * a + b * b) + 1e-12)
+        a, b, c = a / norm, b / norm, c / norm
+
+        dist = np.abs(a * pts[:, 0] + b * pts[:, 1] + c)
+        inliers = int(np.sum(dist <= inlier_thresh))
+        if inliers > best_inliers:
+            best_inliers = inliers
+            best_abc = (float(a), float(b), float(c))
+
+    if best_abc is None or best_inliers < min_inliers:
+        return None
+    return best_abc
+
+
+def signed_distance(px: float, py: float, a: float, b: float, c: float) -> float:
+    return (a * px + b * py + c) / (np.sqrt(a * a + b * b) + 1e-12)
+
+
+def line_x_at_y(a: float, b: float, c: float, y: float) -> Optional[float]:
+    if abs(a) < 1e-9:
+        return None
+    return float(-(b * y + c) / a)
+
+
+# =========================
+# STOPLINE CALIBRATOR (copy style from redlight)
+# =========================
+class StoplineCalibrator:
+    def __init__(self, duration: float = 5.0):
+        self.duration = duration
+        self.start_time: Optional[float] = None
+        self.points: List[np.ndarray] = []
+        self.line_abc: Optional[Tuple[float, float, float]] = None
+        self.sign_flip: float = 1.0
+        self.min_x: int = 0
+        self.max_x: int = 0
+
+    def start(self):
+        self.start_time = time.time()
+
+    def is_calibrated(self) -> bool:
+        return self.line_abc is not None
+
+    def add_mask_points(self, mask01: np.ndarray):
+        ys, xs = np.where(mask01 > 0)
+        if len(xs) > 0:
+            pts = np.stack([xs, ys], axis=1)
+            self.points.append(pts)
+
+    def maybe_finish(self, frame_h: int, frame_w: int, min_points: int = 800):
+        if self.start_time is None or self.is_calibrated():
+            return
+        elapsed = time.time() - self.start_time
+        if elapsed < self.duration:
+            return
+        if not self.points:
+            return
+
+        all_pts = np.concatenate(self.points, axis=0)
+        if len(all_pts) < min_points:
+            return
+
+        self.min_x = int(np.min(all_pts[:, 0]))
+        self.max_x = int(np.max(all_pts[:, 0]))
+
+        abc = fit_line_ransac(all_pts, max_iters=800, inlier_thresh=3.0, min_inliers=max(260, min_points // 2))
+        if abc is None:
+            return
+
+        self.line_abc = abc
+        a, b, c = abc
+
+        # sign flip so that "before stopline" is negative at bottom center
+        ref_x, ref_y = frame_w / 2.0, frame_h - 10.0
+        s = a * ref_x + b * ref_y + c
+        self.sign_flip = -1.0 if s > 0 else 1.0
+
+        print(f"[✓] Stopline calibrated: {a:.4f}x + {b:.4f}y + {c:.2f} = 0 | x-range=({self.min_x},{self.max_x})")
+
+
+# =========================
+# FROZEN LINES
+# =========================
+@dataclass
+class FrozenLine:
+    cls_id: int
+    abc: Tuple[float, float, float]
+    y_min: int
+    y_max: int
+    color: Tuple[int, int, int]
+
+    def x_at(self, y: float) -> Optional[float]:
+        a, b, c = self.abc
+        return line_x_at_y(a, b, c, y)
+
+
+def road_roi_bounds(w: int, h: int) -> Tuple[int, int]:
+    return int(0.18 * w), int(0.94 * w)
+
+
+def class_color(cls_id: int) -> Tuple[int, int, int]:
+    if cls_id == DASH_WHITE:
+        return COLOR_DASH_WHITE
+    if cls_id == DASH_YELLOW:
+        return COLOR_DASH_YELLOW
+    if cls_id == SOLID_WHITE:
+        return COLOR_SOLID_WHITE
+    if cls_id == SOLID_YELLOW:
+        return COLOR_SOLID_YELLOW
+    return (255, 255, 255)
+
+
+def extract_component_lines(union01: np.ndarray,
+                            cls_id: int,
+                            frame_w: int,
+                            frame_h: int,
+                            min_area: int = 550,
+                            min_points: int = 170) -> List[FrozenLine]:
+    lines: List[FrozenLine] = []
+    if union01 is None:
+        return lines
+
+    roi_l, roi_r = road_roi_bounds(frame_w, frame_h)
+    bin01 = (union01 > 0).astype(np.uint8)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(bin01, connectivity=8)
+
+    for k in range(1, num):
+        x, y, w, h, area = stats[k]
+        if area < min_area:
+            continue
+
+        x_mid = x + w * 0.5
+        if not (roi_l <= x_mid <= roi_r):
+            continue
+
+        # bottom-half preference
+        if (y + h) < 0.55 * frame_h:
+            continue
+
+        comp = (labels == k)
+        ys, xs = np.where(comp)
+        if len(xs) < min_points:
+            continue
+
+        pts = np.stack([xs, ys], axis=1).astype(np.float32)
+        abc = fit_line_ransac(
+            pts,
+            max_iters=600,
+            inlier_thresh=3.6,
+            min_inliers=min(320, max(150, len(pts) // 6))
+        )
+        if abc is None:
+            continue
+
+        y_min = int(max(0, y))
+        y_max = int(min(frame_h - 1, y + h - 1))
+        lines.append(FrozenLine(cls_id=cls_id, abc=abc, y_min=y_min, y_max=y_max, color=class_color(cls_id)))
+
+    return lines
+
+
+def draw_lines(frame: np.ndarray, lines: List[FrozenLine], thickness: int = 3) -> None:
     h, w = frame.shape[:2]
-    x_min = max(0, min(w-1, x_min))
-    x_max = max(0, min(w-1, x_max))
-    y_min = max(0, min(h-1, y_min))
-    y_max = max(0, min(h-1, y_max))
-    
-    cv2.line(frame, (x_min, y_min), (x_max, y_max), color, thickness)
+    for ln in lines:
+        a, b, c = ln.abc
+        y1, y2 = ln.y_min, ln.y_max
+        x1 = line_x_at_y(a, b, c, y1)
+        x2 = line_x_at_y(a, b, c, y2)
+        if x1 is None or x2 is None:
+            continue
+        p1 = (int(np.clip(round(x1), 0, w - 1)), int(np.clip(y1, 0, h - 1)))
+        p2 = (int(np.clip(round(x2), 0, w - 1)), int(np.clip(y2, 0, h - 1)))
+        cv2.line(frame, p1, p2, ln.color, thickness)
 
 
-def point_to_line_distance(point, line_params):
-    """
-    Calculate perpendicular distance from point to line
-    """
-    if line_params is None:
-        return float('inf')
-    
-    x0, y0 = point
-    a = line_params['slope']
-    b = line_params['intercept']
-    
-    # Line equation: ax - y + b = 0
-    distance = abs(a * x0 - y0 + b) / math.sqrt(a**2 + 1)
-    return distance
+# =========================
+# LANE RULES FROM ARROWS
+# =========================
+def allowed_to_label(allowed: Set[str]) -> str:
+    if allowed == {"LEFT"}:
+        return "Only_Left"
+    if allowed == {"RIGHT"}:
+        return "Only_Right"
+    if allowed == {"STRAIGHT"}:
+        return "Only_Straight"
+    if allowed == {"STRAIGHT", "LEFT"}:
+        return "Straight_Or_Left"
+    if allowed == {"STRAIGHT", "RIGHT"}:
+        return "Straight_Or_Right"
+    if not allowed:
+        return "UNKNOWN"
+    return "OR".join(sorted(allowed))
 
 
-def check_point_in_lane(point, left_line, right_line, tolerance=10):
-    """
-    Check if a point is within a lane defined by two lines
-    Returns: True if point is between the two lines
-    """
-    if left_line is None or right_line is None:
-        return False
-    
-    x, y = point
-    
-    # Calculate x positions on both lines at given y
-    x_left = (y - left_line['intercept']) / left_line['slope'] if abs(left_line['slope']) > 0.001 else x
-    x_right = (y - right_line['intercept']) / right_line['slope'] if abs(right_line['slope']) > 0.001 else x
-    
-    # Ensure left is actually left
-    if x_left > x_right:
-        x_left, x_right = x_right, x_left
-    
-    return (x_left - tolerance) <= x <= (x_right + tolerance)
+def arrow_allowed_raw(cls_id: int) -> Set[str]:
+    if cls_id == 1:
+        return {"LEFT"}
+    if cls_id == 2:
+        return {"RIGHT"}
+    if cls_id == 3:
+        return {"STRAIGHT"}
+    if cls_id == 4:
+        return {"STRAIGHT", "LEFT"}
+    if cls_id == 5:
+        return {"STRAIGHT", "RIGHT"}
+    return set()
 
 
-def get_centroid(mask):
-    """
-    Calculate centroid of a binary mask
-    """
-    points = np.column_stack(np.where(mask > 0))
-    if len(points) == 0:
+def lane_of_point_by_y(px: float, py: float, boundaries: List[FrozenLine]) -> Optional[int]:
+    xs = []
+    for ln in boundaries:
+        x = ln.x_at(py)
+        if x is not None and np.isfinite(x):
+            xs.append(float(x))
+    if len(xs) < 2:
         return None
-    return (int(np.mean(points[:, 1])), int(np.mean(points[:, 0])))
+    xs.sort()
+    for i in range(len(xs) - 1):
+        if xs[i] <= px < xs[i + 1]:
+            return i
+    return None
 
 
-def calculate_action_from_trajectory(trajectory, threshold_angle=15):
-    """
-    Determine vehicle action (LEFT, RIGHT, STRAIGHT) from trajectory
-    trajectory: list of (x, y) points in chronological order
-    """
-    if len(trajectory) < 5:
-        return "STRAIGHT"
-    
-    # Use first and last points to determine direction
-    start_point = np.array(trajectory[0])
-    end_point = np.array(trajectory[-1])
-    
-    direction_vector = end_point - start_point
-    
-    # Calculate angle relative to vertical (forward direction)
-    angle = math.degrees(math.atan2(direction_vector[0], -direction_vector[1]))
-    
-    if angle < -threshold_angle:
-        return "ACTION_LEFT"
-    elif angle > threshold_angle:
-        return "ACTION_RIGHT"
-    else:
-        return "ACTION_STRAIGHT"
+def lane_of_polygon(poly: np.ndarray, boundaries: List[FrozenLine]) -> Optional[int]:
+    if poly is None or len(poly) < 3:
+        return None
+    pts = poly.astype(np.float32)
+    step = max(1, len(pts) // 25)
+    votes: Dict[int, int] = {}
+    for p in pts[::step]:
+        li = lane_of_point_by_y(float(p[0]), float(p[1]), boundaries)
+        if li is None:
+            continue
+        votes[li] = votes.get(li, 0) + 1
+    if not votes:
+        cen = polygon_centroid(poly)
+        if cen is None:
+            return None
+        return lane_of_point_by_y(cen[0], cen[1], boundaries)
+    return max(votes.items(), key=lambda kv: kv[1])[0]
 
 
-def check_cross_stopline(prev_point, curr_point, stopline_params):
+def finalize_lane_rule(present_arrow_classes: Set[int], present_dirs: Set[str]) -> Set[str]:
+    # prioritize combined arrows 4/5
+    if 5 in present_arrow_classes:
+        return {"STRAIGHT", "RIGHT"}
+    if 4 in present_arrow_classes:
+        return {"STRAIGHT", "LEFT"}
+
+    # fallback combine if both present
+    if "STRAIGHT" in present_dirs and "RIGHT" in present_dirs:
+        return {"STRAIGHT", "RIGHT"}
+    if "STRAIGHT" in present_dirs and "LEFT" in present_dirs:
+        return {"STRAIGHT", "LEFT"}
+
+    if "STRAIGHT" in present_dirs:
+        return {"STRAIGHT"}
+    if "RIGHT" in present_dirs:
+        return {"RIGHT"}
+    if "LEFT" in present_dirs:
+        return {"LEFT"}
+    return set()
+
+
+def build_lane_rules_from_arrows(poly_acc: Dict[int, List[np.ndarray]],
+                                 lane_boundaries: List[FrozenLine]) -> Dict[int, Set[str]]:
+    lane_dirs: Dict[int, Set[str]] = {}
+    lane_arrow_classes: Dict[int, Set[int]] = {}
+
+    for cid in ARROW_CLASSES:
+        raw_dirs = arrow_allowed_raw(cid)
+        for poly in poly_acc.get(cid, []):
+            li = lane_of_polygon(poly, lane_boundaries)
+            if li is None:
+                continue
+            lane_dirs.setdefault(li, set()).update(raw_dirs)
+            lane_arrow_classes.setdefault(li, set()).add(cid)
+
+    lane_rules: Dict[int, Set[str]] = {}
+    for li in lane_dirs.keys():
+        lane_rules[li] = finalize_lane_rule(lane_arrow_classes.get(li, set()), lane_dirs.get(li, set()))
+    return lane_rules
+
+
+# =========================
+# BUILD PER-LANE REF VECTORS (to reduce false positives)
+# =========================
+def build_lane_ref_vectors(boundaries: List[FrozenLine], fh: int) -> Dict[int, Tuple[float, float]]:
     """
-    Check if vehicle crossed the stop line
-    Returns: True if crossed from bottom to top
+    Compute per-lane reference direction (unit vector) using lane centerline.
+    This is crucial for lanes near the right edge where "straight" drifts to center in the image.
     """
-    if stopline_params is None:
+    lane_ref: Dict[int, Tuple[float, float]] = {}
+    if len(boundaries) < 2:
+        return lane_ref
+
+    # choose two y-levels: near stopline and near camera
+    y_high = int(0.55 * fh)  # nearer stopline
+    y_low = int(0.86 * fh)   # nearer camera
+    y_high = max(0, min(fh - 1, y_high))
+    y_low = max(0, min(fh - 1, y_low))
+    if y_high >= y_low:
+        y_high = int(0.52 * fh)
+        y_low = int(0.88 * fh)
+
+    for i in range(len(boundaries) - 1):
+        xL1 = boundaries[i].x_at(y_low)
+        xR1 = boundaries[i + 1].x_at(y_low)
+        xL2 = boundaries[i].x_at(y_high)
+        xR2 = boundaries[i + 1].x_at(y_high)
+        if any(v is None or not np.isfinite(v) for v in [xL1, xR1, xL2, xR2]):
+            continue
+
+        cx1 = 0.5 * (float(xL1) + float(xR1))
+        cx2 = 0.5 * (float(xL2) + float(xR2))
+
+        dx = cx2 - cx1
+        dy = float(y_high - y_low)  # negative => upward
+
+        n = float(np.hypot(dx, dy) + 1e-9)
+        lane_ref[i] = (dx / n, dy / n)
+
+    return lane_ref
+
+
+# =========================
+# CHAM VACH
+# =========================
+def point_near_line(px: float, py: float, ln: FrozenLine) -> bool:
+    if py < ln.y_min - LINE_TOUCH_Y_MARGIN or py > ln.y_max + LINE_TOUCH_Y_MARGIN:
         return False
-    
-    # Calculate y position of stopline at vehicle x position
-    x_curr = curr_point[0]
-    y_stop = stopline_params['slope'] * x_curr + stopline_params['intercept']
-    
-    # Check if vehicle crossed from below (higher y) to above (lower y)
-    prev_y = prev_point[1]
-    curr_y = curr_point[1]
-    
-    # In image coordinates, y increases downward
-    # So crossing from bottom to top means: prev_y > y_stop and curr_y <= y_stop
-    if prev_y > y_stop and curr_y <= y_stop:
-        return True
-    
+    a, b, c = ln.abc
+    d = abs(a * px + b * py + c)
+    return d <= LINE_TOUCH_DIST_PX
+
+
+def cham_vach_for_bbox(x1: float, y1: float, x2: float, y2: float, solid_lines: List[FrozenLine]) -> bool:
+    """
+    solid_white_line / solid_yellow_line:
+      both bottom wheels touch => Cham Vach
+    """
+    bl = (float(x1), float(y2))
+    br = (float(x2), float(y2))
+    for ln in solid_lines:
+        if point_near_line(bl[0], bl[1], ln) and point_near_line(br[0], br[1], ln):
+            return True
     return False
 
 
-# ============================================================================
-# MAIN SYSTEM CLASS
-# ============================================================================
+# =========================
+# DIRECTION BY REFERENCE VECTOR (ANGLE)
+# =========================
+def robust_direction_by_ref_vector(
+    positions: List[Tuple[float, float]],
+    vref: Tuple[float, float]
+) -> Tuple[str, Dict[str, float]]:
+    """
+    Determine action by comparing motion vector v with reference vector vref (unit-ish).
+    - Align vref direction with motion (flip if dot < 0)
+    - Use median dx/dy over forward steps to stabilize
+    - Compute dot/cross/angle
+    Decision:
+      angle <= STRAIGHT_ANGLE_DEG => STRAIGHT
+      angle >= TURN_ANGLE_DEG     => LEFT/RIGHT by sign(cross)
+      else                         => STRAIGHT (bias to reduce false positives)
+    """
+    if len(positions) < MIN_ACTION_FRAMES:
+        return "UNKNOWN", {"magSum": 0.0, "dxMed": 0.0, "dyMed": 0.0, "dot": 0.0, "cross": 0.0, "angle": 0.0, "used": 0.0}
 
-class LaneViolationDetector:
-    def __init__(self, model_path, video_path, output_path=None):
-        """
-        Initialize the Lane Violation Detection System
-        """
-        self.model = YOLO(model_path)
-        self.video_path = video_path
-        self.output_path = output_path
-        
-        # Stage 1: Accumulation phase (0-5 seconds)
-        self.initialization_time = 5  # seconds
-        self.is_initialized = False
-        self.frame_count = 0
-        self.fps = 30  # Will be updated from video
-        
-        # Accumulated masks for line and arrow detection
-        self.accumulated_line_points = defaultdict(list)
-        self.accumulated_arrow_masks = defaultdict(list)
-        
-        # Stage 2: Static map (frozen after initialization)
-        self.fitted_lines = {}  # {class_id: line_params}
-        self.lane_rules = {}    # {lane_id: rule_class_id}
-        self.lanes = []         # List of (left_line_id, right_line_id, rule)
-        
-        # Tracking data
-        self.tracked_vehicles = {}  # {track_id: {'trajectory': deque, 'class': int}}
-        self.violation_log = []
-        
-        # Current frame masks for visualization during initialization
-        self.current_frame_masks = {}  # {class_id: mask_array}
-        
-        print("✓ Lane Violation Detector initialized")
-    
-    
-    def accumulate_masks(self, results):
-        """
-        Stage 1: Accumulate mask points during initialization phase
-        Also stores current frame masks for visualization
-        """
-        # Clear previous frame masks
-        self.current_frame_masks = {}
-        
-        for result in results:
-            if result.masks is None:
-                continue
-            
-            boxes = result.boxes
-            masks = result.masks
-            
-            for i, (box, mask) in enumerate(zip(boxes, masks)):
-                class_id = int(box.cls[0])
-                mask_data = mask.data[0].cpu().numpy()
-                
-                # Resize mask to frame size
-                mask_resized = cv2.resize(mask_data, 
-                                         (result.orig_shape[1], result.orig_shape[0]))
-                
-                # Store current mask for visualization (lane lines and arrows)
-                if class_id in [DASHED_WHITE_LINE, DASHED_YELLOW_LINE, 
-                               SOLID_WHITE_LINE, SOLID_YELLOW_LINE, STOP_LINE,
-                               ARROW_LEFT, ARROW_RIGHT, ARROW_STRAIGHT,
-                               ARROW_STRAIGHT_AND_LEFT, ARROW_STRAIGHT_AND_RIGHT]:
-                    if class_id not in self.current_frame_masks:
-                        self.current_frame_masks[class_id] = mask_resized.copy()
-                    else:
-                        # Combine masks of same class
-                        self.current_frame_masks[class_id] = np.maximum(
-                            self.current_frame_masks[class_id], mask_resized)
-                
-                # Accumulate line points
-                if class_id in [DASHED_WHITE_LINE, DASHED_YELLOW_LINE, 
-                               SOLID_WHITE_LINE, SOLID_YELLOW_LINE, STOP_LINE]:
-                    points = np.column_stack(np.where(mask_resized > 0.5))
-                    if len(points) > 0:
-                        # Store as (x, y) format
-                        self.accumulated_line_points[class_id].extend(
-                            [(p[1], p[0]) for p in points]
-                        )
-                
-                # Accumulate arrow masks
-                if class_id in [ARROW_LEFT, ARROW_RIGHT, ARROW_STRAIGHT,
-                               ARROW_STRAIGHT_AND_LEFT, ARROW_STRAIGHT_AND_RIGHT]:
-                    self.accumulated_arrow_masks[class_id].append(mask_resized)
-    
-    
-    def freeze_static_map(self):
-        """
-        Stage 1 Complete: Process accumulated data and create static map
-        Uses clustering to separate multiple lines of same class
-        """
-        print("\n" + "="*70)
-        print("FREEZING STATIC MAP - Processing accumulated data...")
-        print("="*70)
-        
-        # Step A: Fit lines from accumulated points using clustering
-        # fitted_lines now stores a list of lines per class_id
-        self.fitted_lines = {}  # Reset - will store {class_id: [line1, line2, ...]}
-        
-        line_names = {
-            DASHED_WHITE_LINE: "Dashed White",
-            DASHED_YELLOW_LINE: "Dashed Yellow",
-            SOLID_WHITE_LINE: "Solid White",
-            SOLID_YELLOW_LINE: "Solid Yellow",
-            STOP_LINE: "Stop Line"
-        }
-        
-        all_vertical_lines = []  # Store all individual lines for lane detection
-        
-        for class_id, points in self.accumulated_line_points.items():
-            if len(points) < 50:
-                continue
-            
-            line_name = line_names.get(class_id, f"Line {class_id}")
-            
-            # Use clustering to separate multiple lines of same class
-            clusters = cluster_line_points(points, eps=40, min_samples=30)
-            
-            if not clusters:
-                # Fallback: try fitting single line
-                line_params = fit_line_ransac(points)
-                if line_params is not None:
-                    self.fitted_lines[class_id] = [line_params]
-                    print(f"✓ Fitted {line_name}: 1 line, slope={line_params['slope']:.2f}")
-                    if class_id != STOP_LINE:
-                        all_vertical_lines.append((class_id, line_params))
-            else:
-                fitted_lines_list = []
-                for i, cluster_points in enumerate(clusters):
-                    line_params = fit_line_ransac(cluster_points.tolist())
-                    if line_params is not None:
-                        fitted_lines_list.append(line_params)
-                        print(f"✓ Fitted {line_name} #{i+1}: slope={line_params['slope']:.2f}")
-                        if class_id != STOP_LINE:
-                            all_vertical_lines.append((class_id, line_params))
-                
-                if fitted_lines_list:
-                    self.fitted_lines[class_id] = fitted_lines_list
-        
-        print(f"\n📊 Total vertical lines found: {len(all_vertical_lines)}")
-        
-        # Step B: Identify lanes and assign rules
-        # Sort all vertical lines by their x-position at middle of frame
-        if len(all_vertical_lines) >= 2:
-            y_mid = 500  # Middle height reference
-            
-            def get_x_at_y(line_params, y):
-                """Calculate x position at given y"""
-                if abs(line_params['slope']) < 0.001:
-                    return float('inf')
-                return (y - line_params['intercept']) / line_params['slope']
-            
-            all_vertical_lines.sort(key=lambda x: get_x_at_y(x[1], y_mid))
-            
-            # Create lanes between consecutive lines
-            for i in range(len(all_vertical_lines) - 1):
-                left_line_id, left_line = all_vertical_lines[i]
-                right_line_id, right_line = all_vertical_lines[i+1]
-                
-                # Check if lines are close enough to form a lane (not too wide)
-                left_x = get_x_at_y(left_line, y_mid)
-                right_x = get_x_at_y(right_line, y_mid)
-                lane_width = right_x - left_x
-                
-                if lane_width < 50 or lane_width > 400:  # Skip if too narrow or too wide
+    v0x, v0y = float(vref[0]), float(vref[1])
+    v0n = np.hypot(v0x, v0y) + 1e-9
+    v0x /= v0n
+    v0y /= v0n
+
+    steps = []
+    for (x0, y0), (x1, y1) in zip(positions[:-1], positions[1:]):
+        dx = float(x1 - x0)
+        dy = float(y1 - y0)
+        if np.hypot(dx, dy) < STEP_DMIN:
+            continue
+        steps.append((dx, dy))
+
+    if len(steps) < max(6, MIN_ACTION_FRAMES // 2):
+        return "UNKNOWN", {"magSum": 0.0, "dxMed": 0.0, "dyMed": 0.0, "dot": 0.0, "cross": 0.0, "angle": 0.0, "used": float(len(steps))}
+
+    # rough motion
+    dx0 = float(np.median([s[0] for s in steps]))
+    dy0 = float(np.median([s[1] for s in steps]))
+    if (dx0 * dx0 + dy0 * dy0) < 1e-6:
+        return "UNKNOWN", {"magSum": 0.0, "dxMed": dx0, "dyMed": dy0, "dot": 0.0, "cross": 0.0, "angle": 0.0, "used": float(len(steps))}
+
+    # flip vref to face forward along motion
+    if (dx0 * v0x + dy0 * v0y) < 0:
+        v0x, v0y = -v0x, -v0y
+
+    # keep forward steps
+    fsteps = []
+    mag_sum = 0.0
+    for dx, dy in steps:
+        if (dx * v0x + dy * v0y) <= 0.0:
+            continue
+        fsteps.append((dx, dy))
+        mag_sum += float(np.hypot(dx, dy))
+
+    if len(fsteps) < max(6, MIN_ACTION_FRAMES // 2) or mag_sum < MIN_MOVE_MAG_SUM:
+        return "UNKNOWN", {"magSum": mag_sum, "dxMed": dx0, "dyMed": dy0, "dot": 0.0, "cross": 0.0, "angle": 0.0, "used": float(len(fsteps))}
+
+    dx_med = float(np.median([s[0] for s in fsteps]))
+    dy_med = float(np.median([s[1] for s in fsteps]))
+    vn = np.hypot(dx_med, dy_med) + 1e-9
+    vx = dx_med / vn
+    vy = dy_med / vn
+
+    dot = float(vx * v0x + vy * v0y)
+    dot = max(-1.0, min(1.0, dot))
+    cross = float(v0x * vy - v0y * vx)  # >0 => RIGHT , <0 => LEFT
+    angle = float(np.degrees(np.arctan2(abs(cross), dot)))
+
+    if angle <= STRAIGHT_ANGLE_DEG:
+        act = "STRAIGHT"
+    elif angle >= TURN_ANGLE_DEG:
+        act = "RIGHT" if cross > 0 else "LEFT"
+    else:
+        act = "STRAIGHT"  # bias to STRAIGHT
+
+    return act, {
+        "magSum": mag_sum,
+        "dxMed": dx_med,
+        "dyMed": dy_med,
+        "dot": dot,
+        "cross": cross,
+        "angle": angle,
+        "used": float(len(fsteps)),
+        "refX": float(v0x),
+        "refY": float(v0y),
+    }
+
+
+# =========================
+# TRACK STATE
+# =========================
+@dataclass
+class TrackState:
+    positions: List[Tuple[float, float]] = field(default_factory=list)
+    last_lane: Optional[int] = None
+    wrong_dir_violation: bool = False
+    touch_violation: bool = False
+    dbg_text: str = ""
+    dbg_time: float = 0.0
+
+
+# =========================
+# HUD
+# =========================
+def draw_info_panel(frame, status: str, fps: float, wrong: int, cham: int,
+                    calibrating: bool, remain_s: float = 0.0, debug_on: bool = False):
+    cv2.rectangle(frame, (10, 10), (520, 180), (0, 0, 0), -1)
+    cv2.rectangle(frame, (10, 10), (520, 180), (255, 255, 255), 2)
+
+    if calibrating:
+        cv2.putText(frame, "STATUS: CALIBRATING (SHOW ALL MASKS)", (25, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+        cv2.putText(frame, f"Remaining: {remain_s:.1f}s", (25, 75),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    else:
+        cv2.putText(frame, f"STATUS: {status}", (25, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+
+    cv2.putText(frame, f"FPS: {fps:.1f}", (25, 110),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+    cv2.putText(frame, f"WrongDir: {wrong}", (25, 145),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
+    cv2.putText(frame, f"ChamVach: {cham}", (260, 145),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
+    cv2.putText(frame, f"DEBUG: {'ON' if debug_on else 'OFF'} (press 'd')", (25, 175),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+
+# =========================
+# MAIN
+# =========================
+def run(video_path: str = VIDEO_PATH, model_path: str = MODEL_PATH):
+    model = YOLO(model_path)
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # accumulate polygons in calibration phase
+    poly_acc: Dict[int, List[np.ndarray]] = {
+        cid: [] for cid in (ARROW_CLASSES | {DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW, STOPLINE_ID})
+    }
+
+    union_line: Dict[int, Optional[np.ndarray]] = {DASH_WHITE: None, DASH_YELLOW: None, SOLID_WHITE: None, SOLID_YELLOW: None}
+    union_stop: Optional[np.ndarray] = None
+
+    stop_cal = StoplineCalibrator(duration=CALIBRATION_DURATION_SEC)
+    stop_cal.start()
+
+    all_lines: List[FrozenLine] = []
+    lane_boundaries: List[FrozenLine] = []
+    lane_rules: Dict[int, Set[str]] = {}
+    lane_ref_vecs: Dict[int, Tuple[float, float]] = {}
+
+    stopline_segment: Optional[Tuple[Tuple[int, int], Tuple[int, int], Tuple[float, float, float], int, int]] = None
+    stop_vref: Tuple[float, float] = (0.0, -1.0)
+
+    tracks: Dict[int, TrackState] = {}
+    wrong_count = 0
+    cham_count = 0
+
+    t0 = time.time()
+    fps_t0 = time.time()
+    fps_cnt = 0
+    fps_now = 0.0
+    is_frozen = False
+
+    debug_on = DEBUG_DEFAULT
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        now = time.time()
+        elapsed = now - t0
+        calibrating = (elapsed < CALIBRATION_DURATION_SEC) and (not is_frozen)
+        remain = max(0.0, CALIBRATION_DURATION_SEC - elapsed)
+
+        fps_cnt += 1
+        if now - fps_t0 >= 1.0:
+            fps_now = fps_cnt / (now - fps_t0)
+            fps_cnt = 0
+            fps_t0 = now
+
+        # predict vs track
+        if calibrating:
+            results = model.predict(frame, imgsz=IMG_SIZE, conf=CONF_CALIB, verbose=False)
+        else:
+            results = model.track(
+                frame, imgsz=IMG_SIZE, conf=CONF_TRACK, iou=IOU_THRESHOLD,
+                persist=True, tracker=TRACKER, verbose=False
+            )
+
+        r0 = results[0]
+        vis = frame.copy()
+
+        masks_xy = None
+        masks_data = None
+        if r0.masks is not None:
+            if hasattr(r0.masks, "xy") and r0.masks.xy is not None:
+                masks_xy = r0.masks.xy
+            if hasattr(r0.masks, "data") and r0.masks.data is not None:
+                masks_data = r0.masks.data.cpu().numpy()
+
+        if r0.boxes is None or len(r0.boxes) == 0:
+            boxes = np.zeros((0, 4), dtype=np.float32)
+            cls_ids = np.zeros((0,), dtype=np.int32)
+            tids = np.zeros((0,), dtype=np.int32)
+        else:
+            boxes = r0.boxes.xyxy.cpu().numpy().astype(np.float32)
+            cls_ids = r0.boxes.cls.cpu().numpy().astype(np.int32)
+            tids = (
+                r0.boxes.id.cpu().numpy().astype(np.int32)
+                if (hasattr(r0.boxes, "id") and r0.boxes.id is not None)
+                else np.array([-1] * len(cls_ids), dtype=np.int32)
+            )
+
+        # ================= CALIBRATION (5s) =================
+        if calibrating:
+            # show all masks overlays and accumulate polygons
+            if masks_xy is not None:
+                for i, cid in enumerate(cls_ids):
+                    cid = int(cid)
+                    if cid not in poly_acc:
+                        continue
+                    if i >= len(masks_xy):
+                        continue
+                    poly = np.array(masks_xy[i], dtype=np.int32)
+                    if poly is None or len(poly) < 3:
+                        continue
+
+                    poly_acc[cid].append(poly)
+
+                    if cid in ARROW_CLASSES:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(255, 120, 255), alpha=0.25,
+                                                   border_color=COLOR_ARROW, border_thickness=1)
+                    elif cid == DASH_WHITE:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(180, 255, 255), alpha=0.25,
+                                                   border_color=COLOR_DASH_WHITE, border_thickness=2)
+                    elif cid == DASH_YELLOW:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(160, 220, 255), alpha=0.25,
+                                                   border_color=COLOR_DASH_YELLOW, border_thickness=2)
+                    elif cid == SOLID_WHITE:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(120, 120, 255), alpha=0.25,
+                                                   border_color=COLOR_SOLID_WHITE, border_thickness=2)
+                    elif cid == SOLID_YELLOW:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(120, 180, 255), alpha=0.25,
+                                                   border_color=COLOR_SOLID_YELLOW, border_thickness=2)
+                    elif cid == STOPLINE_ID:
+                        vis = draw_polygon_overlay(vis, poly, fill_color=(255, 180, 180), alpha=0.30,
+                                                   border_color=COLOR_STOPLINE, border_thickness=2)
+
+            # build union masks for lines + stopline
+            if masks_data is not None and masks_data.shape[0] == len(cls_ids):
+                for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
+                    idxs = np.where(cls_ids == cls_line)[0]
+                    if len(idxs) > 0:
+                        m = masks_data[idxs].max(axis=0)
+                        m01 = smooth_binary(mask_data_to_binary(m, fw, fh, thr=0.5))
+                        union_line[cls_line] = m01 if union_line[cls_line] is None else (union_line[cls_line] | m01)
+
+                idx39 = np.where(cls_ids == STOPLINE_ID)[0]
+                if len(idx39) > 0:
+                    m = masks_data[idx39].max(axis=0)
+                    m01 = smooth_binary(mask_data_to_binary(m, fw, fh, thr=0.5))
+                    union_stop = m01 if union_stop is None else (union_stop | m01)
+                    stop_cal.add_mask_points(m01)
+
+            stop_cal.maybe_finish(fh, fw)
+            draw_info_panel(vis, "CALIBRATING", fps_now, wrong_count, cham_count, True, remain, debug_on)
+
+        # ================= FREEZE AFTER 5s =================
+        if (not calibrating) and (not is_frozen):
+            # finalize stopline if needed
+            if not stop_cal.is_calibrated() and union_stop is not None:
+                stop_cal.add_mask_points(union_stop)
+                stop_cal.maybe_finish(fh, fw, min_points=600)
+
+            if stop_cal.is_calibrated():
+                a, b, c = stop_cal.line_abc
+                if abs(b) > 1e-9:
+                    y1 = int(-(a * stop_cal.min_x + c) / b)
+                    y2 = int(-(a * stop_cal.max_x + c) / b)
+                    y1 = max(0, min(fh - 1, y1))
+                    y2 = max(0, min(fh - 1, y2))
+                    stopline_segment = ((stop_cal.min_x, y1), (stop_cal.max_x, y2), (a, b, c),
+                                        stop_cal.min_x, stop_cal.max_x)
+                    stop_vref = (float(a), float(b))  # normal
+
+            all_lines = []
+            for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
+                all_lines.extend(extract_component_lines(union_line.get(cls_line), cls_line, fw, fh))
+
+            # lane boundaries: ONLY dash_white + solid_white
+            lane_boundaries = [ln for ln in all_lines if ln.cls_id in (DASH_WHITE, SOLID_WHITE)]
+
+            # sort boundaries by x at a reference y
+            y_ref = 0.75 * fh
+            tmp = []
+            for ln in lane_boundaries:
+                x = ln.x_at(y_ref)
+                if x is None or not np.isfinite(x):
                     continue
-                
-                # Find arrow rule for this lane
-                lane_rule = self.find_lane_rule(left_line, right_line)
-                
-                self.lanes.append({
-                    'left_line_id': left_line_id,
-                    'right_line_id': right_line_id,
-                    'left_line': left_line,
-                    'right_line': right_line,
-                    'rule': lane_rule,
-                    'lane_id': len(self.lanes)
-                })
-                
-                rule_name = ARROW_NAMES.get(lane_rule, 'No Rule') if lane_rule else 'No Rule'
-                print(f"✓ Lane {len(self.lanes)}: width={lane_width:.0f}px, Rule = {rule_name}")
-        
-        self.is_initialized = True
-        print("="*70)
-        print(f"✓ STATIC MAP FROZEN - {len(self.lanes)} lanes detected")
-        print("✓ Violation detection now ACTIVE")
-        print("="*70 + "\n")
-    
-    
-    def find_lane_rule(self, left_line, right_line):
-        """
-        Find which arrow rule applies to a lane by checking arrow centroids
-        """
-        for arrow_class, masks in self.accumulated_arrow_masks.items():
-            if len(masks) == 0:
-                continue
-            
-            # Combine all masks for this arrow type
-            combined_mask = np.sum(masks, axis=0)
-            combined_mask = (combined_mask > 0).astype(np.uint8)
-            
-            # Get centroid
-            centroid = get_centroid(combined_mask)
-            if centroid is None:
-                continue
-            
-            # Check if centroid is in this lane
-            if check_point_in_lane(centroid, left_line, right_line, tolerance=50):
-                return arrow_class
-        
-        return None
-    
-    
-    def detect_violations(self, frame, results):
-        """
-        Stage 2: Real-time violation detection
-        """
-        violations = []
-        
-        if results[0].boxes is None or len(results[0].boxes) == 0:
-            return violations
-        
-        boxes = results[0].boxes
-        
-        for box in boxes:
-            class_id = int(box.cls[0])
-            
-            # Only process vehicles
-            if class_id not in [CAR, MOTORCYCLE, AMBULANCE, FIRE_TRUCK, POLICE_CAR]:
-                continue
-            
-            # Get tracking ID
-            track_id = int(box.id[0]) if box.id is not None else None
-            if track_id is None:
-                continue
-            
-            # Calculate bottom-center point (wheel position)
-            xyxy = box.xyxy[0].cpu().numpy()
-            x_center = (xyxy[0] + xyxy[2]) / 2
-            y_bottom = xyxy[3]
-            bottom_center = (int(x_center), int(y_bottom))
-            
-            # Initialize or update trajectory
-            if track_id not in self.tracked_vehicles:
-                self.tracked_vehicles[track_id] = {
-                    'trajectory': deque(maxlen=30),
-                    'class': class_id,
-                    'prev_point': None,
-                    'crossed_stopline': False,
-                    'lane_at_cross': None
-                }
-            
-            vehicle_data = self.tracked_vehicles[track_id]
-            vehicle_data['trajectory'].append(bottom_center)
-            
-            # Check if crossing stop line
-            if STOP_LINE in self.fitted_lines and len(self.fitted_lines[STOP_LINE]) > 0:
-                stopline = self.fitted_lines[STOP_LINE][0]  # Use first stopline
-                
-                if vehicle_data['prev_point'] is not None:
-                    if check_cross_stopline(vehicle_data['prev_point'], 
-                                          bottom_center, stopline):
-                        
-                        if not vehicle_data['crossed_stopline']:
-                            vehicle_data['crossed_stopline'] = True
-                            
-                            # Determine which lane vehicle is in
-                            current_lane = None
-                            for lane in self.lanes:
-                                if check_point_in_lane(bottom_center, 
-                                                      lane['left_line'], 
-                                                      lane['right_line']):
-                                    current_lane = lane
-                                    break
-                            
-                            vehicle_data['lane_at_cross'] = current_lane
-                            
-                            # Analyze action after sufficient trajectory
-                            if len(vehicle_data['trajectory']) >= 10:
-                                action = calculate_action_from_trajectory(
-                                    list(vehicle_data['trajectory'])
-                                )
-                                
-                                # Check for violation
-                                if current_lane and class_id not in PRIORITY_VEHICLES:
-                                    is_violation = self.check_lane_violation(
-                                        action, current_lane['rule']
-                                    )
-                                    
-                                    if is_violation:
-                                        violations.append({
-                                            'track_id': track_id,
-                                            'bbox': xyxy,
-                                            'action': action,
-                                            'required': ARROW_NAMES.get(
-                                                current_lane['rule'], 'Unknown'
-                                            ),
-                                            'lane_id': current_lane['lane_id']
-                                        })
-                                        
-                                        self.violation_log.append({
-                                            'frame': self.frame_count,
-                                            'track_id': track_id,
-                                            'action': action,
-                                            'lane_rule': current_lane['rule']
-                                        })
-                                        
-                                        print(f"⚠️  VIOLATION DETECTED: Vehicle {track_id} "
-                                              f"- Action: {action}, Required: "
-                                              f"{ARROW_NAMES.get(current_lane['rule'], 'Unknown')}")
-            
-            vehicle_data['prev_point'] = bottom_center
-        
-        return violations
-    
-    
-    def check_lane_violation(self, action, lane_rule):
-        """
-        Check if vehicle action violates lane rule
-        """
-        if lane_rule == ARROW_LEFT:
-            return action != "ACTION_LEFT"
-        elif lane_rule == ARROW_RIGHT:
-            return action != "ACTION_RIGHT"
-        elif lane_rule == ARROW_STRAIGHT:
-            return action != "ACTION_STRAIGHT"
-        elif lane_rule == ARROW_STRAIGHT_AND_LEFT:
-            return action == "ACTION_RIGHT"
-        elif lane_rule == ARROW_STRAIGHT_AND_RIGHT:
-            return action == "ACTION_LEFT"
-        
-        return False
-    
-    
-    def visualize_frame(self, frame, results, violations):
-        """
-        Draw visualization on frame
-        """
-        vis_frame = frame.copy()
-        
-        # During initialization: Draw mask overlays for lane lines and arrows
-        if not self.is_initialized:
-            # Define colors for each class (BGR format)
-            mask_colors = {
-                SOLID_WHITE_LINE: (0, 0, 255),      # Red
-                SOLID_YELLOW_LINE: (0, 0, 255),    # Red
-                DASHED_WHITE_LINE: (0, 255, 255),  # Yellow
-                DASHED_YELLOW_LINE: (0, 255, 255), # Yellow
-                STOP_LINE: (255, 0, 0),            # Blue
-                ARROW_LEFT: (0, 255, 0),           # Green
-                ARROW_RIGHT: (0, 255, 0),          # Green
-                ARROW_STRAIGHT: (0, 255, 0),       # Green
-                ARROW_STRAIGHT_AND_LEFT: (0, 255, 0),
-                ARROW_STRAIGHT_AND_RIGHT: (0, 255, 0)
-            }
-            
-            # Create overlay for masks
-            overlay = vis_frame.copy()
-            
-            for class_id, mask in self.current_frame_masks.items():
-                if class_id in mask_colors:
-                    color = mask_colors[class_id]
-                    # Create colored mask
-                    mask_binary = (mask > 0.5).astype(np.uint8)
-                    contours, _ = cv2.findContours(mask_binary, cv2.RETR_EXTERNAL, 
-                                                   cv2.CHAIN_APPROX_SIMPLE)
-                    cv2.drawContours(overlay, contours, -1, color, -1)
-                    
-                    # Draw contour outline
-                    cv2.drawContours(vis_frame, contours, -1, color, 2)
-            
-            # Blend overlay with original frame
-            alpha = 0.3  # Transparency
-            vis_frame = cv2.addWeighted(overlay, alpha, vis_frame, 1 - alpha, 0)
-            
-            # Show calibration progress bar
-            time_elapsed = self.frame_count / self.fps
-            progress = min(time_elapsed / self.initialization_time, 1.0)
-            bar_width = int(400 * progress)
-            cv2.rectangle(vis_frame, (10, 120), (410, 140), (100, 100, 100), -1)
-            cv2.rectangle(vis_frame, (10, 120), (10 + bar_width, 140), (0, 255, 0), -1)
-            cv2.putText(vis_frame, f"Calibrating: {progress*100:.0f}%", (10, 160),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        if self.is_initialized:
-            # Draw fitted lines (each class may have multiple lines)
-            for class_id, lines_list in self.fitted_lines.items():
-                color = LINE_COLORS.get(class_id, (255, 255, 255))
-                thickness = 4 if class_id == STOP_LINE else 3
-                # lines_list is now a list of line_params
-                for line_params in lines_list:
-                    draw_fitted_line(vis_frame, line_params, color, thickness)
-            
-            # Draw lane rules
-            for lane in self.lanes:
-                # Calculate middle position of lane for text
-                y_mid = int((lane['left_line']['y_min'] + 
-                            lane['left_line']['y_max']) / 2)
-                x_left = int((y_mid - lane['left_line']['intercept']) / 
-                            lane['left_line']['slope'])
-                x_right = int((y_mid - lane['right_line']['intercept']) / 
-                             lane['right_line']['slope'])
-                x_mid = (x_left + x_right) // 2
-                
-                rule_text = ARROW_NAMES.get(lane['rule'], "Unknown")
-                cv2.putText(vis_frame, rule_text, (x_mid - 80, y_mid),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            # Draw violations
-            for violation in violations:
-                bbox = violation['bbox']
-                x1, y1, x2, y2 = map(int, bbox)
-                
-                # Red box for violating vehicle
-                cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                
-                # "WRONG LANE" text
-                cv2.putText(vis_frame, "WRONG LANE", (x1, y1 - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-        
-        # Add status text
-        status = "MONITORING" if self.is_initialized else "INITIALIZING"
-        color = (0, 255, 0) if self.is_initialized else (0, 165, 255)
-        cv2.putText(vis_frame, f"Status: {status}", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-        
-        time_elapsed = self.frame_count / self.fps
-        cv2.putText(vis_frame, f"Time: {time_elapsed:.1f}s", (10, 70),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        
-        if self.is_initialized:
-            cv2.putText(vis_frame, f"Violations: {len(self.violation_log)}", 
-                       (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        
-        return vis_frame
-    
-    
-    def process_video(self):
-        """
-        Main processing loop
-        """
-        cap = cv2.VideoCapture(self.video_path)
-        
-        if not cap.isOpened():
-            print("❌ Error: Cannot open video file")
-            return
-        
-        # Get video properties
-        self.fps = int(cap.get(cv2.CAP_PROP_FPS))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        print(f"\n📹 Video Info: {width}x{height} @ {self.fps} FPS")
-        print(f"📊 Total Frames: {total_frames}")
-        print(f"⏱️  Duration: {total_frames/self.fps:.1f} seconds\n")
-        
-        # Setup video writer if output path specified
-        writer = None
-        if self.output_path:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, 
-                                    (width, height))
-        
-        initialization_frames = self.initialization_time * self.fps
-        
-        print("🚀 Starting processing...\n")
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                self.frame_count += 1
-                
-                # Run YOLO detection with tracking
-                results = self.model.track(frame, persist=True, verbose=False,
-                                          imgsz=640, conf=0.3)
-                
-                # Stage 1: Accumulation phase
-                if not self.is_initialized:
-                    self.accumulate_masks(results)
-                    
-                    # Check if initialization period is complete
-                    if self.frame_count >= initialization_frames:
-                        self.freeze_static_map()
-                
-                # Stage 2: Violation detection
-                violations = []
-                if self.is_initialized:
-                    violations = self.detect_violations(frame, results)
-                
-                # Visualization
-                vis_frame = self.visualize_frame(frame, results, violations)
-                
-                # Display
-                cv2.imshow('Lane Violation Detection', vis_frame)
-                
-                # Write to output
-                if writer:
-                    writer.write(vis_frame)
-                
-                # Progress indicator
-                if self.frame_count % 30 == 0:
-                    progress = (self.frame_count / total_frames) * 100
-                    print(f"Progress: {progress:.1f}% - Frame {self.frame_count}/{total_frames}")
-                
-                # Exit on 'q' key
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    print("\n⚠️  Processing interrupted by user")
-                    break
-        
-        except KeyboardInterrupt:
-            print("\n⚠️  Processing interrupted by user")
-        
-        finally:
-            # Cleanup
-            cap.release()
-            if writer:
-                writer.release()
-            cv2.destroyAllWindows()
-            
-            # Print summary
-            print("\n" + "="*70)
-            print("PROCESSING COMPLETE")
-            print("="*70)
-            print(f"📊 Total Frames Processed: {self.frame_count}")
-            print(f"⚠️  Total Violations Detected: {len(self.violation_log)}")
-            if self.output_path:
-                print(f"💾 Output saved to: {self.output_path}")
-            print("="*70 + "\n")
+                tmp.append((float(x), ln))
+            tmp.sort(key=lambda t: t[0])
+            lane_boundaries = [ln for _, ln in tmp]
 
+            lane_rules = build_lane_rules_from_arrows(poly_acc, lane_boundaries)
+            lane_ref_vecs = build_lane_ref_vectors(lane_boundaries, fh)
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
+            is_frozen = True
+            print("[✓] FROZEN READY")
+            print(f"  Stopline: {'OK' if stopline_segment is not None else 'MISSING'}")
+            print(f"  Lane boundaries: {len(lane_boundaries)} | lanes: {max(0, len(lane_boundaries)-1)}")
+            for li in range(max(0, len(lane_boundaries) - 1)):
+                allowed = lane_rules.get(li, set())
+                print(f"  Lane {li}: {allowed_to_label(allowed)}")
+                if li in lane_ref_vecs:
+                    v = lane_ref_vecs[li]
+                    print(f"    refVec=({v[0]:.3f},{v[1]:.3f})")
+            if stopline_segment is not None:
+                a_s, b_s, _ = stopline_segment[2]
+                print(f"  Stopline normal v0=(a,b)=({a_s:.4f},{b_s:.4f})")
+                print(f"  STRAIGHT_ANGLE_DEG={STRAIGHT_ANGLE_DEG:.1f} | TURN_ANGLE_DEG={TURN_ANGLE_DEG:.1f} | SAFE_STRAIGHT_MAX={SAFE_STRAIGHT_MAX:.1f}")
 
-def main():
-    """
-    Main execution function
-    """
-    from config.config import Config
-    
-    # Configuration from Config
-    MODEL_PATH = Config.MODEL_PATH
-    VIDEO_PATH = Config.DEFAULT_VIDEO
-    OUTPUT_PATH = Config.OUTPUT_VIDEO
-    
-    print("\n" + "="*70)
-    print("LANE VIOLATION DETECTION SYSTEM")
-    print("="*70 + "\n")
-    
-    # Initialize detector
-    detector = LaneViolationDetector(
-        model_path=MODEL_PATH,
-        video_path=VIDEO_PATH,
-        output_path=OUTPUT_PATH
-    )
-    
-    # Process video
-    detector.process_video()
+        # ================= MONITORING =================
+        if is_frozen:
+            # draw stopline
+            if stopline_segment is not None:
+                p1, p2, _, _, _ = stopline_segment
+                cv2.line(vis, p1, p2, COLOR_STOPLINE, 3)
+
+            # draw lane boundaries
+            draw_lines(vis, lane_boundaries, thickness=3)
+
+            # lane labels
+            y_label = int(0.80 * fh)
+            xs_lab = []
+            for ln in lane_boundaries:
+                x = ln.x_at(y_label)
+                if x is not None and np.isfinite(x):
+                    xs_lab.append(float(x))
+            xs_lab.sort()
+            for i in range(len(xs_lab) - 1):
+                cx = int((xs_lab[i] + xs_lab[i + 1]) / 2.0)
+                allowed = lane_rules.get(i, set())
+                cv2.putText(vis, f"Lane {i}: {allowed_to_label(allowed)}",
+                            (max(10, cx - 160), y_label),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+            # cham vach only SOLID lines
+            solid_lines_for_touch = [ln for ln in all_lines if ln.cls_id in (SOLID_WHITE, SOLID_YELLOW)]
+
+            # stopline signed distance
+            if stopline_segment is not None:
+                a_s, b_s, c_s = stopline_segment[2]
+                flip = stop_cal.sign_flip
+            else:
+                a_s = b_s = c_s = 0.0
+                flip = 1.0
+
+            # process tracked vehicles
+            for xyxy, cid, tid in zip(boxes, cls_ids, tids):
+                cid = int(cid)
+                tid = int(tid)
+                if tid < 0 or cid not in VEHICLE_CLASSES:
+                    continue
+
+                x1, y1, x2, y2 = [float(v) for v in xyxy]
+                px = (x1 + x2) / 2.0
+                py = y2  # bottom center
+
+                st = tracks.get(tid)
+                if st is None:
+                    st = TrackState()
+                    tracks[tid] = st
+
+                st.positions.append((px, py))
+                if len(st.positions) > 180:
+                    st.positions.pop(0)
+
+                lane_now = lane_of_point_by_y(px, py, lane_boundaries)
+                if lane_now is not None:
+                    st.last_lane = lane_now
+
+                # ---- Cham Vach ----
+                if (not st.touch_violation) and (cid not in PRIORITY_VEHICLES):
+                    if cham_vach_for_bbox(x1, y1, x2, y2, solid_lines_for_touch):
+                        st.touch_violation = True
+                        cham_count += 1
+                        if debug_on:
+                            print(f"[CHAMVACH] ID={tid}")
+
+                # ---- WrongDir only at CROSS stopline ----
+                if (not st.wrong_dir_violation) and (stopline_segment is not None) and (cid not in PRIORITY_VEHICLES):
+                    if len(st.positions) >= 2:
+                        px_prev, py_prev = st.positions[-2]
+                        s_prev = signed_distance(px_prev, py_prev, a_s, b_s, c_s) * flip
+                        s_curr = signed_distance(px, py, a_s, b_s, c_s) * flip
+
+                        r_prev = -1 if s_prev < 0 else +1
+                        r_curr = -1 if s_curr < 0 else +1
+
+                        crossed = (r_prev == -1 and r_curr == +1)
+                        if crossed:
+                            lane_before = lane_of_point_by_y(px_prev, py_prev, lane_boundaries)
+                            if lane_before is None:
+                                lane_before = st.last_lane
+
+                            allowed = lane_rules.get(lane_before, set()) if lane_before is not None else set()
+
+                            hist = st.positions[:-1]
+                            win = hist[-ACTION_WINDOW:] if len(hist) >= ACTION_WINDOW else hist
+
+                            # choose reference: per-lane ref vector if available, else stopline normal
+                            ref = lane_ref_vecs.get(lane_before, stop_vref)
+                            act, stats = robust_direction_by_ref_vector(win, ref)
+                            ref_used = "LANE" if lane_before in lane_ref_vecs else "STOP"
+
+                            # SAFEGUARD: if STRAIGHT is allowed and the angle is not too large => force STRAIGHT
+                            if allowed and "STRAIGHT" in allowed and act in {"LEFT", "RIGHT"} and stats.get("angle", 999.0) < SAFE_STRAIGHT_MAX:
+                                act = "STRAIGHT"
+
+                            dbg = (
+                                f"ID={tid} laneB={lane_before} allow={allowed_to_label(allowed)} "
+                                f"act={act} angle={stats.get('angle',0):.1f} "
+                                f"ref={ref_used} vRef=({stats.get('refX',0):.2f},{stats.get('refY',0):.2f}) "
+                                f"dot={stats.get('dot',0):.3f} cross={stats.get('cross',0):.3f} "
+                                f"dxMed={stats.get('dxMed',0):.2f} dyMed={stats.get('dyMed',0):.2f} "
+                                f"magSum={stats.get('magSum',0):.1f} used={stats.get('used',0):.0f} "
+                                f"sPrev={s_prev:.2f} sCur={s_curr:.2f}"
+                            )
+
+                            if debug_on:
+                                print(f"[CROSS] {dbg}")
+
+                            if allowed and act != "UNKNOWN":
+                                if act not in allowed:
+                                    st.wrong_dir_violation = True
+                                    wrong_count += 1
+                                    st.dbg_text = dbg
+                                    st.dbg_time = time.time()
+                                    if debug_on:
+                                        print(f"[WRONGDIR] {dbg}")
+
+                # ---- Draw bbox ----
+                col = COLOR_SAFE
+                label = f"ID:{tid}"
+
+                if st.wrong_dir_violation:
+                    col = COLOR_VIOLATION
+                    label = f"SAI HUONG | ID:{tid}"
+                elif st.touch_violation:
+                    col = COLOR_VIOLATION
+                    label = f"CHAM VACH | ID:{tid}"
+
+                cv2.rectangle(vis, (int(x1), int(y1)), (int(x2), int(y2)), col, 2)
+                cv2.circle(vis, (int(px), int(py)), 4, col, -1)
+                cv2.putText(vis, label, (int(x1), max(20, int(y1) - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
+
+                # Debug overlay
+                if debug_on:
+                    allow_now = allowed_to_label(lane_rules.get(lane_now, set()))
+                    cv2.putText(vis, f"laneNow={lane_now} allowNow={allow_now}",
+                                (int(x1), int(y2) + 18),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+
+                # show last CROSS debug 3s
+                if debug_on and st.dbg_text and (time.time() - st.dbg_time) < 3.0:
+                    s = st.dbg_text
+                    cv2.putText(vis, s[:120], (int(x1), int(y2) + 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                    cv2.putText(vis, s[120:240], (int(x1), int(y2) + 58),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+
+            draw_info_panel(vis, "MONITORING", fps_now, wrong_count, cham_count, False, 0.0, debug_on)
+
+        cv2.imshow(WINDOW_NAME, vis)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            break
+        if key == ord("d"):
+            debug_on = not debug_on
+
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"Done. WrongDir={wrong_count} | ChamVach={cham_count}")
 
 
 if __name__ == "__main__":
-    main()
+    run()

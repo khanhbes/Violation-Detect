@@ -38,7 +38,7 @@ GIAI ĐOẠN 1: KHỞI TẠO & MÔ HÌNH HÓA MÔI TRƯỜNG (0s - 5s)
 Mục tiêu: Tạo ra một bản đồ số cố định (Static Map) từ các mask rung nhiễu của AI.
 Logic:
 1. Trong 5 giây đầu, chạy model YOLO Segmentation nhưng KHÔNG bắt lỗi.
-2. Tích lũy (Accumulate) các điểm pixel từ mask của các class Vạch kẻ (Lines) và Mũi tên (Arrows).
+2. Tích lũy (Accumulate) các điểm pixel từ mask của tất cả các class trên
 3. Tại giây thứ 5, thực hiện "ĐÓNG BĂNG" (Freeze) và xử lý hình học:
    A. Xử lý Vạch kẻ (Line Fitting):
       - Với mỗi nhóm điểm mask của vạch kẻ và stopline: Sử dụng thuật toán RANSAC (hoặc PCA) để tìm ra đường thẳng trung bình tốt nhất (y = ax + b) đi qua đám mây điểm đó.
@@ -47,6 +47,7 @@ Logic:
         + Solid lines (37, 38): Màu ĐỎ.
         + Dashed lines (7, 8): Màu VÀNG.
         + Stopline (39): Màu XANH DƯƠNG (Blue).
+      - Mỗi class vạch kẻ chỉ có 1 đường thẳng
    B. Xử lý Làn đường & Gán luật (Lane Mapping):
       - Xác định "Làn đường" (Lane Area) là vùng không gian nằm giữa 2 đường kẻ dọc.
       - Kiểm tra tọa độ tâm (Centroid) của các mask Mũi tên (Class 1-5).
@@ -81,3 +82,4 @@ PHẦN 3: YÊU CẦU OUTPUT VISUALIZATION
 --------------------------------------------------------------------------------
 HÃY VIẾT CODE PYTHON ĐẦY ĐỦ CHO LOGIC TRÊN.
 Tách riêng các hàm xử lý hình học (fit_line, check_point_in_lane) để code dễ đọc.
+Giảm thiểu các mask nhận diện bị "răng cưa" ở viền
