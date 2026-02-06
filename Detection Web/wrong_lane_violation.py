@@ -39,8 +39,9 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Import shared config
+# Import shared config and draw utilities
 from config.config import config
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
 
 
 # =========================
@@ -627,26 +628,19 @@ class TrackState:
 # =========================
 def draw_info_panel(frame, status: str, fps: float, wrong: int, cham: int,
                     calibrating: bool, remain_s: float = 0.0, debug_on: bool = False):
-    cv2.rectangle(frame, (10, 10), (520, 180), (0, 0, 0), -1)
-    cv2.rectangle(frame, (10, 10), (520, 180), (255, 255, 255), 2)
-
+    """HUD sử dụng draw_info_hud thống nhất"""
     if calibrating:
-        cv2.putText(frame, "STATUS: CALIBRATING (SHOW ALL MASKS)", (25, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-        cv2.putText(frame, f"Remaining: {remain_s:.1f}s", (25, 75),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+        # Sử dụng draw_calibration_hud cho giai đoạn calibration
+        progress = (CALIBRATION_DURATION_SEC - remain_s) / CALIBRATION_DURATION_SEC * 100
+        draw_calibration_hud(frame, progress, CALIBRATION_DURATION_SEC)
     else:
-        cv2.putText(frame, f"STATUS: {status}", (25, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-
-    cv2.putText(frame, f"FPS: {fps:.1f}", (25, 110),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
-    cv2.putText(frame, f"WrongDir: {wrong}", (25, 145),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
-    cv2.putText(frame, f"ChamVach: {cham}", (260, 145),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
-    cv2.putText(frame, f"DEBUG: {'ON' if debug_on else 'OFF'} (press 'd')", (25, 175),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Sử dụng draw_info_hud thống nhất
+        hud_lines = [
+            (f"FPS: {fps:.1f}", config.HUD_TEXT_COLOR),
+            (f"WrongDir: {wrong} | ChamVach: {cham}", config.COLOR_VIOLATION),
+            (f"DEBUG: {'ON' if debug_on else 'OFF'} (press 'd')", config.HUD_TEXT_COLOR),
+        ]
+        draw_info_hud(frame, hud_lines, title=f"STATUS: {status}", title_color=config.COLOR_SAFE, width=450)
 
 
 # =========================
@@ -976,21 +970,19 @@ def run(video_path: str = None, model_path: str = None):
                                     if debug_on:
                                         print(f"[WRONGDIR] {dbg}")
 
-                # ---- Draw bbox ----
+                # ---- Draw bbox - sử dụng draw_utils ----
                 col = COLOR_SAFE
-                label = f"ID:{tid}"
+                label = f"Safe ID:{tid}"
 
                 if st.wrong_dir_violation:
                     col = COLOR_VIOLATION
-                    label = f"SAI HUONG | ID:{tid}"
+                    label = f"SAI HUONG ID:{tid}"
                 elif st.touch_violation:
                     col = COLOR_VIOLATION
-                    label = f"CHAM VACH | ID:{tid}"
+                    label = f"CHAM VACH ID:{tid}"
 
-                cv2.rectangle(vis, (int(x1), int(y1)), (int(x2), int(y2)), col, 2)
+                draw_bbox_with_label(vis, (x1, y1, x2, y2), label, col)
                 cv2.circle(vis, (int(px), int(py)), 4, col, -1)
-                cv2.putText(vis, label, (int(x1), max(20, int(y1) - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
 
                 # Debug overlay
                 if debug_on:

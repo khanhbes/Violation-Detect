@@ -17,8 +17,9 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-# Import shared config
+# Import shared config and draw utilities
 from config.config import config
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud
 
 # ================= HELMET-SPECIFIC CONFIG =================
 # These class IDs are specific to helmet detection and not in shared config
@@ -100,37 +101,7 @@ def point_in_bbox(px: float, py: float, b: Tuple[float, float, float, float]) ->
     x1, y1, x2, y2 = b
     return (x1 <= px <= x2) and (y1 <= py <= y2)
 
-def draw_box_tag(frame, bbox, text, color, thickness=3):
-    x1, y1, x2, y2 = map(int, bbox)
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    fs = 0.65
-    th = 2
-    (tw, th_text), _ = cv2.getTextSize(text, font, fs, th)
-    tag_h = th_text + 10
-    tag_w = tw + 14
-
-    tx1, ty1 = x1, max(0, y1 - tag_h - 3)
-    tx2, ty2 = x1 + tag_w, y1
-    cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), color, -1)
-    cv2.putText(frame, text, (tx1 + 7, ty2 - 6), font, fs, (10, 10, 10), th, cv2.LINE_AA)
-
-def put_info_box(frame, lines: List[str], x=15, y=15):
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.6
-    thickness = 2
-    pad = 10
-    line_h = 22
-    widths = [cv2.getTextSize(t, font, font_scale, thickness)[0][0] for t in lines]
-    box_w = max(widths) + pad * 2
-    box_h = line_h * len(lines) + pad
-    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), C_BG, -1)
-    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), C_BORDER, 2)
-    ty = y + pad + 16
-    for t in lines:
-        cv2.putText(frame, t, (x + pad, ty), font, font_scale, (240, 240, 240), thickness, cv2.LINE_AA)
-        ty += line_h
+# draw_box_tag và put_info_box đã được thay thế bởi draw_utils.draw_bbox_with_label và draw_info_hud
 
 
 # ================ STATE ================
@@ -277,14 +248,14 @@ def main():
                 elif cls_id == CLS_PERSON and conf >= CONF_RIDER_FALLBACK:
                     riders.append((bbox, cls_id, conf))
 
-        # Draw rider boxes
+        # Draw rider boxes - sử dụng draw_utils
         for rb, rcls, rconf in riders:
             if rcls == CLS_PERSON_WITH_HELMET:
-                draw_box_tag(frame, rb, f"Helmet {rconf:.2f}", C_HELMET, thickness=2)
+                draw_bbox_with_label(frame, rb, f"Helmet {rconf:.2f}", C_HELMET)
             elif rcls == CLS_PERSON_NO_HELMET:
-                draw_box_tag(frame, rb, f"NoHelmet {rconf:.2f}", C_NO_HELMET, thickness=2)
+                draw_bbox_with_label(frame, rb, f"NoHelmet {rconf:.2f}", C_NO_HELMET)
             else:
-                draw_box_tag(frame, rb, f"Person {rconf:.2f}", C_PERSON, thickness=1)
+                draw_bbox_with_label(frame, rb, f"Person {rconf:.2f}", C_PERSON)
 
         now = time.time()
         vehicles_count = len(motos)
@@ -315,16 +286,16 @@ def main():
                         total_violations += 1
                         print(f"[SNAPSHOT] {out_path}")
 
-            # Display rule
+            # Display rule - sử dụng draw_utils
             if state.safe_latched:
                 live_safe += 1
-                draw_box_tag(frame, moto_bbox, f"Helmet ID {moto_id}", C_GREEN, thickness=3)
+                draw_bbox_with_label(frame, moto_bbox, f"Helmet ID {moto_id}", C_GREEN)
             else:
                 if rider_cls == CLS_PERSON_NO_HELMET:
                     live_violations += 1
-                    draw_box_tag(frame, moto_bbox, f"No Helmet ID {moto_id}", C_RED, thickness=3)
+                    draw_bbox_with_label(frame, moto_bbox, f"No Helmet ID {moto_id}", C_RED)
                 else:
-                    draw_box_tag(frame, moto_bbox, f"Motorcycle ID {moto_id} ...", C_ORANGE, thickness=3)
+                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle ID {moto_id}", C_ORANGE)
 
             if DRAW_DEBUG_ASSOC and state.last_rider_bbox is not None:
                 mx, my = map(int, bbox_center(moto_bbox))
@@ -338,13 +309,14 @@ def main():
         prev_time = cur_time
         fps_smooth = (0.85 * fps_smooth) + (0.15 * inst_fps) if fps_smooth > 0 else inst_fps
 
-        info_lines = [
-            f"FPS: {fps_smooth:.1f}",
-            f"Vehicles Count: {vehicles_count}",
-            f"Violations: {live_violations} (total {total_violations})",
-            f"Safe: {live_safe} (total {total_safe})",
+        # HUD - sử dụng draw_utils
+        hud_lines = [
+            (f"FPS: {fps_smooth:.1f}", config.HUD_TEXT_COLOR),
+            (f"Vehicles: {vehicles_count}", config.HUD_TEXT_COLOR),
+            (f"Violations: {live_violations} (total {total_violations})", C_RED),
+            (f"Safe: {live_safe} (total {total_safe})", C_GREEN),
         ]
-        put_info_box(frame, info_lines, x=15, y=15)
+        draw_info_hud(frame, hud_lines, title="HELMET DETECTION", title_color=config.COLOR_WARNING)
 
         cv2.imshow("Helmet Violation - Motorcycle", frame)
         key = cv2.waitKey(1) & 0xFF

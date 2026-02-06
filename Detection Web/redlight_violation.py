@@ -20,8 +20,9 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Import config
+# Import config and draw utilities
 from config import config
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
 
 
 # =============================================================================
@@ -395,24 +396,16 @@ def draw_traffic_lights(frame, boxes, cls_ids, confs):
             best_confs[light_type] = conf
             best_lights[light_type] = (xyxy, cls_id, conf)
     
-    # Vẽ chỉ đèn tốt nhất cho mỗi loại
+    # Vẽ chỉ đèn tốt nhất cho mỗi loại - sử dụng draw_utils
     for light_type, light_data in best_lights.items():
         if light_data is None:
             continue
         
         xyxy, cls_id, conf = light_data
-        x1, y1, x2, y2 = [int(v) for v in xyxy]
         color, label = get_light_color(cls_id)
         
-        # Vẽ box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        
-        # Vẽ label
-        text = f"{label} {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(frame, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(frame, text, (x1 + 2, y1 - 4), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        # Sử dụng draw_bbox_with_label thống nhất
+        draw_bbox_with_label(frame, tuple(xyxy), f"{label} {conf:.2f}", color)
 
 
 def detect_traffic_lights(cls_ids: np.ndarray) -> TrafficLightState:
@@ -639,12 +632,12 @@ def run(
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
-    # Video writer
+    # Video writer - sử dụng kích thước gốc của video
     writer = cv2.VideoWriter(
         output_path,
         cv2.VideoWriter_fourcc(*"mp4v"),
         fps,
-        (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+        (w, h)  # Giữ nguyên độ phân giải gốc
     )
     
     if not writer.isOpened():
@@ -811,37 +804,28 @@ def run(
                 elif label == "WARNING" and tracks[tid].last_event_frame == frame_idx:
                     warnings += 1
             
-            # Vẽ box và label
-            cv2.rectangle(frame_vis, (x1, y1), (x2, y2), color, 2)
+            # Vẽ box và label - sử dụng draw_utils
+            draw_bbox_with_label(frame_vis, (x1, y1, x2, y2), f"{label} ID:{tid}", color)
             cv2.circle(frame_vis, (int(px), int(py)), 4, color, -1)
-            
-            text = f"{label} ID:{tid}"
-            cv2.putText(frame_vis, text, (x1, max(20, y1 - 8)),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
-        # HUD
-        cv2.rectangle(frame_vis, (10, 10), (300, 160), (0, 0, 0), -1)
-        cv2.rectangle(frame_vis, (10, 10), (300, 160), (255, 255, 255), 2)
-        
-        # Lấy trạng thái đèn đơn giản để hiển thị
+        # HUD - sử dụng draw_utils
         simple_light = light_state.get_simple_state()
-        light_color = (0, 0, 255) if simple_light == "RED" else (0, 255, 255) if simple_light == "YELLOW" else (0, 255, 0)
-        cv2.putText(frame_vis, f"Light: {simple_light}", (20, 40),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, light_color, 2)
-        cv2.putText(frame_vis, f"Violations: {violations}", (20, 75),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, config.COLOR_VIOLATION, 2)
-        cv2.putText(frame_vis, f"Warnings: {warnings}", (20, 110),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, config.COLOR_WARNING, 2)
-        cv2.putText(frame_vis, f"FPS: {current_fps:.1f}", (20, 145),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        light_color = config.COLOR_VIOLATION if simple_light == "RED" else config.COLOR_WARNING if simple_light == "YELLOW" else config.COLOR_SAFE
         
-        # Resize và output
-        frame_out = cv2.resize(frame_vis, (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT))
-        writer.write(frame_out)
+        hud_lines = [
+            (f"Light: {simple_light}", light_color),
+            (f"Violations: {violations}", config.COLOR_VIOLATION),
+            (f"Warnings: {warnings}", config.COLOR_WARNING),
+            (f"FPS: {current_fps:.1f}", config.HUD_TEXT_COLOR),
+        ]
+        draw_info_hud(frame_vis, hud_lines, title="RED LIGHT DETECTION", title_color=config.COLOR_VIOLATION)
+        
+        # Output - giữ nguyên độ phân giải gốc (không resize)
+        writer.write(frame_vis)
         
         # Preview
         if show_preview:
-            cv2.imshow("Red Light Violation Detection", frame_out)
+            cv2.imshow("Red Light Violation Detection", frame_vis)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         

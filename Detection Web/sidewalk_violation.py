@@ -12,8 +12,9 @@ from collections import defaultdict
 import time
 import os
 
-# Import shared config
+# Import shared config and draw utilities
 from config.config import config
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
 
 # --- CALIBRATION CONFIG ---
 CONF_THRESHOLD_CALIBRATION = 0.35
@@ -352,16 +353,12 @@ def main():
                         if vehicle_status[track_id] != "Violation":
                             vehicle_status[track_id] = "Safe"
 
+                    # Sử dụng draw_bbox_with_label thống nhất
+                    draw_bbox_with_label(frame, box, label, box_color)
+
+                    # Extract coordinates for debug visualization
                     x1, y1, x2, y2 = map(int, box)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-
-                    font = cv2.FONT_HERSHEY_SIMPLEX
-                    (label_w, label_h), _ = cv2.getTextSize(label, font, 0.6, 2)
-                    cv2.rectangle(frame, (x1, y1 - label_h - 8),
-                                  (x1 + label_w + 6, y1), box_color, -1)
-                    cv2.putText(frame, label, (x1 + 3, y1 - 4),
-                                font, 0.6, (255, 255, 255), 2)
-
+                    
                     # Debug points (yellow)
                     height = y2 - y1
                     y_check = int(y2 - height * 0.3)
