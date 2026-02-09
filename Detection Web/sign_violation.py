@@ -14,7 +14,7 @@ from enum import Enum
 
 # Import shared config and draw utilities
 from config.config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud, save_violation_snapshot
 
 
 class SignType(Enum):
@@ -258,6 +258,8 @@ class TrafficSignViolationDetector:
                             self.total_violations += 1
                             if violation_type:
                                 self.violations_by_type[violation_type] += 1
+                            # Chụp screenshot khi xác nhận violation
+                            save_violation_snapshot(frame, f"sign_{violation_type or 'unknown'}", tid, box)
                             print(f"🚨 VIOLATION: ID {tid} - {violation_type}")
                     
                     self._draw_vehicle(frame, tracker, box)

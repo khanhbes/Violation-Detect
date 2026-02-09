@@ -22,7 +22,7 @@ from ultralytics import YOLO
 
 # Import config and draw utilities
 from config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud, save_violation_snapshot
 
 
 # =============================================================================
@@ -367,7 +367,7 @@ def get_light_color(cls_id: int) -> Tuple[Tuple[int, int, int], str]:
 
 
 def draw_traffic_lights(frame, boxes, cls_ids, confs):
-    """Vẽ bounding box cho đèn giao thông tốt nhất (confidence cao nhất cho mỗi loại)"""
+    """Vẽ bounding box cho đèn giao thông tốt nhất (confidence cao nhất cho mỗi loại, thêm NMS)"""
     all_light_classes = get_all_light_classes()
     all_red = config.RED_LIGHTS + config.ARROW_LEFT_RED + config.ARROW_STRAIGHT_RED
     all_yellow = config.YELLOW_LIGHTS + config.ARROW_LEFT_YELLOW + config.ARROW_STRAIGHT_YELLOW
@@ -396,15 +396,43 @@ def draw_traffic_lights(frame, boxes, cls_ids, confs):
             best_confs[light_type] = conf
             best_lights[light_type] = (xyxy, cls_id, conf)
     
-    # Vẽ chỉ đèn tốt nhất cho mỗi loại - sử dụng draw_utils
+    # Helper function tính IoU
+    def calc_iou(box1, box2):
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union = area1 + area2 - inter
+        return inter / union if union > 0 else 0
+    
+    # Lọc đèn bị overlap - chỉ giữ đèn có confidence cao nhất
+    lights_to_draw = []
     for light_type, light_data in best_lights.items():
-        if light_data is None:
-            continue
-        
+        if light_data is not None:
+            lights_to_draw.append((light_type, light_data))
+    
+    # Sắp xếp theo confidence giảm dần
+    lights_to_draw.sort(key=lambda x: x[1][2], reverse=True)
+    
+    # Lọc overlap
+    final_lights = []
+    for light_type, light_data in lights_to_draw:
+        xyxy, cls_id, conf = light_data
+        is_overlap = False
+        for _, existing_data in final_lights:
+            if calc_iou(xyxy, existing_data[0]) > 0.3:  # Threshold IoU = 0.3
+                is_overlap = True
+                break
+        if not is_overlap:
+            final_lights.append((light_type, light_data))
+    
+    # Vẽ chỉ các đèn không bị overlap
+    for light_type, light_data in final_lights:
         xyxy, cls_id, conf = light_data
         color, label = get_light_color(cls_id)
-        
-        # Sử dụng draw_bbox_with_label thống nhất
         draw_bbox_with_label(frame, tuple(xyxy), f"{label} {conf:.2f}", color)
 
 
@@ -664,8 +692,12 @@ def run(
     current_fps = 0.0
     
     frame_idx = 0
+    
+    # Debug mode - mặc định tắt, bấm 'd' để bật
+    debug_on = False
+    
     print("\n[START] Processing video...")
-    print("Press 'q' to quit\n")
+    print("Press 'q' to quit, 'd' to toggle debug\n")
     
     while True:
         ret, frame = cap.read()
@@ -748,8 +780,7 @@ def run(
             elapsed = time.time() - calibrator.start_time
             progress = min(elapsed / calibrator.duration * 100, 100)
             remaining = max(0, calibrator.duration - elapsed)
-            cv2.putText(frame_vis, f"CALIBRATING STOPLINE... {progress:.0f}% ({remaining:.1f}s)", 
-                       (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
+            # Calibration ngầm - không hiển thị text
         
         # Vẽ stopline cố định sau khi calibrate (giới hạn trong phạm vi mask)
         if calibrator.is_calibrated():
@@ -800,13 +831,34 @@ def run(
                 if label == "VIOLATION" and tracks[tid].last_event_frame == frame_idx:
                     violations += 1
                     direction = tracks[tid].direction
+                    # Chụp screenshot ngay khi phát hiện violation (dùng frame gốc)
+                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2))
                     print(f"[VIOLATION] Vehicle ID {tid} | Direction: {direction}")
                 elif label == "WARNING" and tracks[tid].last_event_frame == frame_idx:
                     warnings += 1
             
-            # Vẽ box và label - sử dụng draw_utils
-            draw_bbox_with_label(frame_vis, (x1, y1, x2, y2), f"{label} ID:{tid}", color)
+            # Vẽ box và label - ngắn gọn
+            vehicle_name = config.CLASS_NAMES.get(cls_id, "Vehicle")
+            # Chỉ hiện Warning hoặc Violation ngắn gọn
+            if label == "VIOLATION":
+                display_label = "Violation"
+            elif label == "WARNING":
+                display_label = "Warning"
+            else:
+                display_label = f"{vehicle_name}:{tid}"
+            draw_bbox_with_label(frame_vis, (x1, y1, x2, y2), display_label, color)
             cv2.circle(frame_vis, (int(px), int(py)), 4, color, -1)
+            
+            # Debug overlay - hiển thị thông tin chi tiết
+            if debug_on:
+                track = tracks[tid]
+                # Hiển thị signed distance và state
+                if calibrator.is_calibrated():
+                    a, b, c = calibrator.line_abc
+                    signed = get_signed_distance(px, py, a, b, c) * calibrator.sign_flip
+                    debug_text = f"d={signed:.0f} dir={track.direction}"
+                    cv2.putText(frame_vis, debug_text, (int(x1), int(y2) + 18),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # HUD - sử dụng draw_utils
         simple_light = light_state.get_simple_state()
@@ -826,8 +878,12 @@ def run(
         # Preview
         if show_preview:
             cv2.imshow("Red Light Violation Detection", frame_vis)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
+            if key == ord('d'):
+                debug_on = not debug_on
+                print(f"[DEBUG] Debug mode: {'ON' if debug_on else 'OFF'}")
         
         # Progress log
         if frame_idx % 100 == 0:

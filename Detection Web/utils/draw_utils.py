@@ -172,3 +172,63 @@ def draw_calibration_hud(
     fill_w = int(bar_w * progress)
     if fill_w > 0:
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), config.COLOR_SAFE, -1)
+
+
+def save_violation_snapshot(
+    original_frame: np.ndarray,
+    violation_type: str,
+    vehicle_id: int,
+    bbox: Optional[Tuple[float, float, float, float]] = None,
+    label: str = None,
+    color: Tuple[int, int, int] = None
+) -> str:
+    """
+    Lưu screenshot khi phát hiện violation.
+    Chỉ vẽ bbox của phương tiện vi phạm, ẩn các bbox khác.
+    Sử dụng cùng style bbox như khi chạy video.
+    
+    Args:
+        original_frame: Frame gốc (chưa vẽ bbox)
+        violation_type: Loại lỗi (vd: "no_helmet", "redlight", "sidewalk", "wrong_way", "wrong_lane", "sign")
+        vehicle_id: ID của xe vi phạm
+        bbox: Bounding box của xe vi phạm
+        label: Label hiển thị trên bbox (mặc định: "VIOLATION #ID")
+        color: Màu bbox (mặc định: COLOR_VIOLATION)
+    
+    Returns:
+        Đường dẫn file đã lưu
+    """
+    import os
+    from datetime import datetime
+    from pathlib import Path
+    
+    # Đường dẫn lưu ảnh vi phạm
+    base_violations_dir = Path(r"C:\Users\khanh\OneDrive\Desktop\Violation Detect\Detection Web\Violations")
+    violations_dir = base_violations_dir / violation_type
+    os.makedirs(violations_dir, exist_ok=True)
+    
+    # Tạo tên file với timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # milliseconds
+    filename = f"{violation_type}_id{vehicle_id}_{timestamp}.jpg"
+    filepath = violations_dir / filename
+    
+    # Copy frame để không ảnh hưởng frame gốc
+    snapshot = original_frame.copy()
+    
+    # Vẽ CHỈ bbox của xe vi phạm - dùng cùng style như video đang chạy
+    if bbox is not None:
+        # Màu và label mặc định
+        if color is None:
+            color = config.COLOR_VIOLATION
+        if label is None:
+            label = f"VIOLATION #{vehicle_id}"
+        
+        # Sử dụng draw_bbox_with_label để đảm bảo style giống video
+        draw_bbox_with_label(snapshot, bbox, label, color)
+    
+    # Lưu full frame với chỉ bbox violation
+    cv2.imwrite(str(filepath), snapshot)
+    
+    print(f"📸 [SNAPSHOT] {violation_type.upper()} - Vehicle #{vehicle_id} -> {filepath}")
+    
+    return str(filepath)

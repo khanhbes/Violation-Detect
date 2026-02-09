@@ -41,7 +41,7 @@ from ultralytics import YOLO
 
 # Import shared config and draw utilities
 from config.config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud, save_violation_snapshot
 
 
 # =========================
@@ -691,7 +691,7 @@ def run(video_path: str = None, model_path: str = None):
     fps_now = 0.0
     is_frozen = False
 
-    debug_on = DEBUG_DEFAULT
+    debug_on = False  # Mặc định tắt, bấm 'd' để bật
 
     while True:
         ok, frame = cap.read()
@@ -794,7 +794,7 @@ def run(video_path: str = None, model_path: str = None):
                     stop_cal.add_mask_points(m01)
 
             stop_cal.maybe_finish(fh, fw)
-            draw_info_panel(vis, "CALIBRATING", fps_now, wrong_count, cham_count, True, remain, debug_on)
+            # Calibration ngầm - không hiển thị panel
 
         # ================= FREEZE AFTER 5s =================
         if (not calibrating) and (not is_frozen):
@@ -915,6 +915,8 @@ def run(video_path: str = None, model_path: str = None):
                     if cham_vach_for_bbox(x1, y1, x2, y2, solid_lines_for_touch):
                         st.touch_violation = True
                         cham_count += 1
+                        # Chụp screenshot khi phát hiện cham vach (dùng frame gốc)
+                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2))
                         if debug_on:
                             print(f"[CHAMVACH] ID={tid}")
 
@@ -967,19 +969,22 @@ def run(video_path: str = None, model_path: str = None):
                                     wrong_count += 1
                                     st.dbg_text = dbg
                                     st.dbg_time = time.time()
+                                    # Chụp screenshot khi phát hiện wrong_dir (dùng frame gốc)
+                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2))
                                     if debug_on:
                                         print(f"[WRONGDIR] {dbg}")
 
                 # ---- Draw bbox - sử dụng draw_utils ----
+                vehicle_name = config.CLASS_NAMES.get(cid, "Vehicle")
                 col = COLOR_SAFE
-                label = f"Safe ID:{tid}"
+                label = f"{vehicle_name}:{tid}"  # Không có Safe
 
                 if st.wrong_dir_violation:
                     col = COLOR_VIOLATION
-                    label = f"SAI HUONG ID:{tid}"
+                    label = "Violation"  # Ngắn gọn
                 elif st.touch_violation:
                     col = COLOR_VIOLATION
-                    label = f"CHAM VACH ID:{tid}"
+                    label = "Violation"  # Ngắn gọn
 
                 draw_bbox_with_label(vis, (x1, y1, x2, y2), label, col)
                 cv2.circle(vis, (int(px), int(py)), 4, col, -1)

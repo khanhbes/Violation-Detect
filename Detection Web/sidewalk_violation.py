@@ -14,7 +14,7 @@ import os
 
 # Import shared config and draw utilities
 from config.config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud, save_violation_snapshot
 
 # --- CALIBRATION CONFIG ---
 CONF_THRESHOLD_CALIBRATION = 0.35
@@ -120,26 +120,16 @@ def check_violation_with_points(box, threshold_points=2, offset_ratio=0.3):
 
 
 def draw_forbidden_zones(frame):
-    global cached_overlay
-
+    """Vẽ đường kẻ bao quanh các vùng cấm (không dùng overlay)"""
     if not is_calibrated or len(forbidden_zones) == 0:
         return frame
 
-    if cached_overlay is None:
-        cached_overlay = np.zeros_like(frame, dtype=np.uint8)
-
-        for polygon, label in zip(forbidden_zones, zone_labels):
-            if label == "SIDEWALK":
-                color = (255, 200, 100)
-            else:
-                color = (100, 255, 200)
-
-            cv2.fillPoly(cached_overlay, [polygon], color)
-
-    frame = cv2.addWeighted(cached_overlay, 0.3, frame, 0.7, 0, frame)
-
+    # Chỉ vẽ đường kẻ viền, không dùng overlay
     for polygon, label in zip(forbidden_zones, zone_labels):
-        border_color = (255, 150, 0) if label == "SIDEWALK" else (0, 200, 150)
+        if label == "SIDEWALK":
+            border_color = (255, 0, 0)  # Blue
+        else:
+            border_color = (0, 255, 255)  # Yellow (Median)
         cv2.polylines(frame, [polygon], True, border_color, 2)
 
     return frame
@@ -235,6 +225,9 @@ def main():
     # Get class IDs from config
     sidewalk_class = config.SIDEWALK_CLASS[0] if config.SIDEWALK_CLASS else 27
     median_class = config.MEDIAN_CLASS[0] if config.MEDIAN_CLASS else 20
+    
+    # Debug mode - mặc định tắt, bấm 'd' để bật
+    debug_on = False
 
     while cap.isOpened():
         success, frame = cap.read()
@@ -244,6 +237,9 @@ def main():
         frame_start = time.time()
         frame_count += 1
         current_time = time.time()
+        
+        # Frame để vẽ (tạo ở đầu loop giống redlight_violation.py)
+        frame_vis = frame.copy()
 
         if not is_calibrated:
             elapsed = current_time - calibration_start_time
@@ -270,11 +266,20 @@ def main():
 
                     if cls_id == sidewalk_class:
                         accum_sidewalk += temp_mask.astype(np.float32) / 255.0
+                        # Vẽ contour màu xanh lá (không dùng overlay)
+                        contours, _ = cv2.findContours(temp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        cv2.drawContours(frame_vis, contours, -1, (255, 0, 0), 2)  # Blue
                     elif cls_id == median_class:
                         accum_median += temp_mask.astype(np.float32) / 255.0
+                        # Vẽ contour màu vàng (không dùng overlay)
+                        contours, _ = cv2.findContours(temp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        cv2.drawContours(frame_vis, contours, -1, (0, 255, 255), 2)  # Yellow
 
             if result.masks is not None and len(result.masks) > 0:
                 calibration_frame_count += 1
+
+            # Calibration ngầm - không hiển thị text
+            remaining = max(0, CALIBRATION_DURATION - elapsed)
 
             if elapsed >= CALIBRATION_DURATION:
                 print("\n🔒 LOCKING FORBIDDEN ZONES...")
@@ -302,8 +307,6 @@ def main():
                 print(f"   - Median zones: {zone_labels.count('MEDIAN')}")
                 print(f"   Frames with detection: {calibration_frame_count}")
                 print("🟢 Starting violation detection...\n")
-
-            draw_info_box(frame, 0, 0, calibration_progress)
 
         else:
             results = model.track(
@@ -335,7 +338,7 @@ def main():
 
                     if is_violation:
                         box_color = config.COLOR_VIOLATION
-                        label = f"VIOLATION #{track_id} ({zone_type})"
+                        label = "Violation"  # Ngắn gọn
 
                         if track_id not in violated_ids:
                             violated_ids.add(track_id)
@@ -343,32 +346,35 @@ def main():
                                 "zone": zone_type,
                                 "frame": frame_count
                             }
+                            # Chụp screenshot ngay khi phát hiện violation mới (dùng frame gốc)
+                            save_violation_snapshot(frame, "sidewalk", track_id, box, label)
                             print(f"🚨 NEW VIOLATION: Vehicle #{track_id} on {zone_type} (frame {frame_count})")
 
                         vehicle_status[track_id] = "Violation"
                     else:
                         box_color = config.COLOR_SAFE
-                        label = f"Safe #{track_id}"
+                        vehicle_name = config.CLASS_NAMES.get(cls_id, "Vehicle")
+                        label = f"{vehicle_name}:{track_id}"  # Không có Safe
 
                         if vehicle_status[track_id] != "Violation":
                             vehicle_status[track_id] = "Safe"
 
-                    # Sử dụng draw_bbox_with_label thống nhất
-                    draw_bbox_with_label(frame, box, label, box_color)
+                    # Sử dụng draw_bbox_with_label thống nhất - vẽ lên frame_vis
+                    draw_bbox_with_label(frame_vis, box, label, box_color)
 
                     # Extract coordinates for debug visualization
                     x1, y1, x2, y2 = map(int, box)
                     
-                    # Debug points (yellow)
-                    height = y2 - y1
-                    y_check = int(y2 - height * 0.3)
-                    cv2.circle(frame, (x1, y_check), 6, (0, 255, 255), -1)
-                    cv2.circle(frame, (int((x1 + x2)/2), y_check), 7, (0, 255, 255), -1)
-                    cv2.circle(frame, (x2, y_check), 6, (0, 255, 255), -1)
+                    # Debug points (yellow) - chỉ vẽ khi debug_on
+                    if debug_on:
+                        height = y2 - y1
+                        y_check = int(y2 - height * 0.3)
+                        cv2.circle(frame_vis, (x1, y_check), 6, (0, 255, 255), -1)
+                        cv2.circle(frame_vis, (int((x1 + x2)/2), y_check), 7, (0, 255, 255), -1)
+                        cv2.circle(frame_vis, (x2, y_check), 6, (0, 255, 255), -1)
+                        cv2.circle(frame_vis, ((x1 + x2)//2, y2), 5, box_color, -1)
 
-                    cv2.circle(frame, ((x1 + x2)//2, y2), 5, box_color, -1)
-
-            frame = draw_forbidden_zones(frame)
+            frame_vis = draw_forbidden_zones(frame_vis)
 
             frame_time = time.time() - frame_start
             fps_history.append(frame_time)
@@ -376,16 +382,26 @@ def main():
                 fps_history.pop(0)
             avg_fps = 1.0 / (sum(fps_history) / len(fps_history)) if fps_history else 0
 
-            draw_info_box(frame, avg_fps, vehicle_count)
+            # HUD giống redlight_violation.py
+            hud_lines = [
+                (f"Vehicles: {vehicle_count}", config.HUD_TEXT_COLOR),
+                (f"Violations: {len(violated_ids)}", config.COLOR_VIOLATION),
+                (f"Zones: {len(forbidden_zones)}", config.COLOR_WARNING),
+                (f"FPS: {avg_fps:.1f}", config.HUD_TEXT_COLOR),
+            ]
+            draw_info_hud(frame_vis, hud_lines, title="SIDEWALK DETECTION", title_color=config.COLOR_WARNING)
 
         # Write frame to video
         if out is not None:
-            out.write(frame)
+            out.write(frame_vis)
 
-        cv2.imshow("Sidewalk Violation Detection", frame)
+        cv2.imshow("Sidewalk Violation Detection", frame_vis)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        if key == ord('d'):
+            debug_on = not debug_on
 
     cap.release()
     if out is not None:

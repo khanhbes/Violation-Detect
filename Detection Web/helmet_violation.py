@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 # Import shared config and draw utilities
 from config.config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, save_violation_snapshot
 
 # ================= HELMET-SPECIFIC CONFIG =================
 # These class IDs are specific to helmet detection and not in shared config
@@ -58,6 +58,7 @@ C_HELMET = C_GREEN
 C_NO_HELMET = C_RED
 C_PERSON = config.COLOR_WARNING
 
+# Debug mode - mặc định tắt, bấm 'd' để bật
 DRAW_DEBUG_ASSOC = False
 
 
@@ -158,25 +159,6 @@ def associate_rider_to_motorcycle(
     return best
 
 
-def save_violation_snapshot(frame_bgr, moto_bbox, moto_id: int):
-    snap = frame_bgr.copy()
-    draw_box_tag(snap, moto_bbox, f"No Helmet | ID {moto_id}", C_RED, thickness=4)
-
-    text = "NO HELMET"
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    fs = 2.0
-    th = 5
-    (tw, thh), _ = cv2.getTextSize(text, font, fs, th)
-    x = max(10, (snap.shape[1] - tw) // 2)
-    y = max(thh + 20, 80)
-    cv2.putText(snap, text, (x, y), font, fs, C_RED, th, cv2.LINE_AA)
-
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    out_path = os.path.join(SNAPSHOT_DIR, f"no_helmet_id{moto_id}_{ts}.jpg")
-    cv2.imwrite(out_path, snap)
-    return out_path
-
-
 # ================ MAIN ================
 def main():
     try:
@@ -203,6 +185,9 @@ def main():
 
     total_violations = 0
     total_safe = 0
+    
+    # Debug mode - mặc định tắt, bấm 'd' để bật
+    debug_on = False
 
     while True:
         ret, frame = cap.read()
@@ -281,23 +266,22 @@ def main():
                 # Immediate snapshot on no-helmet (ONLY if not safe-latched)
                 if rider_cls == CLS_PERSON_NO_HELMET and not state.safe_latched:
                     if (now - state.last_snapshot_time) >= EVENT_COOLDOWN_SEC:
-                        out_path = save_violation_snapshot(frame, moto_bbox, moto_id)
+                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox)
                         state.last_snapshot_time = now
                         total_violations += 1
-                        print(f"[SNAPSHOT] {out_path}")
 
             # Display rule - sử dụng draw_utils
             if state.safe_latched:
                 live_safe += 1
-                draw_bbox_with_label(frame, moto_bbox, f"Helmet ID {moto_id}", C_GREEN)
+                draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id} Helmet", C_GREEN)
             else:
                 if rider_cls == CLS_PERSON_NO_HELMET:
                     live_violations += 1
-                    draw_bbox_with_label(frame, moto_bbox, f"No Helmet ID {moto_id}", C_RED)
+                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id} NO HELMET", C_RED)
                 else:
-                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle ID {moto_id}", C_ORANGE)
+                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id}", C_ORANGE)
 
-            if DRAW_DEBUG_ASSOC and state.last_rider_bbox is not None:
+            if debug_on and state.last_rider_bbox is not None:
                 mx, my = map(int, bbox_center(moto_bbox))
                 rxc, ryc = map(int, bbox_center(state.last_rider_bbox))
                 cv2.line(frame, (mx, my), (rxc, ryc), (255, 255, 255), 2)
@@ -322,6 +306,8 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord("q")):
             break
+        if key == ord('d'):
+            debug_on = not debug_on
 
     cap.release()
     cv2.destroyAllWindows()

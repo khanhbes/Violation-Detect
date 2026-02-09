@@ -4,6 +4,7 @@ Cấu hình tập trung cho toàn bộ hệ thống phát hiện vi phạm giao 
 """
 
 import os
+import cv2
 from pathlib import Path
 
 
@@ -89,6 +90,15 @@ class Config:
     SIDEWALK_CLASS = [27]
     MEDIAN_CLASS = [20]
     
+    # Class Names - Tên hiển thị cho từng class ID
+    CLASS_NAMES = {
+        0: "Ambulance",
+        6: "Car",
+        9: "Fire Truck",
+        21: "Motorcycle",
+        26: "Police Car",
+    }
+    
     # ========================================
     # DISPLAY - Hiển thị
     # ========================================
@@ -101,6 +111,22 @@ class Config:
     COLOR_VIOLATION = (0, 0, 255)          # Red
     COLOR_WRONG_LANE = (255, 0, 255)       # Magenta
     COLOR_STOPLINE = (0, 165, 255)         # Orange
+    COLOR_BG = (20, 20, 20)                # Background
+    COLOR_BORDER = (200, 200, 200)         # Border
+    COLOR_ARROW = (255, 100, 0)            # Arrow color
+    
+    # BBOX & Label Styling
+    FONT = cv2.FONT_HERSHEY_SIMPLEX
+    BBOX_THICKNESS = 2
+    LABEL_FONT_SCALE = 0.5
+    LABEL_TEXT_THICKNESS = 1
+    
+    # HUD Styling
+    HUD_BG_COLOR = (20, 20, 20)
+    HUD_BORDER_COLOR = (200, 200, 200)
+    HUD_TEXT_COLOR = (240, 240, 240)
+    HUD_FONT_SCALE = 0.65
+    HUD_TEXT_THICKNESS = 2
     
     # ========================================
     # CLASS NAMES - Tên đầy đủ

@@ -15,7 +15,7 @@ from enum import Enum
 
 # Import shared config and draw utilities
 from config.config import config
-from utils.draw_utils import draw_bbox_with_label, draw_info_hud
+from utils.draw_utils import draw_bbox_with_label, draw_info_hud, save_violation_snapshot
 
 
 # =====================================================================================
@@ -416,6 +416,8 @@ class PrecisionWrongWayDetector:
                 if tracker.is_confirmed_violator and tracker.confirmed_frame == tracker.total_frames:
                     self.total_violations += 1
                     self.violations_by_class[vehicle_class] += 1
+                    # Chụp screenshot ngay khi xác nhận violation
+                    save_violation_snapshot(frame, "wrong_way", tid, box)
                     print(f"🚨 VIOLATION: ID {tid} ({vehicle_class})")
                     
             self._draw_vehicle(frame, tracker, box)
