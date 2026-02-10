@@ -128,28 +128,40 @@
                         <label>🔍 Select Detectors</label>
                         <div class="detector-grid">
                             <button class="detector-btn active" data-detector="helmet">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">🪖</span>
-                                <span>Helmet</span>
+                                <span class="detector-name">Helmet</span>
+                                <span class="detector-desc">No helmet violation</span>
                             </button>
                             <button class="detector-btn" data-detector="redlight">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">🔴</span>
-                                <span>Red Light</span>
+                                <span class="detector-name">Red Light</span>
+                                <span class="detector-desc">Running red light</span>
                             </button>
                             <button class="detector-btn" data-detector="sidewalk">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">🚶</span>
-                                <span>Sidewalk</span>
+                                <span class="detector-name">Sidewalk</span>
+                                <span class="detector-desc">Driving on sidewalk</span>
                             </button>
                             <button class="detector-btn" data-detector="wrong_way">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">⬅️</span>
-                                <span>Wrong Way</span>
+                                <span class="detector-name">Wrong Way</span>
+                                <span class="detector-desc">Wrong direction</span>
                             </button>
                             <button class="detector-btn" data-detector="wrong_lane">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">🛣️</span>
-                                <span>Wrong Lane</span>
+                                <span class="detector-name">Wrong Lane</span>
+                                <span class="detector-desc">Lane violation</span>
                             </button>
                             <button class="detector-btn" data-detector="sign">
+                                <span class="detector-dot"></span>
                                 <span class="emoji">🚫</span>
-                                <span>Sign</span>
+                                <span class="detector-name">Sign</span>
+                                <span class="detector-desc">Traffic sign violation</span>
                             </button>
                         </div>
                     </div>
@@ -158,20 +170,35 @@
                     <div class="form-group">
                         <label>⚙️ Detection Settings</label>
                         <div class="settings-panel">
-                            <div class="settings-grid">
-                                <div class="setting-item">
-                                    <div class="setting-label">Confidence</div>
-                                    <input id="confRange" type="range" min="0.05" max="0.9" step="0.05" value="0.25">
-                                    <div class="setting-value" id="confValue">0.25</div>
+                            <!-- Confidence -->
+                            <div class="setting-item setting-item--wide">
+                                <div class="setting-header">
+                                    <div class="setting-label">🎯 Confidence Threshold</div>
+                                    <div class="conf-bubble" id="confBubble">25%</div>
                                 </div>
-                                <div class="setting-item">
-                                    <div class="setting-label">Debug</div>
-                                    <label class="switch">
-                                        <input id="debugToggle" type="checkbox">
-                                        <span class="slider"></span>
-                                    </label>
-                                    <div class="setting-value" id="debugValue">OFF</div>
+                                <div class="range-wrapper">
+                                    <input id="confRange" type="range" min="5" max="90" step="5" value="25">
+                                    <div class="range-fill" id="rangeFill"></div>
                                 </div>
+                                <div class="range-labels">
+                                    <span>Low</span>
+                                    <span>Medium</span>
+                                    <span>High</span>
+                                </div>
+                            </div>
+                            <!-- Debug -->
+                            <div class="setting-item setting-item--wide">
+                                <div class="setting-header">
+                                    <div class="setting-label">🐛 Debug Mode</div>
+                                </div>
+                                <label class="debug-toggle">
+                                    <input id="debugToggle" type="checkbox">
+                                    <span class="debug-track">
+                                        <span class="debug-knob">🐛</span>
+                                        <span class="debug-text-off">OFF</span>
+                                        <span class="debug-text-on">ON</span>
+                                    </span>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -202,9 +229,12 @@
                 <h2><span class="icon">📸</span> Recent Violations</h2>
                 <div class="gallery-tabs">
                     <button class="gallery-tab active" data-tab="all">All</button>
-                    <button class="gallery-tab" data-tab="helmet">Helmet</button>
-                    <button class="gallery-tab" data-tab="redlight">Red Light</button>
-                    <button class="gallery-tab" data-tab="sidewalk">Sidewalk</button>
+                    <button class="gallery-tab" data-tab="helmet">🪖 Helmet</button>
+                    <button class="gallery-tab" data-tab="redlight">🔴 Red Light</button>
+                    <button class="gallery-tab" data-tab="sidewalk">🚶 Sidewalk</button>
+                    <button class="gallery-tab" data-tab="wrong_way">⬅️ Wrong Way</button>
+                    <button class="gallery-tab" data-tab="wrong_lane">🛣️ Wrong Lane</button>
+                    <button class="gallery-tab" data-tab="sign">🚫 Sign</button>
                 </div>
             </div>
             <div id="snapshotsGallery" class="gallery-grid">
@@ -383,7 +413,7 @@
         function startDetection() {
             const video = videoSelect.value;
             const model = modelSelect.value;
-            const conf = parseFloat(confRange.value);
+            const conf = parseInt(confRange.value) / 100;
             const debug = debugToggle.checked;
 
             if (!video || !model) {
@@ -520,12 +550,27 @@
         startBtn.addEventListener('click', startDetection);
         stopBtn.addEventListener('click', stopDetection);
 
-        confRange.addEventListener('input', () => {
-            confValue.textContent = parseFloat(confRange.value).toFixed(2);
-        });
+        const confBubble = document.getElementById('confBubble');
+        const rangeFill = document.getElementById('rangeFill');
+
+        function updateConfUI() {
+            const val = parseInt(confRange.value);
+            const pct = (val - 5) / (90 - 5) * 100;
+            confBubble.textContent = val + '%';
+            rangeFill.style.width = pct + '%';
+            // Color the bubble based on value
+            if (val <= 30) {
+                confBubble.style.background = 'linear-gradient(135deg, #10b981, #34d399)';
+            } else if (val <= 60) {
+                confBubble.style.background = 'linear-gradient(135deg, #f59e0b, #fbbf24)';
+            } else {
+                confBubble.style.background = 'linear-gradient(135deg, #ef4444, #f87171)';
+            }
+        }
+
+        confRange.addEventListener('input', updateConfUI);
 
         debugToggle.addEventListener('change', () => {
-            debugValue.textContent = debugToggle.checked ? 'ON' : 'OFF';
             debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
         });
 
@@ -536,8 +581,7 @@
         loadVideos();
         loadModels();
         loadSnapshots();
-        confValue.textContent = parseFloat(confRange.value).toFixed(2);
-        debugValue.textContent = debugToggle.checked ? 'ON' : 'OFF';
+        updateConfUI();
         debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
     </script>
 </body>
