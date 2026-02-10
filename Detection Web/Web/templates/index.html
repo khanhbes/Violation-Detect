@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚦 Traffic Violation Detection</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <nav class="topbar">
+        <div class="topbar-inner">
+            <div class="brand">Traffic Violation</div>
+            <div class="topbar-links">
+                <a href="#home">Home</a>
+                <a href="#image">Image</a>
+                <a href="#video">Video</a>
+                <a href="#realtime">Real-Time</a>
+                <a href="#lookup">Look Up</a>
+            </div>
+        </div>
+    </nav>
+    <div class="container">
+        <!-- Header -->
+        <header class="header" id="home">
+            <h1>🚦 Traffic Violation Detection</h1>
+            <p class="subtitle">AI-powered real-time traffic monitoring system</p>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Video Panel -->
+            <section class="video-panel" id="video">
+                <!-- Video Display -->
+                <div class="card">
+                    <div class="video-container">
+                        <canvas id="videoCanvas" width="1280" height="720"></canvas>
+                        <div id="videoOverlay" class="video-overlay">
+                            <span class="icon">🎬</span>
+                            <p>Select options and click Start Detection</p>
+                        </div>
+                        <div class="video-stats" id="videoStats" style="display: none;">
+                            <div class="stat-item">
+                                <span>Frame:</span>
+                                <span class="stat-value" id="frameNum">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span>FPS:</span>
+                                <span class="stat-value" id="fpsValue">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span>Progress:</span>
+                                <span class="stat-value" id="progressValue">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="progress-bar" id="progressBar" style="display: none;">
+                        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">📊</span> Live Statistics</div>
+                    <div class="stats-grid">
+                        <div class="stat-card violation">
+                            <span class="emoji">🪖</span>
+                            <span class="value" id="helmetCount">0</span>
+                            <span class="label">Helmet</span>
+                        </div>
+                        <div class="stat-card violation">
+                            <span class="emoji">🔴</span>
+                            <span class="value" id="redlightCount">0</span>
+                            <span class="label">Red Light</span>
+                        </div>
+                        <div class="stat-card violation">
+                            <span class="emoji">🚶</span>
+                            <span class="value" id="sidewalkCount">0</span>
+                            <span class="label">Sidewalk</span>
+                        </div>
+                        <div class="stat-card violation">
+                            <span class="emoji">⬅️</span>
+                            <span class="value" id="wrongwayCount">0</span>
+                            <span class="label">Wrong Way</span>
+                        </div>
+                        <div class="stat-card violation">
+                            <span class="emoji">🛣️</span>
+                            <span class="value" id="wronglaneCount">0</span>
+                            <span class="label">Wrong Lane</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="emoji">⚠️</span>
+                            <span class="value" id="totalCount">0</span>
+                            <span class="label">Total</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <aside class="control-panel" id="realtime">
+                <div class="card">
+                    <div class="card-title"><span class="icon">🎮</span> Control Panel</div>
+
+                    <!-- Video Selection -->
+                    <div class="form-group">
+                        <label>📹 Video Source</label>
+                        <div class="select-wrapper">
+                            <select id="videoSelect">
+                                <option value="">Loading videos...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Model Selection -->
+                    <div class="form-group">
+                        <label>🧠 AI Model</label>
+                        <div class="select-wrapper">
+                            <select id="modelSelect">
+                                <option value="">Loading models...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Detector Selection -->
+                    <div class="form-group">
+                        <label>🔍 Select Detectors</label>
+                        <div class="detector-grid">
+                            <button class="detector-btn active" data-detector="helmet">
+                                <span class="emoji">🪖</span>
+                                <span>Helmet</span>
+                            </button>
+                            <button class="detector-btn" data-detector="redlight">
+                                <span class="emoji">🔴</span>
+                                <span>Red Light</span>
+                            </button>
+                            <button class="detector-btn" data-detector="sidewalk">
+                                <span class="emoji">🚶</span>
+                                <span>Sidewalk</span>
+                            </button>
+                            <button class="detector-btn" data-detector="wrong_way">
+                                <span class="emoji">⬅️</span>
+                                <span>Wrong Way</span>
+                            </button>
+                            <button class="detector-btn" data-detector="wrong_lane">
+                                <span class="emoji">🛣️</span>
+                                <span>Wrong Lane</span>
+                            </button>
+                            <button class="detector-btn" data-detector="sign">
+                                <span class="emoji">🚫</span>
+                                <span>Sign</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Detection Settings -->
+                    <div class="form-group">
+                        <label>⚙️ Detection Settings</label>
+                        <div class="settings-panel">
+                            <div class="settings-grid">
+                                <div class="setting-item">
+                                    <div class="setting-label">Confidence</div>
+                                    <input id="confRange" type="range" min="0.05" max="0.9" step="0.05" value="0.25">
+                                    <div class="setting-value" id="confValue">0.25</div>
+                                </div>
+                                <div class="setting-item">
+                                    <div class="setting-label">Debug</div>
+                                    <label class="switch">
+                                        <input id="debugToggle" type="checkbox">
+                                        <span class="slider"></span>
+                                    </label>
+                                    <div class="setting-value" id="debugValue">OFF</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status -->
+                    <div class="status-bar">
+                        <span id="statusIndicator" class="status-indicator idle"></span>
+                        <span id="statusText" class="status-text">Ready to start</span>
+                        <span id="debugStatus" class="debug-status">Debug: OFF</span>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <button id="startBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                        ▶️ Start Detection
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" style="width: 100%; margin-top: 10px;" disabled>
+                        ⏹️ Stop
+                    </button>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Gallery Section -->
+        <div id="image" class="anchor-spacer"></div>
+        <div id="lookup" class="anchor-spacer"></div>
+        <section class="gallery-section card">
+            <div class="gallery-header">
+                <h2><span class="icon">📸</span> Recent Violations</h2>
+                <div class="gallery-tabs">
+                    <button class="gallery-tab active" data-tab="all">All</button>
+                    <button class="gallery-tab" data-tab="helmet">Helmet</button>
+                    <button class="gallery-tab" data-tab="redlight">Red Light</button>
+                    <button class="gallery-tab" data-tab="sidewalk">Sidewalk</button>
+                </div>
+            </div>
+            <div id="snapshotsGallery" class="gallery-grid">
+                <p class="no-items">No violations detected yet. Start detection to capture violations.</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // =====================================================================
+        // ELEMENTS
+        // =====================================================================
+        const canvas = document.getElementById('videoCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoOverlay = document.getElementById('videoOverlay');
+        const videoStats = document.getElementById('videoStats');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+
+        const videoSelect = document.getElementById('videoSelect');
+        const modelSelect = document.getElementById('modelSelect');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const debugStatus = document.getElementById('debugStatus');
+
+        const frameNum = document.getElementById('frameNum');
+        const fpsValue = document.getElementById('fpsValue');
+        const progressValue = document.getElementById('progressValue');
+
+        const helmetCount = document.getElementById('helmetCount');
+        const redlightCount = document.getElementById('redlightCount');
+        const sidewalkCount = document.getElementById('sidewalkCount');
+        const wrongwayCount = document.getElementById('wrongwayCount');
+        const wronglaneCount = document.getElementById('wronglaneCount');
+        const totalCount = document.getElementById('totalCount');
+
+        const snapshotsGallery = document.getElementById('snapshotsGallery');
+        const toast = document.getElementById('toast');
+
+        const confRange = document.getElementById('confRange');
+        const confValue = document.getElementById('confValue');
+        const debugToggle = document.getElementById('debugToggle');
+        const debugValue = document.getElementById('debugValue');
+
+        let ws = null;
+        let selectedDetectors = ['helmet'];
+
+        // =====================================================================
+        // UTILITIES
+        // =====================================================================
+
+        function showToast(message, type = 'success') {
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function formatSize(bytes) {
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function resetUI() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            videoOverlay.classList.remove('hidden');
+            videoStats.style.display = 'none';
+            progressBar.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressValue.textContent = '0%';
+            frameNum.textContent = '0';
+            fpsValue.textContent = '0';
+            helmetCount.textContent = '0';
+            redlightCount.textContent = '0';
+            sidewalkCount.textContent = '0';
+            wrongwayCount.textContent = '0';
+            wronglaneCount.textContent = '0';
+            totalCount.textContent = '0';
+        }
+
+        // =====================================================================
+        // LOAD DATA
+        // =====================================================================
+
+        async function loadVideos() {
+            try {
+                const resp = await fetch('/api/videos');
+                const videos = await resp.json();
+                videoSelect.innerHTML = videos.map(v =>
+                    `<option value="${v.path}">${v.name} (${formatSize(v.size)})</option>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load videos:', e);
+                videoSelect.innerHTML = '<option value="">No videos found</option>';
+            }
+        }
+
+        async function loadModels() {
+            try {
+                const resp = await fetch('/api/models');
+                const models = await resp.json();
+                modelSelect.innerHTML = models.map(m =>
+                    `<option value="${m.path}">${m.name} (${formatSize(m.size)})</option>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load models:', e);
+                modelSelect.innerHTML = '<option value="">No models found</option>';
+            }
+        }
+
+        async function loadSnapshots(filter = 'all') {
+            try {
+                const resp = await fetch('/api/snapshots');
+                let snapshots = await resp.json();
+
+                if (filter !== 'all') {
+                    snapshots = snapshots.filter(s => s.type === filter);
+                }
+
+                if (snapshots.length === 0) {
+                    snapshotsGallery.innerHTML = '<p class="no-items">No violations detected yet.</p>';
+                    return;
+                }
+
+                snapshotsGallery.innerHTML = snapshots.slice(0, 12).map(s => `
+                    <div class="gallery-item" onclick="window.open('${s.path}', '_blank')">
+                        <img src="${s.path}" alt="${s.type}" loading="lazy">
+                        <div class="gallery-item-info">
+                            <span class="gallery-item-type ${s.type}">${s.type}</span>
+                            <span class="gallery-item-name">${s.filename}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load snapshots:', e);
+            }
+        }
+
+        // =====================================================================
+        // DETECTOR SELECTION
+        // =====================================================================
+
+        document.querySelectorAll('.detector-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.classList.toggle('active');
+                updateSelectedDetectors();
+            });
+        });
+
+        function updateSelectedDetectors() {
+            selectedDetectors = [];
+            document.querySelectorAll('.detector-btn.active').forEach(btn => {
+                selectedDetectors.push(btn.dataset.detector);
+            });
+        }
+
+        // =====================================================================
+        // GALLERY TABS
+        // =====================================================================
+
+        document.querySelectorAll('.gallery-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                loadSnapshots(tab.dataset.tab);
+            });
+        });
+
+        // =====================================================================
+        // WEBSOCKET DETECTION
+        // =====================================================================
+
+        function startDetection() {
+            const video = videoSelect.value;
+            const model = modelSelect.value;
+            const conf = parseFloat(confRange.value);
+            const debug = debugToggle.checked;
+
+            if (!video || !model) {
+                showToast('Please select video and model', 'error');
+                return;
+            }
+
+            if (selectedDetectors.length === 0) {
+                showToast('Please select at least one detector', 'error');
+                return;
+            }
+
+            // Connect WebSocket
+            ws = new WebSocket(`ws://${window.location.host}/ws/detect`);
+
+            ws.onopen = () => {
+                statusIndicator.className = 'status-indicator running';
+                statusText.textContent = 'Connecting...';
+
+                // Send start command
+                ws.send(JSON.stringify({
+                    action: 'start',
+                    video: video,
+                    model: model,
+                    detectors: selectedDetectors,
+                    conf: conf,
+                    debug: debug
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'started':
+                        videoOverlay.classList.add('hidden');
+                        videoStats.style.display = 'flex';
+                        progressBar.style.display = 'block';
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                        statusText.textContent = `Processing: ${data.video}`;
+                        debugStatus.textContent = `Debug: ${data.debug ? 'ON' : 'OFF'}`;
+                        showToast(`Started detection with ${data.detectors.join(', ')}`, 'success');
+                        break;
+
+                    case 'frame':
+                        // Draw frame
+                        const img = new Image();
+                        img.onload = () => {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+                        };
+                        img.src = 'data:image/jpeg;base64,' + data.image;
+
+                        // Update stats
+                        if (data.stats) {
+                            frameNum.textContent = data.stats.frame_idx;
+                            fpsValue.textContent = data.stats.fps;
+
+                            const viols = data.stats.violations || {};
+                            helmetCount.textContent = viols.helmet || 0;
+                            redlightCount.textContent = viols.redlight || 0;
+                            sidewalkCount.textContent = viols.sidewalk || 0;
+                            wrongwayCount.textContent = viols.wrong_way || 0;
+                            wronglaneCount.textContent = viols.wrong_lane || 0;
+                            totalCount.textContent = data.stats.total || 0;
+                        }
+
+                        // Update progress
+                        if (data.progress) {
+                            progressFill.style.width = data.progress + '%';
+                            progressValue.textContent = data.progress.toFixed(1) + '%';
+                        }
+                        break;
+
+                    case 'violation':
+                        showToast(`⚠️ ${data.data.type} violation detected!`, 'warning');
+                        loadSnapshots();
+                        break;
+
+                    case 'finished':
+                        statusIndicator.className = 'status-indicator idle';
+                        statusText.textContent = 'Detection finished';
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                        showToast('Detection completed!', 'success');
+                        loadSnapshots();
+                        resetUI();
+                        break;
+
+                    case 'stopped':
+                        statusIndicator.className = 'status-indicator idle';
+                        statusText.textContent = 'Stopped';
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                        resetUI();
+                        break;
+
+                    case 'error':
+                        statusIndicator.className = 'status-indicator error';
+                        statusText.textContent = 'Error: ' + data.message;
+                        showToast('Error: ' + data.message, 'error');
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                        break;
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusIndicator.className = 'status-indicator error';
+                statusText.textContent = 'Connection error';
+                showToast('Connection error', 'error');
+            };
+
+            ws.onclose = () => {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            };
+        }
+
+        function stopDetection() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'stop' }));
+                ws.close();
+            }
+        }
+
+        // =====================================================================
+        // EVENT LISTENERS
+        // =====================================================================
+
+        startBtn.addEventListener('click', startDetection);
+        stopBtn.addEventListener('click', stopDetection);
+
+        confRange.addEventListener('input', () => {
+            confValue.textContent = parseFloat(confRange.value).toFixed(2);
+        });
+
+        debugToggle.addEventListener('change', () => {
+            debugValue.textContent = debugToggle.checked ? 'ON' : 'OFF';
+            debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
+        });
+
+        // =====================================================================
+        // INIT
+        // =====================================================================
+
+        loadVideos();
+        loadModels();
+        loadSnapshots();
+        confValue.textContent = parseFloat(confRange.value).toFixed(2);
+        debugValue.textContent = debugToggle.checked ? 'ON' : 'OFF';
+        debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
+    </script>
+</body>
+
+</html>

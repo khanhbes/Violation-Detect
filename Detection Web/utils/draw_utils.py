@@ -90,6 +90,8 @@ def draw_info_hud(
         title: Tiêu đề HUD (optional)
         title_color: Màu tiêu đề (default: COLOR_SAFE)
     """
+    # HUD disabled by request
+    return
     x, y = position
     line_height = 30
     padding = 15
@@ -137,6 +139,8 @@ def draw_calibration_hud(
         position: Vị trí HUD
         width: Chiều rộng HUD
     """
+    # HUD disabled by request
+    return
     x, y = position
     
     # Draw background
