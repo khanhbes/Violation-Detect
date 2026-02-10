@@ -19,7 +19,7 @@ class Config:
     MODEL_DIR = ASSETS_DIR / 'model'
     VIDEO_DIR = ASSETS_DIR / 'video'
     OUTPUT_DIR = BASE_DIR / 'output'
-    SNAPSHOT_DIR = BASE_DIR / 'snapshots'
+    SNAPSHOT_DIR = BASE_DIR / 'Violations'
     
     OUTPUT_DIR.mkdir(exist_ok=True)
     SNAPSHOT_DIR.mkdir(exist_ok=True)

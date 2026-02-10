@@ -264,7 +264,7 @@ class TrafficSignViolationDetector:
                             if violation_type:
                                 self.violations_by_type[violation_type] += 1
                             # Chụp screenshot khi xác nhận violation
-                            save_violation_snapshot(frame, f"sign_{violation_type or 'unknown'}", tid, box)
+                            save_violation_snapshot(frame, f"sign_{violation_type or 'unknown'}", tid, box, vehicle_class=tracker.vehicle_class)
                             print(f"🚨 VIOLATION: ID {tid} - {violation_type}")
                     
                     self._draw_vehicle(frame, tracker, box)

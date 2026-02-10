@@ -30,22 +30,29 @@
         <!-- ==================== HOME TAB ==================== -->
         <section id="tab-home" class="tab-panel active">
             <div class="hero">
-                <div class="hero-particles"></div>
+                <div id="particles-js" class="hero-particles-canvas"></div>
+                <div class="hero-glow hero-glow--1"></div>
+                <div class="hero-glow hero-glow--2"></div>
                 <div class="hero-content">
-                    <div class="hero-badge animate-in">🔬 AI Research Project</div>
-                    <h1 class="hero-title animate-in">Traffic Violation<br><span class="gradient-text">Detection
+                    <div class="hero-badge animate-in"><span class="badge-dot"></span> AI Research Project</div>
+                    <h1 class="hero-title animate-in">Traffic Violation<br><span
+                            class="gradient-text animated-gradient">Detection
                             System</span></h1>
-                    <p class="hero-desc animate-in">Hệ thống phát hiện vi phạm giao thông thời gian thực sử dụng trí tuệ
-                        nhân tạo YOLOv12-Seg, nhận diện 40 loại đối tượng với độ chính xác cao.</p>
+                    <p class="hero-desc animate-in">Hệ thống phát hiện vi phạm giao thông thời gian thực</p>
+                    <p class="hero-typed-line animate-in"><span class="typing-text"></span></p>
                     <div class="hero-stats animate-in">
-                        <div class="hero-stat"><span class="hero-stat-value">40</span><span
+                        <div class="hero-stat tilt-card"><span class="hero-stat-value" data-count="40">0</span><span
                                 class="hero-stat-label">Object Classes</span></div>
-                        <div class="hero-stat"><span class="hero-stat-value">6</span><span
+                        <div class="hero-stat tilt-card"><span class="hero-stat-value" data-count="6">0</span><span
                                 class="hero-stat-label">Violation Types</span></div>
-                        <div class="hero-stat"><span class="hero-stat-value">Real-Time</span><span
-                                class="hero-stat-label">Detection Speed</span></div>
-                        <div class="hero-stat"><span class="hero-stat-value">YOLOv12</span><span
+                        <div class="hero-stat tilt-card"><span class="hero-stat-value"
+                                data-text="Real-Time">—</span><span class="hero-stat-label">Detection Speed</span></div>
+                        <div class="hero-stat tilt-card"><span class="hero-stat-value" data-text="YOLOv12">—</span><span
                                 class="hero-stat-label">AI Model</span></div>
+                    </div>
+                    <div class="hero-cta animate-in">
+                        <a href="#" class="btn btn-hero-primary" data-tab="realtime">🚀 Bắt đầu ngay</a>
+                        <a href="#" class="btn btn-hero-outline" data-tab="image">🖼️ Thử với ảnh</a>
                     </div>
                 </div>
             </div>
@@ -445,6 +452,15 @@
     </div><!-- .container -->
 
     <div id="toast" class="toast"></div>
+
+    <!-- Scroll to top button -->
+    <a href="#" class="scroll-top" id="scrollTop" aria-label="Scroll to top">⬆</a>
+
+    <!-- CDN Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/typed.js/2.0.5/typed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.0/vanilla-tilt.min.js"></script>
+    <script src="https://unpkg.com/scrollreveal@4.0.9/dist/scrollreveal.min.js"></script>
 
     <script src="/static/app.js"></script>
 </body>

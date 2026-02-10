@@ -16,12 +16,28 @@ document.querySelectorAll('.nav-link').forEach(link => {
     });
 });
 
+// Hero CTA buttons (navigate to tabs)
+document.querySelectorAll('.hero-cta .btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const tabId = btn.dataset.tab;
+        if (tabId) {
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            const navLink = document.querySelector(`.nav-link[data-tab="${tabId}"]`);
+            if (navLink) navLink.classList.add('active');
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            const panel = document.getElementById('tab-' + tabId);
+            if (panel) panel.classList.add('active');
+        }
+    });
+});
+
 // =====================================================================
 // SCROLL ANIMATIONS (Intersection Observer)
 // =====================================================================
 function triggerAnimations(container) {
     container.querySelectorAll('.animate-in').forEach((el, i) => {
-        el.style.animationDelay = (i * 0.08) + 's';
+        el.style.transitionDelay = (i * 0.08) + 's';
         el.classList.remove('visible');
         void el.offsetWidth;
         el.classList.add('visible');
@@ -454,3 +470,136 @@ loadModels();
 loadSnapshots();
 updateConfUI();
 debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
+
+// =====================================================================
+// PARTICLES.JS — Interactive particle network in hero
+// =====================================================================
+if (typeof particlesJS !== 'undefined' && document.getElementById('particles-js')) {
+    particlesJS('particles-js', {
+        particles: {
+            number: { value: 60, density: { enable: true, value_area: 900 } },
+            color: { value: '#6366f1' },
+            shape: { type: 'circle' },
+            opacity: { value: 0.5, random: true, anim: { enable: true, speed: 0.8, opacity_min: 0.1 } },
+            size: { value: 3, random: true, anim: { enable: true, speed: 2, size_min: 0.3 } },
+            line_linked: { enable: true, distance: 150, color: '#6366f1', opacity: 0.2, width: 1 },
+            move: { enable: true, speed: 1.5, direction: 'none', random: true, out_mode: 'out' }
+        },
+        interactivity: {
+            detect_on: 'canvas',
+            events: {
+                onhover: { enable: true, mode: 'grab' },
+                onclick: { enable: true, mode: 'push' },
+                resize: true
+            },
+            modes: {
+                grab: { distance: 200, line_linked: { opacity: 0.5 } },
+                push: { particles_nb: 3 }
+            }
+        },
+        retina_detect: true
+    });
+}
+
+// =====================================================================
+// TYPED.JS — Typing effect in hero subtitle
+// =====================================================================
+if (typeof Typed !== 'undefined' && document.querySelector('.typing-text')) {
+    new Typed('.typing-text', {
+        strings: [
+            'trí tuệ nhân tạo YOLOv12-Seg',
+            'nhận diện 40 loại đối tượng',
+            'xử lý real-time với độ chính xác cao',
+            'theo dõi phương tiện liên tục qua ByteTrack',
+            'phân tích hành vi vi phạm tự động'
+        ],
+        typeSpeed: 40,
+        backSpeed: 20,
+        backDelay: 2000,
+        loop: true,
+        showCursor: true,
+        cursorChar: '|'
+    });
+}
+
+// =====================================================================
+// SCROLLREVEAL — Staggered reveal animations
+// =====================================================================
+if (typeof ScrollReveal !== 'undefined') {
+    const sr = ScrollReveal({
+        origin: 'bottom',
+        distance: '80px',
+        duration: 1000,
+        easing: 'cubic-bezier(0.5, 0, 0, 1)',
+        reset: false
+    });
+
+    sr.reveal('.hero-badge', { delay: 100, origin: 'top' });
+    sr.reveal('.hero-title', { delay: 200, origin: 'top' });
+    sr.reveal('.hero-desc', { delay: 300 });
+    sr.reveal('.hero-stats', { delay: 400 });
+    sr.reveal('.hero-cta', { delay: 500 });
+}
+
+// =====================================================================
+// VANILLA TILT — 3D tilt effect on cards
+// =====================================================================
+if (typeof VanillaTilt !== 'undefined') {
+    VanillaTilt.init(document.querySelectorAll('.tilt-card'), {
+        max: 8,
+        speed: 400,
+        glare: true,
+        'max-glare': 0.12,
+        perspective: 1000
+    });
+}
+
+// =====================================================================
+// COUNT-UP ANIMATION — Hero stat values
+// =====================================================================
+function animateCountUp() {
+    document.querySelectorAll('.hero-stat-value[data-count]').forEach(el => {
+        const target = parseInt(el.dataset.count);
+        const duration = 2000;
+        const start = performance.now();
+        const step = (now) => {
+            const elapsed = now - start;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+            el.textContent = Math.round(target * eased);
+            if (progress < 1) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    });
+    document.querySelectorAll('.hero-stat-value[data-text]').forEach(el => {
+        const text = el.dataset.text;
+        setTimeout(() => { el.textContent = text; }, 800);
+    });
+}
+
+// Trigger count-up when hero becomes visible
+const heroObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            animateCountUp();
+            heroObserver.unobserve(entry.target);
+        }
+    });
+}, { threshold: 0.3 });
+const heroSection = document.querySelector('.hero');
+if (heroSection) heroObserver.observe(heroSection);
+
+// =====================================================================
+// SCROLL TO TOP BUTTON
+// =====================================================================
+const scrollTopBtn = document.getElementById('scrollTop');
+if (scrollTopBtn) {
+    window.addEventListener('scroll', () => {
+        if (window.scrollY > 300) scrollTopBtn.classList.add('visible');
+        else scrollTopBtn.classList.remove('visible');
+    });
+    scrollTopBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+}

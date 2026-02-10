@@ -352,7 +352,8 @@ def main():
                                 "frame": frame_count
                             }
                             # Chụp screenshot ngay khi phát hiện violation mới (dùng frame gốc)
-                            save_violation_snapshot(frame, "sidewalk", track_id, box, label)
+                            vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
+                            save_violation_snapshot(frame, "sidewalk", track_id, box, label, vehicle_class=vclass)
                             print(f"🚨 NEW VIOLATION: Vehicle #{track_id} on {zone_type} (frame {frame_count})")
 
                         vehicle_status[track_id] = "Violation"

@@ -422,7 +422,7 @@ class PrecisionWrongWayDetector:
                     self.total_violations += 1
                     self.violations_by_class[vehicle_class] += 1
                     # Chụp screenshot ngay khi xác nhận violation
-                    save_violation_snapshot(frame, "wrong_way", tid, box)
+                    save_violation_snapshot(frame, "wrong_way", tid, box, vehicle_class=vehicle_class)
                     print(f"🚨 VIOLATION: ID {tid} ({vehicle_class})")
                     
             self._draw_vehicle(frame, tracker, box)

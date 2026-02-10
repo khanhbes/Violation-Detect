@@ -81,45 +81,9 @@ def draw_info_hud(
 ) -> None:
     """
     Vẽ HUD (Head-Up Display) thông tin đồng bộ.
-    
-    Args:
-        frame: Frame để vẽ
-        lines: List các tuple (text, color) cho từng dòng
-        position: Vị trí góc trên trái của HUD
-        width: Chiều rộng HUD
-        title: Tiêu đề HUD (optional)
-        title_color: Màu tiêu đề (default: COLOR_SAFE)
     """
     # HUD disabled by request
     return
-    x, y = position
-    line_height = 30
-    padding = 15
-    
-    # Calculate height
-    num_lines = len(lines) + (1 if title else 0)
-    height = num_lines * line_height + padding * 2
-    
-    # Draw background
-    cv2.rectangle(frame, (x, y), (x + width, y + height), config.HUD_BG_COLOR, -1)
-    cv2.rectangle(frame, (x, y), (x + width, y + height), config.HUD_BORDER_COLOR, 2)
-    
-    font = config.FONT
-    font_scale = config.HUD_FONT_SCALE
-    text_thickness = config.HUD_TEXT_THICKNESS
-    
-    current_y = y + padding + 20
-    
-    # Draw title if provided
-    if title:
-        t_color = title_color if title_color else config.COLOR_SAFE
-        cv2.putText(frame, title, (x + padding, current_y), font, font_scale, t_color, text_thickness, cv2.LINE_AA)
-        current_y += line_height
-    
-    # Draw each line
-    for text, color in lines:
-        cv2.putText(frame, text, (x + padding, current_y), font, font_scale, color, text_thickness, cv2.LINE_AA)
-        current_y += line_height
 
 
 def draw_calibration_hud(
@@ -131,51 +95,9 @@ def draw_calibration_hud(
 ) -> None:
     """
     Vẽ HUD cho giai đoạn calibration.
-    
-    Args:
-        frame: Frame để vẽ
-        progress: Tiến độ từ 0.0 đến 1.0
-        duration: Tổng thời gian calibration (seconds)
-        position: Vị trí HUD
-        width: Chiều rộng HUD
     """
     # HUD disabled by request
     return
-    x, y = position
-    
-    # Draw background
-    cv2.rectangle(frame, (x, y), (x + width, y + 170), config.HUD_BG_COLOR, -1)
-    cv2.rectangle(frame, (x, y), (x + width, y + 170), config.HUD_BORDER_COLOR, 2)
-    
-    font = config.FONT
-    fs = config.HUD_FONT_SCALE
-    th = config.HUD_TEXT_THICKNESS
-    padding = 15
-    
-    # Title
-    cv2.putText(frame, "STATUS: CALIBRATING", (x + padding, y + 30), 
-                font, fs, config.COLOR_WARNING, th, cv2.LINE_AA)
-    
-    # Progress percentage
-    progress_text = f"Progress: {int(progress * 100)}%"
-    cv2.putText(frame, progress_text, (x + padding, y + 65), 
-                font, fs, config.HUD_TEXT_COLOR, th, cv2.LINE_AA)
-    
-    # Remaining time
-    remaining = max(0, duration * (1 - progress))
-    cv2.putText(frame, f"Time: {remaining:.1f}s", (x + padding, y + 100), 
-                font, fs, config.HUD_TEXT_COLOR, th, cv2.LINE_AA)
-    
-    # Progress bar
-    bar_x = x + padding
-    bar_y = y + 120
-    bar_w = width - padding * 2
-    bar_h = 20
-    
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), config.HUD_BORDER_COLOR, 2)
-    fill_w = int(bar_w * progress)
-    if fill_w > 0:
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), config.COLOR_SAFE, -1)
 
 
 def save_violation_snapshot(
@@ -184,12 +106,16 @@ def save_violation_snapshot(
     vehicle_id: int,
     bbox: Optional[Tuple[float, float, float, float]] = None,
     label: str = None,
-    color: Tuple[int, int, int] = None
+    color: Tuple[int, int, int] = None,
+    vehicle_class: str = "vehicle"
 ) -> str:
     """
     Lưu screenshot khi phát hiện violation.
     Chỉ vẽ bbox của phương tiện vi phạm, ẩn các bbox khác.
     Sử dụng cùng style bbox như khi chạy video.
+    
+    Tên file: {ViolationType}_{VehicleClass}_ID{id}_{timestamp}.jpg
+    VD: Helmet_motorcycle_ID12_20260211_143025.jpg
     
     Args:
         original_frame: Frame gốc (chưa vẽ bbox)
@@ -198,22 +124,25 @@ def save_violation_snapshot(
         bbox: Bounding box của xe vi phạm
         label: Label hiển thị trên bbox (mặc định: "VIOLATION #ID")
         color: Màu bbox (mặc định: COLOR_VIOLATION)
+        vehicle_class: Loại phương tiện (vd: "motorcycle", "car", "bus", "truck")
     
     Returns:
         Đường dẫn file đã lưu
     """
     import os
     from datetime import datetime
-    from pathlib import Path
     
-    # Đường dẫn lưu ảnh vi phạm
-    base_violations_dir = Path(r"C:\Users\khanh\OneDrive\Desktop\Violation Detect\Detection Web\Violations")
-    violations_dir = base_violations_dir / violation_type
+    # Sử dụng SNAPSHOT_DIR từ config
+    snapshot_base = config.SNAPSHOT_DIR
+    violations_dir = snapshot_base / violation_type
     os.makedirs(violations_dir, exist_ok=True)
     
-    # Tạo tên file với timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # milliseconds
-    filename = f"{violation_type}_id{vehicle_id}_{timestamp}.jpg"
+    # Tạo tên file theo format: ViolationType_VehicleClass_IDxx_timestamp.jpg
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    # Capitalize violation type, clean vehicle class
+    vtype_name = violation_type.replace("_", " ").title().replace(" ", "")
+    vclass_name = vehicle_class.replace(" ", "_") if vehicle_class else "vehicle"
+    filename = f"{vtype_name}_{vclass_name}_ID{vehicle_id}_{timestamp}.jpg"
     filepath = violations_dir / filename
     
     # Copy frame để không ảnh hưởng frame gốc
@@ -221,18 +150,15 @@ def save_violation_snapshot(
     
     # Vẽ CHỈ bbox của xe vi phạm - dùng cùng style như video đang chạy
     if bbox is not None:
-        # Màu và label mặc định
         if color is None:
             color = config.COLOR_VIOLATION
         if label is None:
             label = f"VIOLATION #{vehicle_id}"
-        
-        # Sử dụng draw_bbox_with_label để đảm bảo style giống video
         draw_bbox_with_label(snapshot, bbox, label, color)
     
     # Lưu full frame với chỉ bbox violation
     cv2.imwrite(str(filepath), snapshot)
     
-    print(f"📸 [SNAPSHOT] {violation_type.upper()} - Vehicle #{vehicle_id} -> {filepath}")
+    print(f"📸 [SNAPSHOT] {vtype_name}_{vclass_name}_ID{vehicle_id} -> {filepath}")
     
     return str(filepath)

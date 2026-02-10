@@ -837,7 +837,8 @@ def run(
                     violations += 1
                     direction = tracks[tid].direction
                     # Chụp screenshot ngay khi phát hiện violation (dùng frame gốc)
-                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2))
+                    vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
+                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                     print(f"[VIOLATION] Vehicle ID {tid} | Direction: {direction}")
                 elif label == "WARNING" and tracks[tid].last_event_frame == frame_idx:
                     warnings += 1

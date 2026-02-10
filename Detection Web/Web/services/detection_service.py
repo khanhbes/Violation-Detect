@@ -135,7 +135,7 @@ class HelmetDetectorWrapper:
                 
                 if rider_cls == CLS_PERSON_NO_HELMET and not state.safe_latched:
                     if (now - state.last_snapshot_time) >= 2.0:
-                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox)
+                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox, vehicle_class="motorcycle")
                         state.last_snapshot_time = now
                         self.total_violations += 1
                         violations.append({
@@ -290,7 +290,8 @@ class SidewalkDetectorWrapper:
                         
                         if track_id not in self.violated_ids:
                             self.violated_ids.add(track_id)
-                            save_violation_snapshot(frame, "sidewalk", track_id, box, label)
+                            vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
+                            save_violation_snapshot(frame, "sidewalk", track_id, box, label, vehicle_class=vclass)
                             violations.append({
                                 'type': 'sidewalk',
                                 'id': int(track_id),
@@ -435,7 +436,8 @@ class RedlightDetectorWrapper:
                 
                 if label == "VIOLATION" and self.tracks[tid].last_event_frame == self.frame_idx:
                     self.violations += 1
-                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2))
+                    vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
+                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                     violations.append({
                         'type': 'redlight',
                         'id': tid,

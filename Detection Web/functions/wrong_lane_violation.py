@@ -934,7 +934,8 @@ class WrongLaneDetector:
                     if cham_vach_for_bbox(x1, y1, x2, y2, solid_lines_for_touch):
                         st.touch_violation = True
                         self.cham_count += 1
-                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2))
+                        vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
+                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                         violations.append({
                             'type': 'wrong_lane',
                             'id': tid,
@@ -974,7 +975,8 @@ class WrongLaneDetector:
                                     self.wrong_count += 1
                                     st.dbg_text = ""
                                     st.dbg_time = time.time()
-                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2))
+                                    vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
+                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                                     violations.append({
                                         'type': 'wrong_lane',
                                         'id': tid,
@@ -1287,7 +1289,8 @@ def run(video_path: str = None, model_path: str = None):
                         st.touch_violation = True
                         cham_count += 1
                         # Chụp screenshot khi phát hiện cham vach (dùng frame gốc)
-                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2))
+                        vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
+                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                         if debug_on:
                             print(f"[CHAMVACH] ID={tid}")
 
@@ -1341,7 +1344,8 @@ def run(video_path: str = None, model_path: str = None):
                                     st.dbg_text = dbg
                                     st.dbg_time = time.time()
                                     # Chụp screenshot khi phát hiện wrong_dir (dùng frame gốc)
-                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2))
+                                    vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
+                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                                     if debug_on:
                                         print(f"[WRONGDIR] {dbg}")
 

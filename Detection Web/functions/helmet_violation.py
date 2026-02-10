@@ -271,7 +271,7 @@ def main():
                 # Immediate snapshot on no-helmet (ONLY if not safe-latched)
                 if rider_cls == CLS_PERSON_NO_HELMET and not state.safe_latched:
                     if (now - state.last_snapshot_time) >= EVENT_COOLDOWN_SEC:
-                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox)
+                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox, vehicle_class="motorcycle")
                         state.last_snapshot_time = now
                         total_violations += 1
 
