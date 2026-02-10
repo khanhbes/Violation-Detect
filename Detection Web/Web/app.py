@@ -16,6 +16,8 @@ import base64
 import json
 import cv2
 import numpy as np
+import uuid
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -25,7 +27,7 @@ import time
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -33,21 +35,19 @@ import uvicorn
 
 # Import UnifiedDetector from detection_service
 from services.detection_service import UnifiedDetector
+from config.config import config
 
 # =============================================================================
-# PATH CONFIG
+# PATH CONFIG (from config)
 # =============================================================================
 
-BASE_DIR = Path(__file__).parent.parent
-ASSETS_DIR = BASE_DIR / 'assets'
-MODEL_DIR = ASSETS_DIR / 'model'
-VIDEO_DIR = ASSETS_DIR / 'video'
-OUTPUT_DIR = BASE_DIR / 'output'
-SNAPSHOT_DIR = BASE_DIR / 'snapshots'
+MODEL_DIR = config.MODEL_DIR
+VIDEO_DIR = config.VIDEO_DIR
+OUTPUT_DIR = config.OUTPUT_DIR
+SNAPSHOT_DIR = config.SNAPSHOT_DIR
+UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Ensure directories exist
-OUTPUT_DIR.mkdir(exist_ok=True)
-SNAPSHOT_DIR.mkdir(exist_ok=True)
 for vtype in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane', 'sign']:
     (SNAPSHOT_DIR / vtype).mkdir(exist_ok=True)
 
@@ -58,7 +58,7 @@ for vtype in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane', 'sign
 app = FastAPI(
     title="Traffic Violation Detection",
     description="Real-time traffic violation detection with WebSocket streaming",
-    version="3.0.0"
+    version="4.0.0"
 )
 
 # Static files & templates
@@ -71,6 +71,7 @@ TEMPLATES_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOT_DIR)), name="snapshots")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
@@ -81,6 +82,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # Global detector (lazy loaded)
 detector: Optional[UnifiedDetector] = None
 current_model: Optional[str] = None
+
+# Video processing tasks
+video_tasks: Dict[str, Dict] = {}
 
 
 def get_detector(model_path: str) -> UnifiedDetector:
@@ -173,6 +177,303 @@ async def list_outputs():
 
 
 # =============================================================================
+# IMAGE DETECTION API
+# =============================================================================
+
+@app.post("/api/detect/image")
+async def detect_image(
+    file: UploadFile = File(...),
+    model: str = Form(None),
+    conf: float = Form(0.25)
+):
+    """
+    Upload an image and run YOLO detection on it.
+    Returns annotated image (base64) + list of detections.
+    """
+    try:
+        # Read image
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            return JSONResponse({"error": "Cannot decode image"}, status_code=400)
+        
+        # Get model
+        model_path = model or config.MODEL_PATH
+        det = get_detector(model_path)
+        
+        # Run prediction (not tracking, single image)
+        from ultralytics import YOLO
+        results = det.model.predict(
+            img, 
+            imgsz=config.IMG_SIZE, 
+            conf=conf, 
+            verbose=False
+        )
+        r0 = results[0]
+        
+        # Extract detections
+        detections = []
+        frame_vis = img.copy()
+        
+        if r0.boxes is not None and len(r0.boxes) > 0:
+            boxes = r0.boxes.xyxy.cpu().numpy()
+            classes = r0.boxes.cls.cpu().numpy().astype(int)
+            confs = r0.boxes.conf.cpu().numpy()
+            
+            for i in range(len(boxes)):
+                x1, y1, x2, y2 = [int(v) for v in boxes[i]]
+                cls_id = int(classes[i])
+                confidence = float(confs[i])
+                class_name = config.CLASS_NAMES.get(cls_id, f"class_{cls_id}")
+                
+                detections.append({
+                    "class_id": cls_id,
+                    "class_name": class_name,
+                    "confidence": round(confidence, 4),
+                    "bbox": [x1, y1, x2, y2]
+                })
+                
+                # Draw bbox
+                color = (0, 255, 0) if confidence > 0.5 else (0, 255, 255)
+                cv2.rectangle(frame_vis, (x1, y1), (x2, y2), color, 2)
+                label = f"{class_name} {confidence:.2f}"
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(frame_vis, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                cv2.putText(frame_vis, label, (x1 + 2, y1 - 4),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        
+        # Encode result image
+        _, buffer = cv2.imencode('.jpg', frame_vis, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        img_b64 = base64.b64encode(buffer).decode('utf-8')
+        
+        # Class summary
+        class_summary = {}
+        for d in detections:
+            name = d['class_name']
+            if name not in class_summary:
+                class_summary[name] = {"count": 0, "max_conf": 0, "min_conf": 1}
+            class_summary[name]["count"] += 1
+            class_summary[name]["max_conf"] = max(class_summary[name]["max_conf"], d["confidence"])
+            class_summary[name]["min_conf"] = min(class_summary[name]["min_conf"], d["confidence"])
+        
+        return JSONResponse({
+            "image": img_b64,
+            "detections": detections,
+            "total": len(detections),
+            "class_summary": class_summary
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# =============================================================================
+# VIDEO DETECTION API
+# =============================================================================
+
+@app.post("/api/detect/video")
+async def detect_video(
+    file: UploadFile = File(...),
+    model: str = Form(None),
+    conf: float = Form(0.25)
+):
+    """
+    Upload a video and start processing. Returns task_id to poll status.
+    """
+    try:
+        # Save uploaded video
+        task_id = str(uuid.uuid4())[:8]
+        input_path = UPLOAD_DIR / f"input_{task_id}.mp4"
+        
+        with open(input_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        
+        # Initialize task
+        video_tasks[task_id] = {
+            "status": "processing",
+            "progress": 0,
+            "input": str(input_path),
+            "output": None,
+            "total_detections": 0,
+            "class_summary": {},
+            "error": None
+        }
+        
+        # Process in background
+        model_path = model or config.MODEL_PATH
+        asyncio.create_task(process_video_task(task_id, str(input_path), model_path, conf))
+        
+        return JSONResponse({"task_id": task_id, "status": "processing"})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def process_video_task(task_id: str, input_path: str, model_path: str, conf: float):
+    """Background task to process video with detection."""
+    try:
+        from ultralytics import YOLO
+        model = YOLO(model_path)
+        
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            video_tasks[task_id]["status"] = "error"
+            video_tasks[task_id]["error"] = "Cannot open video"
+            return
+        
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        output_name = f"detected_{task_id}.mp4"
+        output_path = OUTPUT_DIR / output_name
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+        
+        class_summary = {}
+        total_detections = 0
+        frame_idx = 0
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            frame_idx += 1
+            
+            # Run detection with tracking
+            results = model.track(
+                frame, imgsz=config.IMG_SIZE, conf=conf,
+                iou=config.IOU_THRESHOLD, persist=True,
+                verbose=False, tracker=config.TRACKER
+            )
+            r0 = results[0]
+            
+            frame_vis = frame.copy()
+            
+            if r0.boxes is not None and len(r0.boxes) > 0:
+                boxes = r0.boxes.xyxy.cpu().numpy()
+                classes = r0.boxes.cls.cpu().numpy().astype(int)
+                confs = r0.boxes.conf.cpu().numpy()
+                
+                for i in range(len(boxes)):
+                    x1, y1, x2, y2 = [int(v) for v in boxes[i]]
+                    cls_id = int(classes[i])
+                    confidence = float(confs[i])
+                    class_name = config.CLASS_NAMES.get(cls_id, f"class_{cls_id}")
+                    
+                    total_detections += 1
+                    if class_name not in class_summary:
+                        class_summary[class_name] = {"count": 0, "max_conf": 0}
+                    class_summary[class_name]["count"] += 1
+                    class_summary[class_name]["max_conf"] = max(
+                        class_summary[class_name]["max_conf"], confidence
+                    )
+                    
+                    # Draw bbox
+                    color = (0, 255, 0) if confidence > 0.5 else (0, 255, 255)
+                    cv2.rectangle(frame_vis, (x1, y1), (x2, y2), color, 2)
+                    label = f"{class_name} {confidence:.2f}"
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    cv2.rectangle(frame_vis, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                    cv2.putText(frame_vis, label, (x1 + 2, y1 - 4),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            writer.write(frame_vis)
+            
+            # Update progress
+            progress = (frame_idx / total_frames) * 100 if total_frames > 0 else 0
+            video_tasks[task_id]["progress"] = round(progress, 1)
+            video_tasks[task_id]["total_detections"] = total_detections
+            video_tasks[task_id]["class_summary"] = class_summary
+            
+            # Yield control periodically
+            if frame_idx % 5 == 0:
+                await asyncio.sleep(0)
+        
+        cap.release()
+        writer.release()
+        
+        video_tasks[task_id]["status"] = "done"
+        video_tasks[task_id]["progress"] = 100
+        video_tasks[task_id]["output"] = f"/output/{output_name}"
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        video_tasks[task_id]["status"] = "error"
+        video_tasks[task_id]["error"] = str(e)
+
+
+@app.get("/api/detect/video/status/{task_id}")
+async def get_video_status(task_id: str):
+    """Poll video processing status."""
+    if task_id not in video_tasks:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+    return JSONResponse(video_tasks[task_id])
+
+
+# =============================================================================
+# LOOKUP API
+# =============================================================================
+
+@app.post("/api/lookup")
+async def lookup_violations(
+    phone: str = Form(""),
+    cccd: str = Form(""),
+    license_plate: str = Form("")
+):
+    """
+    Look up violations by phone, CCCD, or license plate.
+    For now, search snapshot filenames for matching patterns.
+    """
+    query = (phone + cccd + license_plate).strip().lower()
+    
+    if not query:
+        return JSONResponse({"results": [], "message": "Vui lòng nhập thông tin tra cứu"})
+    
+    results = []
+    for violation_type in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane', 'sign']:
+        folder = SNAPSHOT_DIR / violation_type
+        if folder.exists():
+            for f in sorted(folder.glob("*.jpg"), key=lambda x: x.stat().st_mtime, reverse=True):
+                if query in f.name.lower():
+                    results.append({
+                        "type": violation_type,
+                        "filename": f.name,
+                        "path": f"/snapshots/{violation_type}/{f.name}",
+                        "timestamp": f.stat().st_mtime
+                    })
+    
+    # If no exact match, return recent violations as "related"
+    if not results:
+        for violation_type in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane']:
+            folder = SNAPSHOT_DIR / violation_type
+            if folder.exists():
+                for f in sorted(folder.glob("*.jpg"), key=lambda x: x.stat().st_mtime, reverse=True)[:3]:
+                    results.append({
+                        "type": violation_type,
+                        "filename": f.name,
+                        "path": f"/snapshots/{violation_type}/{f.name}",
+                        "timestamp": f.stat().st_mtime,
+                        "related": True
+                    })
+    
+    return JSONResponse({
+        "results": results[:20],
+        "query": {"phone": phone, "cccd": cccd, "license_plate": license_plate},
+        "total": len(results)
+    })
+
+
+# =============================================================================
 # WEBSOCKET - REAL-TIME DETECTION
 # =============================================================================
 
@@ -185,6 +486,7 @@ async def websocket_detect(websocket: WebSocket):
     Client sends:
         {"action": "start", "video": "path", "model": "path", "detectors": ["helmet"]}
         {"action": "stop"}
+        {"action": "update_settings", "conf": 0.5, "debug": true}
     
     Server sends:
         {"type": "frame", "image": "base64...", "stats": {...}}
@@ -196,6 +498,10 @@ async def websocket_detect(websocket: WebSocket):
     running = False
     det = None
     
+    # Mutable settings that can be updated mid-stream
+    live_conf = 0.25
+    live_debug = False
+    
     try:
         while True:
             data = await websocket.receive_text()
@@ -204,11 +510,11 @@ async def websocket_detect(websocket: WebSocket):
             
             if action == "start":
                 # Get parameters
-                video_path = msg.get("video") or str(VIDEO_DIR / "test_2.mp4")
-                model_path = msg.get("model") or str(MODEL_DIR / "best_yolo12s_seg.pt")
+                video_path = msg.get("video") or config.DEFAULT_VIDEO
+                model_path = msg.get("model") or config.MODEL_PATH
                 detectors = msg.get("detectors", ["helmet"])
-                conf = float(msg.get("conf", 0.25))
-                debug = bool(msg.get("debug", False))
+                live_conf = float(msg.get("conf", 0.25))
+                live_debug = bool(msg.get("debug", False))
                 
                 # Validate paths
                 if not Path(video_path).exists():
@@ -240,8 +546,8 @@ async def websocket_detect(websocket: WebSocket):
                     "fps": fps,
                     "total_frames": total_frames,
                     "detectors": detectors,
-                    "conf": conf,
-                    "debug": debug
+                    "conf": live_conf,
+                    "debug": live_debug
                 })
                 
                 running = True
@@ -253,8 +559,10 @@ async def websocket_detect(websocket: WebSocket):
                         await websocket.send_json({"type": "finished", "stats": det.get_stats()})
                         break
                     
-                    # Detect using UnifiedDetector (imports logic from functions/)
-                    frame_vis, violations = det.process_frame(frame, detectors, conf=conf, debug=debug)
+                    # Detect using UnifiedDetector with LIVE settings
+                    frame_vis, violations = det.process_frame(
+                        frame, detectors, conf=live_conf, debug=live_debug
+                    )
                     
                     # Resize for streaming
                     h, w = frame_vis.shape[:2]
@@ -284,13 +592,14 @@ async def websocket_detect(websocket: WebSocket):
                     # Rate limit
                     await asyncio.sleep(frame_delay * 0.3)
                     
-                    # Check for stop (non-blocking)
+                    # Check for messages (stop or update_settings) non-blocking
                     try:
                         stop_msg = await asyncio.wait_for(
                             websocket.receive_text(),
                             timeout=0.001
                         )
                         stop_data = json.loads(stop_msg)
+                        
                         if stop_data.get("action") == "stop":
                             running = False
                             if cap:
@@ -300,6 +609,18 @@ async def websocket_detect(websocket: WebSocket):
                                 det.reset()
                             await websocket.send_json({"type": "stopped"})
                             break
+                        
+                        elif stop_data.get("action") == "update_settings":
+                            # Live update confidence and debug
+                            if "conf" in stop_data:
+                                live_conf = float(stop_data["conf"])
+                            if "debug" in stop_data:
+                                live_debug = bool(stop_data["debug"])
+                            await websocket.send_json({
+                                "type": "settings_updated",
+                                "conf": live_conf,
+                                "debug": live_debug
+                            })
                     except asyncio.TimeoutError:
                         pass
                 
@@ -340,13 +661,14 @@ async def websocket_detect(websocket: WebSocket):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚦 TRAFFIC VIOLATION DETECTION WEB SERVER v3.0")
+    print("🚦 TRAFFIC VIOLATION DETECTION WEB SERVER v4.0")
     print("   Now using real detection logic from functions/")
     print("=" * 60)
     print(f"📁 Models: {MODEL_DIR}")
     print(f"📁 Videos: {VIDEO_DIR}")
     print(f"📁 Output: {OUTPUT_DIR}")
-    print(f"📁 Functions: {BASE_DIR / 'functions'}")
+    print(f"📁 Uploads: {UPLOAD_DIR}")
+    print(f"📁 Functions: {config.BASE_DIR / 'functions'}")
     print("=" * 60)
     print("🌐 Open: http://localhost:8000")
     print("=" * 60)

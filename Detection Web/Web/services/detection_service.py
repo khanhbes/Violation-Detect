@@ -47,17 +47,10 @@ from functions.sidewalk_violation import (
 )
 
 # =============================================================================
-# PATH CONFIG
+# PATH CONFIG (from config)
 # =============================================================================
 
-ASSETS_DIR = BASE_DIR / 'assets'
-MODEL_DIR = ASSETS_DIR / 'model'
-VIDEO_DIR = ASSETS_DIR / 'video'
-OUTPUT_DIR = BASE_DIR / 'output'
-SNAPSHOT_DIR = BASE_DIR / 'snapshots'
-
-OUTPUT_DIR.mkdir(exist_ok=True)
-SNAPSHOT_DIR.mkdir(exist_ok=True)
+SNAPSHOT_DIR = config.SNAPSHOT_DIR
 for vtype in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane']:
     (SNAPSHOT_DIR / vtype).mkdir(exist_ok=True)
 
@@ -525,7 +518,7 @@ class UnifiedDetector:
     """
     
     def __init__(self, model_path: str = None):
-        self.model_path = model_path or str(MODEL_DIR / 'best_yolo12s_seg.pt')
+        self.model_path = model_path or config.MODEL_PATH
         print(f"🔄 Loading YOLO model: {self.model_path}")
         self.model = YOLO(self.model_path)
         print("✅ Model loaded!")

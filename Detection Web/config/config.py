@@ -19,8 +19,10 @@ class Config:
     MODEL_DIR = ASSETS_DIR / 'model'
     VIDEO_DIR = ASSETS_DIR / 'video'
     OUTPUT_DIR = BASE_DIR / 'output'
+    SNAPSHOT_DIR = BASE_DIR / 'snapshots'
     
     OUTPUT_DIR.mkdir(exist_ok=True)
+    SNAPSHOT_DIR.mkdir(exist_ok=True)
     
     MODEL_PATH = str(MODEL_DIR / 'best_yolo12s_seg.pt')
     DEFAULT_VIDEO = str(VIDEO_DIR / 'test_2.mp4')
