@@ -50,7 +50,7 @@ VERTICAL_GATE_TOP_RATIO = 0.85
 EVENT_COOLDOWN_SEC = 2.0
 
 # Snapshot directory
-SNAPSHOT_DIR = str(config.OUTPUT_DIR / "snapshots")
+SNAPSHOT_DIR = str(config.OUTPUT_DIR / "violations")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
 # Colors (BGR)

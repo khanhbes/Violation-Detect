@@ -92,15 +92,6 @@ class Config:
     SIDEWALK_CLASS = [27]
     MEDIAN_CLASS = [20]
     
-    # Class Names - Tên hiển thị cho từng class ID
-    CLASS_NAMES = {
-        0: "Ambulance",
-        6: "Car",
-        9: "Fire Truck",
-        21: "Motorcycle",
-        26: "Police Car",
-    }
-    
     # ========================================
     # DISPLAY - Hiển thị
     # ========================================
