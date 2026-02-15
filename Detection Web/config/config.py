@@ -87,10 +87,71 @@ class Config:
     SOLID_YELLOW_LINE = [38]               # Vạch liền vàng - 2 chiều, không được sang
     DASHED_YELLOW_LINE = [8]               # Vạch đứt vàng - 2 chiều, được vượt
     
+    # Traffic Signs (biển báo)
+    SIGN_CLASSES = {
+        22: 'no_left_turn',
+        23: 'no_right_turn',
+        24: 'no_straight',
+        31: 'straight_and_left_turn_only',
+        32: 'straight_and_right_turn_only',
+        33: 'straight_only',
+        34: 'turn_left_only',
+        35: 'turn_right_only',
+    }
+    
     # Infrastructure
     STOPLINE_CLASS = [39]
     SIDEWALK_CLASS = [27]
     MEDIAN_CLASS = [20]
+    
+    # ========================================
+    # DETECTION - Ngưỡng phát hiện
+    # ========================================
+    CONF_DETECTION = 0.35
+    
+    # Vehicle class names (short)
+    VEHICLE_CLASS_NAMES = {
+        0: 'ambulance',
+        6: 'car',
+        9: 'fire_truck',
+        21: 'motorcycle',
+        26: 'police_car',
+    }
+    
+    # Position history & Violation confirmation
+    MAX_POSITION_HISTORY = 60
+    VIOLATION_CONSECUTIVE_FRAMES = 5
+    
+    # ========================================
+    # WRONG-WAY DETECTION
+    # ========================================
+    LEARNING_DURATION_FRAMES = 150         # Số frame learning phase
+    KALMAN_PROCESS_NOISE = 0.03            # Kalman filter process noise
+    KALMAN_MEASUREMENT_NOISE = 10.0        # Kalman filter measurement noise
+    TRAJECTORY_SMOOTHING_SIGMA = 2.0       # Gaussian smoothing sigma cho trajectory
+    MIN_SPEED_THRESHOLD = 2.0              # Tốc độ tối thiểu để xét hướng (pixel/frame)
+    OPPOSITE_ANGLE_THRESHOLD = 120         # Ngưỡng góc (°) để coi là ngược chiều
+    VIOLATION_HISTORY_WINDOW = 30          # Số frame lưu evidence vi phạm
+    MIN_TRACKING_FRAMES = 10               # Frame tối thiểu trước khi xét vi phạm
+    ENTRY_GRACE_PERIOD = 15                # Grace period khi xe mới xuất hiện
+    BOUNDARY_MARGIN = 30                   # Margin biên khung hình (pixel)
+    NUM_VERTICAL_LANES = 4                 # Số lane dọc cho spatial zones
+    NUM_HORIZONTAL_ZONES = 3               # Số zone ngang cho spatial zones
+    STALE_TRACKER_FRAMES = 60              # Xóa tracker sau N frame không cập nhật
+    
+    # ========================================
+    # SIGN VIOLATION DETECTION
+    # ========================================
+    SIGN_CALIBRATION_FRAMES = 100          # Số frame calibration biển báo
+    SIGN_CONFIDENCE = 0.5                  # Confidence tối thiểu cho biển báo
+    SIGN_MIN_SAMPLES = 5                   # Số detection tối thiểu để xác nhận biển
+    SIGN_CLUSTER_DISTANCE = 120.0          # Khoảng cách pixel tối đa để gộp cùng biển
+    SIGN_STRAIGHT_RATIO = 0.35             # Ngưỡng dx/dy để phân biệt rẽ vs thẳng
+    SIGN_MAX_AREA_RATIO = 0.03            # Tỉ lệ diện tích bbox/frame tối đa
+    SIGN_MAX_ASPECT_RATIO = 2.5            # Tỉ lệ w/h tối đa cho bbox biển báo
+    SIGN_ENFORCEMENT_ZONE_X = 0.15         # Zone width = frame_width * ratio (mỗi bên)
+    SIGN_ENFORCEMENT_ZONE_UP = 0.08        # Zone height lên trên = frame_height * ratio
+    SIGN_ENFORCEMENT_ZONE_DOWN = 0.15      # Zone height xuống dưới = frame_height * ratio
     
     # ========================================
     # DISPLAY - Hiển thị

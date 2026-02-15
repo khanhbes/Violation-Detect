@@ -1,0 +1,47 @@
+# ========================================
+# IDE & System
+# ========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# ========================================
+# Python
+# ========================================
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.env
+
+# ========================================
+# Detection Web - Large Files & Outputs
+# ========================================
+# Generated outputs (Violations)
+Detection Web/output/
+Detection Web/violations/
+Detection Web/Violations/
+Detection Web/Web/uploads/
+Detection Web/Web/static/snapshots/
+
+# Large binaries (keep smaller files if needed, but usually models/videos are large)
+Detection Web/assets/video/
+Detection Web/assets/model/*.pt
+Detection Web/assets/model/*.onnx
+
+# ========================================
+# Flutter App
+# ========================================
+App/traffic_violation_app/build/
+App/traffic_violation_app/.dart_tool/
+App/traffic_violation_app/.flutter-plugins
+App/traffic_violation_app/.flutter-plugins-dependencies

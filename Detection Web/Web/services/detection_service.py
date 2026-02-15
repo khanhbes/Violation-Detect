@@ -476,38 +476,17 @@ class WrongWayDetectorWrapper:
     """Thin wrapper around PrecisionWrongWayDetector"""
     
     def __init__(self):
-        self.detector = None  # Lazy init
+        self.detector = PrecisionWrongWayDetector()
     
     def reset(self):
-        self.detector = None
+        self.detector.reset()
     
-    def ensure_init(self):
-        if self.detector is None:
-            self.detector = PrecisionWrongWayDetector()
-    
-    def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[dict]]:
-        """process_frame already exists in PrecisionWrongWayDetector"""
-        self.ensure_init()
-        prev_violations = self.detector.total_violations
-        frame_out = self.detector.process_frame(frame)
-        
-        violations = []
-        if self.detector.total_violations > prev_violations:
-            violations.append({
-                'type': 'wrong_way',
-                'id': -1,
-                'label': 'Wrong Way'
-            })
-        
-        return frame_out, violations
+    def process_frame(self, frame: np.ndarray, r0=None, conf: float = 0.25, debug: bool = False) -> Tuple[np.ndarray, List[dict]]:
+        """Process frame — passes r0 from UnifiedDetector's shared model."""
+        return self.detector.process_frame(frame, r0=r0, conf=conf, debug=debug)
     
     def get_stats(self):
-        if self.detector is None:
-            return {'violations': 0, 'learning': True}
-        return {
-            'violations': self.detector.total_violations,
-            'learning': self.detector.is_learning
-        }
+        return self.detector.get_stats()
 
 
 # =============================================================================
@@ -566,13 +545,8 @@ class UnifiedDetector:
         all_violations = []
         frame_vis = frame.copy()
         
-        # Wrong way runs its own model
-        if 'wrong_way' in enabled:
-            frame_vis, ww_viols = self.wrong_way.process_frame(frame_vis)
-            all_violations.extend(ww_viols)
-        
-        # Other detectors share YOLO results
-        needs_shared_model = bool(set(enabled) & {'helmet', 'sidewalk', 'redlight', 'wrong_lane'})
+        # All detectors share YOLO results (wrong_way no longer loads its own model)
+        needs_shared_model = bool(set(enabled) & {'helmet', 'sidewalk', 'redlight', 'wrong_lane', 'wrong_way'})
         
         r0 = None
         if needs_shared_model:
@@ -586,6 +560,10 @@ class UnifiedDetector:
                 tracker=config.TRACKER
             )
             r0 = results[0]
+        
+        if 'wrong_way' in enabled:
+            frame_vis, ww_viols = self.wrong_way.process_frame(frame_vis, r0=r0, conf=conf, debug=debug)
+            all_violations.extend(ww_viols)
         
         if 'helmet' in enabled and r0 is not None:
             frame_vis, h_viols = self.helmet.process_frame(frame_vis, r0)
@@ -617,13 +595,13 @@ class UnifiedDetector:
     def get_stats(self) -> Dict[str, Any]:
         """Get combined stats"""
         elapsed = time.time() - self.start_time
-        wrong_way_total = self.wrong_way.detector.total_violations if self.wrong_way.detector else 0
+        wrong_way_stats = self.wrong_way.get_stats()
         wrong_lane_stats = self.wrong_lane.get_stats()
         violations = {
             'helmet': self.helmet.total_violations,
             'sidewalk': len(self.sidewalk.violated_ids),
             'redlight': self.redlight.violations,
-            'wrong_way': wrong_way_total,
+            'wrong_way': wrong_way_stats.get('violations', 0),
             'wrong_lane': wrong_lane_stats.get('total', 0)
         }
         return {

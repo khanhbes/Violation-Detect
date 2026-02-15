@@ -38,3 +38,6 @@
 37: solid_white_line
 38: solid_yellow_line
 39: stop_line
+
+
+IP: 192.168.1.12

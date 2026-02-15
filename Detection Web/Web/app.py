@@ -86,6 +86,84 @@ current_model: Optional[str] = None
 # Video processing tasks
 video_tasks: Dict[str, Dict] = {}
 
+# ─── Violation Store (in-memory, for App sync) ─────────────────────────────
+violation_store: List[Dict] = []
+violation_counter = 0
+
+# ─── App WebSocket Clients (for real-time push) ────────────────────────────
+app_clients: set = set()
+
+async def broadcast_to_apps(violation: Dict):
+    """Push a violation to all connected Flutter app clients."""
+    if not app_clients:
+        return
+    message = json.dumps({
+        "type": "new_violation",
+        "data": violation
+    })
+    disconnected = set()
+    for ws in app_clients:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            disconnected.add(ws)
+    app_clients.difference_update(disconnected)
+    if disconnected:
+        print(f"📱 Cleaned {len(disconnected)} disconnected app client(s)")
+    print(f"📱 Broadcast violation to {len(app_clients)} app client(s)")
+
+VIOLATION_INFO = {
+    'helmet':     {'name': 'Không đội mũ bảo hiểm',   'fine': 200000,  'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
+    'no_helmet':  {'name': 'Không đội mũ bảo hiểm',   'fine': 200000,  'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
+    'redlight':   {'name': 'Vượt đèn đỏ',             'fine': 800000,  'code': 'DD01',  'law': 'Điều 6, NĐ 100/2019/NĐ-CP'},
+    'sidewalk':   {'name': 'Chạy lên vỉa hè',         'fine': 300000,  'code': 'VH01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'wrong_way':  {'name': 'Chạy ngược chiều',         'fine': 1000000, 'code': 'NC01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'wrong_lane': {'name': 'Đi sai làn đường',         'fine': 1000000, 'code': 'LD01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'sign':       {'name': 'Vi phạm biển báo',         'fine': 500000,  'code': 'BB01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+}
+
+def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str = None):
+    """Save a violation to the in-memory store for App consumption."""
+    global violation_counter
+    violation_counter += 1
+    info = VIOLATION_INFO.get(v_type, VIOLATION_INFO.get('helmet'))
+    now = datetime.now()
+
+    # Try to find the latest snapshot image for this violation
+    image_url = None
+    if snapshot_path:
+        image_url = snapshot_path
+    else:
+        # Search snapshot directory for most recent file matching this type
+        snap_dir = SNAPSHOT_DIR / v_type
+        if snap_dir.exists():
+            files = sorted(snap_dir.glob('*.jpg'), key=lambda f: f.stat().st_mtime, reverse=True)
+            if files:
+                image_url = f'/snapshots/{v_type}/{files[0].name}'
+
+    violation = {
+        'id': f'vio_{violation_counter:04d}',
+        'type': v_type,
+        'violationType': info['name'],
+        'violationCode': info['code'],
+        'description': f'{info["name"]} - {label}',
+        'fineAmount': info['fine'],
+        'lawReference': info['law'],
+        'timestamp': now.isoformat(),
+        'location': 'Camera giám sát giao thông',
+        'imageUrl': image_url,
+        'trackId': track_id,
+        'status': 'pending',
+        'licensePlate': 'Đang xác minh',
+    }
+    violation_store.append(violation)
+    print(f"📱 Violation stored: {info['name']} (ID: {violation['id']})")
+
+    # Broadcast to connected app clients in real-time
+    asyncio.ensure_future(broadcast_to_apps(violation))
+
+    return violation
+
 
 def get_detector(model_path: str) -> UnifiedDetector:
     """Get or create UnifiedDetector with specified model"""
@@ -174,6 +252,57 @@ async def list_outputs():
         })
     outputs.sort(key=lambda x: x['timestamp'], reverse=True)
     return JSONResponse(outputs[:20])
+
+
+# =============================================================================
+# APP SYNC API (for Flutter mobile app)
+# =============================================================================
+
+@app.get("/api/app/violations")
+async def get_app_violations(since: str = None):
+    """
+    Get violations for mobile app.
+    Optional 'since' param (ISO datetime) to get only new violations.
+    """
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+            filtered = [
+                v for v in violation_store
+                if datetime.fromisoformat(v['timestamp']) > since_dt
+            ]
+            return JSONResponse({'violations': filtered, 'total': len(filtered)})
+        except ValueError:
+            pass
+    return JSONResponse({'violations': violation_store, 'total': len(violation_store)})
+
+
+@app.get("/api/app/violations/{violation_id}")
+async def get_app_violation_detail(violation_id: str):
+    """Get single violation detail for mobile app."""
+    for v in violation_store:
+        if v['id'] == violation_id:
+            return JSONResponse(v)
+    return JSONResponse({'error': 'Violation not found'}, status_code=404)
+
+
+@app.get("/api/app/stats")
+async def get_app_stats():
+    """Get violation statistics for mobile app dashboard."""
+    total = len(violation_store)
+    pending = len([v for v in violation_store if v['status'] == 'pending'])
+    total_fines = sum(v['fineAmount'] for v in violation_store if v['status'] == 'pending')
+    by_type = {}
+    for v in violation_store:
+        t = v['type']
+        by_type[t] = by_type.get(t, 0) + 1
+    return JSONResponse({
+        'total': total,
+        'pending': pending,
+        'paid': total - pending,
+        'totalFines': total_fines,
+        'byType': by_type,
+    })
 
 
 # =============================================================================
@@ -582,11 +711,16 @@ async def websocket_detect(websocket: WebSocket):
                         "progress": det.frame_idx / total_frames * 100
                     })
                     
-                    # Send violations if any
+                    # Send violations if any + save to store
                     for v in violations:
+                        stored = store_violation(
+                            v_type=v.get('type', 'unknown'),
+                            track_id=v.get('id', 0),
+                            label=v.get('label', ''),
+                        )
                         await websocket.send_json({
                             "type": "violation",
-                            "data": v
+                            "data": {**v, "stored": stored}
                         })
                     
                     # Rate limit
@@ -653,6 +787,71 @@ async def websocket_detect(websocket: WebSocket):
     finally:
         if cap:
             cap.release()
+
+
+# =============================================================================
+# WEBSOCKET - APP REAL-TIME NOTIFICATIONS
+# =============================================================================
+
+@app.websocket("/ws/app")
+async def websocket_app(websocket: WebSocket):
+    """
+    WebSocket endpoint for Flutter app real-time notifications.
+    
+    App connects here to receive instant violation alerts.
+    Server pushes: {"type": "new_violation", "data": {...}}
+    App can send:  {"action": "ping"} to keep alive
+    """
+    await websocket.accept()
+    app_clients.add(websocket)
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    print(f"📱 App client connected: {client_ip} (total: {len(app_clients)})")
+    
+    # Send current violation count as welcome message
+    await websocket.send_text(json.dumps({
+        "type": "connected",
+        "message": "Connected to violation detection server",
+        "pending_violations": len([v for v in violation_store if v['status'] == 'pending']),
+        "total_violations": len(violation_store),
+    }))
+    
+    try:
+        while True:
+            # Keep connection alive — listen for pings or commands
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            action = msg.get("action", "")
+            
+            if action == "ping":
+                await websocket.send_text(json.dumps({
+                    "type": "pong",
+                    "timestamp": datetime.now().isoformat()
+                }))
+            elif action == "get_violations":
+                # App can request all violations
+                await websocket.send_text(json.dumps({
+                    "type": "violations_list",
+                    "data": violation_store
+                }))
+            elif action == "get_stats":
+                total = len(violation_store)
+                pending = len([v for v in violation_store if v['status'] == 'pending'])
+                await websocket.send_text(json.dumps({
+                    "type": "stats",
+                    "data": {
+                        "total": total,
+                        "pending": pending,
+                        "paid": total - pending,
+                        "totalFines": sum(v['fineAmount'] for v in violation_store if v['status'] == 'pending'),
+                    }
+                }))
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"📱 App client error: {e}")
+    finally:
+        app_clients.discard(websocket)
+        print(f"📱 App client disconnected: {client_ip} (total: {len(app_clients)})")
 
 
 # =============================================================================
