@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/data/mock_data.dart';
-import 'package:traffic_violation_app/services/api_service.dart';
 
 class ProfileScreen extends StatelessWidget {
-  final bool embedded;
-  const ProfileScreen({super.key, this.embedded = false});
+  const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final user = MockData.currentUser;
     
     return Scaffold(
-      appBar: embedded ? null : AppBar(
+      appBar: AppBar(
         title: const Text('Tài khoản'),
         actions: [
           IconButton(
@@ -279,21 +277,13 @@ class ProfileScreen extends StatelessWidget {
           ),
           const Divider(height: 1),
           _buildSettingItem(
-            Icons.dns_outlined,
-            'Cấu hình Server (IP)',
-            () {
-              _showServerConfigDialog(context);
-            },
-          ),
-          const Divider(height: 1),
-          _buildSettingItem(
             Icons.dark_mode_outlined,
             'Giao diện tối',
             () {},
             trailing: Switch(
               value: false,
               onChanged: (v) {},
-              activeColor: AppTheme.primaryColor,
+              activeThumbColor: AppTheme.primaryColor,
             ),
           ),
           const Divider(height: 1),
@@ -356,52 +346,6 @@ class ProfileScreen extends StatelessWidget {
               foregroundColor: Colors.white,
             ),
             child: const Text('Đăng xuất'),
-          ),
-        ],
-      ),
-    );
-  }
-  void _showServerConfigDialog(BuildContext context) {
-    final TextEditingController ipController =
-        TextEditingController(text: ApiService.serverIp);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cấu hình Server'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Nhập địa chỉ IP của máy tính chạy server:'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ipController,
-              decoration: const InputDecoration(
-                labelText: 'Server IP',
-                hintText: 'e.g. 192.168.1.100',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.number,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Hủy'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final ip = ipController.text.trim();
-              if (ip.isNotEmpty) {
-                ApiService().setServerAddress(ip);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Đã cập nhật Server IP: $ip')),
-                );
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('Lưu'),
           ),
         ],
       ),

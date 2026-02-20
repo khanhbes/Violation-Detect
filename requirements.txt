@@ -9,3 +9,6 @@ numpy>=1.24.0
 
 # Thư viện hỗ trợ thuật toán Tracking (Linear Assignment Problem)
 lapx>=0.5.5
+
+# Firebase Admin SDK (FCM push notifications + Firestore)
+firebase-admin>=6.4.0

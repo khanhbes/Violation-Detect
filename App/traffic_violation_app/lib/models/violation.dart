@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Violation {
   final String id;
   final String licensePlate;
@@ -29,14 +31,26 @@ class Violation {
   bool get isPaid => status == 'paid';
   bool get isCancelled => status == 'cancelled';
 
+  /// Parse timestamp from either Firestore Timestamp or ISO string.
+  static DateTime _parseTimestamp(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
+  }
+
   factory Violation.fromJson(Map<String, dynamic> json) {
+    // Prefer 'createdAt' (Firestore server timestamp) over 'timestamp' (ISO string)
+    final ts = json['createdAt'] ?? json['timestamp'];
+
     return Violation(
       id: json['id']?.toString() ?? '',
       licensePlate: json['licensePlate'] ?? 'Đang xác minh',
       violationType: json['violationType'] ?? 'Vi phạm',
       violationCode: json['violationCode'] ?? '',
       description: json['description'] ?? '',
-      timestamp: DateTime.tryParse(json['timestamp'] ?? '') ?? DateTime.now(),
+      timestamp: _parseTimestamp(ts),
       location: json['location'] ?? '',
       imageUrl: json['imageUrl'] ?? '',
       fineAmount: (json['fineAmount'] ?? 0).toDouble(),
@@ -61,3 +75,4 @@ class Violation {
     };
   }
 }
+

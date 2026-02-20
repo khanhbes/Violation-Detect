@@ -23,15 +23,17 @@ class Vehicle {
 
   factory Vehicle.fromJson(Map<String, dynamic> json) {
     return Vehicle(
-      id: json['id'],
-      licensePlate: json['licensePlate'],
-      vehicleType: json['vehicleType'],
-      brand: json['brand'],
-      model: json['model'],
-      color: json['color'],
-      ownerName: json['ownerName'],
-      ownerId: json['ownerId'],
-      registrationDate: DateTime.parse(json['registrationDate']),
+      id: json['id'] ?? '',
+      licensePlate: json['licensePlate'] ?? '',
+      vehicleType: json['vehicleType'] ?? '',
+      brand: json['brand'] ?? '',
+      model: json['model'] ?? '',
+      color: json['color'] ?? '',
+      ownerName: json['ownerName'] ?? '',
+      ownerId: json['ownerId'] ?? '',
+      registrationDate: json['registrationDate'] != null
+          ? DateTime.parse(json['registrationDate'])
+          : DateTime.now(),
     );
   }
 

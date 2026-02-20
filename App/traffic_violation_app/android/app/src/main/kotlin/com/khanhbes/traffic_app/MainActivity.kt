@@ -1,4 +1,4 @@
-package com.example.traffic_violation_app
+package com.khanhbes.traffic_app
 
 import io.flutter.embedding.android.FlutterActivity
 

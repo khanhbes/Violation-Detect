@@ -4,139 +4,12 @@ import 'package:traffic_violation_app/data/mock_data.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
+import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/screens/violations_screen.dart';
 import 'package:traffic_violation_app/screens/profile_screen.dart';
+import 'package:traffic_violation_app/screens/vehicles_screen.dart';
 import 'dart:async';
 
-// ─── Vehicles Page (inline) ───────────────────────────────────────
-class _VehiclesPage extends StatelessWidget {
-  const _VehiclesPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final vehicles = MockData.vehicles;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Phương tiện'),
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Tính năng đang phát triển')),
-              );
-            },
-          ),
-        ],
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: vehicles.length,
-        itemBuilder: (context, index) {
-          final v = vehicles[index];
-          final isMotorcycle = v.vehicleType.contains('máy');
-          return Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: isMotorcycle
-                    ? [const Color(0xFF1A237E), const Color(0xFF283593)]
-                    : [const Color(0xFF004D40), const Color(0xFF00695C)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: (isMotorcycle ? Colors.indigo : Colors.teal)
-                      .withOpacity(0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        isMotorcycle
-                            ? Icons.two_wheeler
-                            : Icons.directions_car,
-                        color: Colors.white70,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        v.brand,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      v.licensePlate,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 3,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      _infoChip(Icons.color_lens_outlined, v.color),
-                      const SizedBox(width: 12),
-                      _infoChip(Icons.category_outlined, v.vehicleType),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _infoChip(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.white60),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─── Home Screen ──────────────────────────────────────────────────
 class HomeScreen extends StatefulWidget {
@@ -154,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isLoading = true;
   StreamSubscription? _newViolationSub;
   StreamSubscription? _connectionSub;
+  StreamSubscription? _firestoreSub;
 
   // Animation controllers
   late AnimationController _fadeController;
@@ -177,7 +51,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _pages.addAll([
       const SizedBox(), // placeholder, replaced by _buildHomePage()
       const ViolationsScreen(embedded: true),
-      const _VehiclesPage(),
+      const VehiclesScreen(),
       const ProfileScreen(embedded: true),
     ]);
 
@@ -187,39 +61,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _initServices() async {
     await _notif.initialize();
 
-    // Listen for new violations → push notification
+    // Listen for new violations from WebSocket → push notification
     _newViolationSub = _api.newViolationStream.listen((violation) {
       _notif.showViolationNotification(violation);
     });
 
-    // Connect WebSocket (real-time)
+    // Connect WebSocket for real-time detection alerts from Server IP
     _api.connectWebSocket();
     
-    // Listen to connection status changes
-    _connectionSub = _api.connectionStream.listen((isConnected) {
+    // Listen to connection status changes (debounced to avoid flicker)
+    _connectionSub = _api.connectionStream
+        .distinct() // Only emit when state actually changes
+        .listen((isConnected) {
       if (mounted) setState(() {});
     });
 
-    // Try API first, fallback to mock
-    final connected = await _api.testConnection();
-    if (connected) {
-      _api.startPolling(); // Fallback polling
-      _api.violationsStream.listen((violations) {
-        if (mounted) {
-          setState(() {
-            _violations = violations;
-            _isLoading = false;
-          });
-        }
-      });
-    } else {
+    // Read violation history from Firestore (primary data source)
+    _firestoreSub = FirestoreService().violationsStream().listen((violations) {
       if (mounted) {
         setState(() {
-          _violations = MockData.violations;
+          _violations = violations;
           _isLoading = false;
         });
       }
-    }
+    });
+
+    // Also test HTTP connection to server
+    _api.testConnection();
 
     _fadeController.forward();
     _slideController.forward();
@@ -231,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _slideController.dispose();
     _newViolationSub?.cancel();
     _connectionSub?.cancel();
+    _firestoreSub?.cancel();
     super.dispose();
   }
 
@@ -480,6 +349,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   color: isRealtime ? Colors.green[800] : Colors.blue[800],
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          if (!isConnected)
+            GestureDetector(
+              onTap: () {
+                _api.reconnect();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Đang kết nối lại...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.refresh, size: 14, color: Colors.red[700]),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Thử lại',
+                      style: TextStyle(
+                        color: Colors.red[700],
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

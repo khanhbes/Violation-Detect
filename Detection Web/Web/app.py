@@ -28,13 +28,14 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
 # Import UnifiedDetector from detection_service
 from services.detection_service import UnifiedDetector
+from services.fcm_service import FCMService
 from config.config import config
 
 # =============================================================================
@@ -59,6 +60,17 @@ app = FastAPI(
     title="Traffic Violation Detection",
     description="Real-time traffic violation detection with WebSocket streaming",
     version="4.0.0"
+)
+
+
+# Enable CORS for mobile app
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Static files & templates
@@ -93,6 +105,13 @@ violation_counter = 0
 # ─── App WebSocket Clients (for real-time push) ────────────────────────────
 app_clients: set = set()
 
+# ─── FCM Push Notification Service ─────────────────────────────────────────
+try:
+    fcm_service = FCMService()
+except Exception as e:
+    print(f"⚠️ FCM service init failed: {e}")
+    fcm_service = None
+
 async def broadcast_to_apps(violation: Dict):
     """Push a violation to all connected Flutter app clients."""
     if not app_clients:
@@ -123,7 +142,7 @@ VIOLATION_INFO = {
 }
 
 def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str = None):
-    """Save a violation to the in-memory store for App consumption."""
+    """Save a violation to in-memory store, Firestore, and Firebase Storage."""
     global violation_counter
     violation_counter += 1
     info = VIOLATION_INFO.get(v_type, VIOLATION_INFO.get('helmet'))
@@ -131,18 +150,78 @@ def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str =
 
     # Try to find the latest snapshot image for this violation
     image_url = None
+    local_snapshot = None
     if snapshot_path:
         image_url = snapshot_path
+        # Resolve to actual file path for Storage upload
+        local_snapshot = Path(snapshot_path)
+        if not local_snapshot.is_absolute():
+            local_snapshot = SNAPSHOT_DIR / v_type / local_snapshot.name
     else:
         # Search snapshot directory for most recent file matching this type
         snap_dir = SNAPSHOT_DIR / v_type
         if snap_dir.exists():
             files = sorted(snap_dir.glob('*.jpg'), key=lambda f: f.stat().st_mtime, reverse=True)
             if files:
+                local_snapshot = files[0]
                 image_url = f'/snapshots/{v_type}/{files[0].name}'
 
+    # ── Upload snapshot to Firebase Storage ─────────────────────────
+    firebase_image_url = image_url  # fallback to local URL
+    if fcm_service and fcm_service.is_available:
+        try:
+            from firebase_admin import storage as fb_storage
+            if local_snapshot and local_snapshot.exists():
+                bucket = fb_storage.bucket()
+                blob_path = f'violations/{v_type}/{local_snapshot.name}'
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(local_snapshot), content_type='image/jpeg')
+                blob.make_public()
+                firebase_image_url = blob.public_url
+                print(f"☁️ Uploaded to Storage: {blob_path}")
+            else:
+                print(f"📷 No snapshot file to upload (path: {local_snapshot})")
+        except Exception as e:
+            print(f"⚠️ Storage upload failed (non-fatal): {e}")
+            # Continue — Firestore write will use local image URL as fallback
+
+    # ── Write violation to Firestore (INDEPENDENT of Storage) ─────
+    firestore_doc_id = None
+    if fcm_service and fcm_service.is_available:
+        try:
+            from firebase_admin import firestore as fb_firestore
+            db = fcm_service._db
+            if db:
+                doc_ref = db.collection('violations').document()
+                doc_data = {
+                    'type': v_type,
+                    'violationType': info['name'],
+                    'violationCode': info['code'],
+                    'description': f'{info["name"]} - {label}',
+                    'fineAmount': info['fine'],
+                    'lawReference': info['law'],
+                    'timestamp': now.isoformat(),
+                    'createdAt': fb_firestore.SERVER_TIMESTAMP,
+                    'location': 'Camera giám sát giao thông',
+                    'imageUrl': firebase_image_url,
+                    'trackId': track_id,
+                    'status': 'pending',
+                    'licensePlate': 'Đang xác minh',
+                }
+                doc_ref.set(doc_data)
+                firestore_doc_id = doc_ref.id
+                print(f"🔥 Firestore: violation saved (ID: {firestore_doc_id})")
+            else:
+                print(f"⚠️ Firestore DB is None — cannot save violation")
+        except Exception as e:
+            print(f"⚠️ Firestore write failed: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"⚠️ FCM service not available — violation NOT saved to Firestore")
+
     violation = {
-        'id': f'vio_{violation_counter:04d}',
+        'id': firestore_doc_id or f'vio_{violation_counter:04d}',
         'type': v_type,
         'violationType': info['name'],
         'violationCode': info['code'],
@@ -151,7 +230,7 @@ def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str =
         'lawReference': info['law'],
         'timestamp': now.isoformat(),
         'location': 'Camera giám sát giao thông',
-        'imageUrl': image_url,
+        'imageUrl': firebase_image_url,
         'trackId': track_id,
         'status': 'pending',
         'licensePlate': 'Đang xác minh',
@@ -159,8 +238,23 @@ def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str =
     violation_store.append(violation)
     print(f"📱 Violation stored: {info['name']} (ID: {violation['id']})")
 
-    # Broadcast to connected app clients in real-time
+    # Broadcast to connected app clients in real-time (WebSocket)
     asyncio.ensure_future(broadcast_to_apps(violation))
+
+    # Send FCM push notification to all registered devices
+    if fcm_service and fcm_service.is_available:
+        try:
+            fcm_service.broadcast_push_notification(
+                title=f'🚨 {info["name"]}',
+                body=f'Mức phạt: {info["fine"]:,}₫ - {label}',
+                data_payload={
+                    'route': '/violation-detail',
+                    'violation_id': violation['id'],
+                    'type': v_type,
+                }
+            )
+        except Exception as e:
+            print(f"⚠️ FCM broadcast error: {e}")
 
     return violation
 
@@ -179,6 +273,11 @@ def get_detector(model_path: str) -> UnifiedDetector:
 # =============================================================================
 # API ROUTES
 # =============================================================================
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(STATIC_DIR / "favicon.png")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -252,6 +351,59 @@ async def list_outputs():
         })
     outputs.sort(key=lambda x: x['timestamp'], reverse=True)
     return JSONResponse(outputs[:20])
+
+
+# =============================================================================
+# FCM TOKEN API (for push notification registration)
+# =============================================================================
+
+from pydantic import BaseModel
+
+class FCMTokenRequest(BaseModel):
+    user_id: str = "default_user"
+    fcm_token: str
+    platform: str = "web"  # android | ios | web
+    device_info: str = ""
+
+class FCMTokenRemoveRequest(BaseModel):
+    fcm_token: str
+
+
+@app.post("/api/fcm/register")
+async def register_fcm_token(req: FCMTokenRequest):
+    """
+    Register a device FCM token for push notifications.
+    Called by Flutter app and Web client on launch/token refresh.
+    """
+    if not fcm_service or not fcm_service.is_available:
+        return JSONResponse(
+            {"status": "warning", "message": "FCM service not available"},
+            status_code=503
+        )
+
+    result = fcm_service.register_token(
+        user_id=req.user_id,
+        fcm_token=req.fcm_token,
+        platform=req.platform,
+        device_info=req.device_info,
+    )
+    status_code = 200 if result.get("status") == "ok" else 500
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.delete("/api/fcm/unregister")
+async def unregister_fcm_token(req: FCMTokenRemoveRequest):
+    """
+    Remove a device FCM token (on logout or uninstall).
+    """
+    if not fcm_service or not fcm_service.is_available:
+        return JSONResponse(
+            {"status": "warning", "message": "FCM service not available"},
+            status_code=503
+        )
+
+    result = fcm_service.remove_token(fcm_token=req.fcm_token)
+    return JSONResponse(result)
 
 
 # =============================================================================
@@ -845,13 +997,15 @@ async def websocket_app(websocket: WebSocket):
                         "totalFines": sum(v['fineAmount'] for v in violation_store if v['status'] == 'pending'),
                     }
                 }))
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as e:
+        print(f"📱 App client disconnected unexpectedly: {client_ip} (Code: {e.code}, Reason: {e.reason})")
     except Exception as e:
         print(f"📱 App client error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         app_clients.discard(websocket)
-        print(f"📱 App client disconnected: {client_ip} (total: {len(app_clients)})")
+        print(f"📱 App client session ended: {client_ip} (total: {len(app_clients)})")
 
 
 # =============================================================================

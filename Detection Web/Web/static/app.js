@@ -603,3 +603,129 @@ if (scrollTopBtn) {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 }
+
+// =====================================================================
+// FCM — Firebase Cloud Messaging (Web Push Notifications)
+// =====================================================================
+// ⚠️ REPLACE the firebaseConfig values with YOUR Firebase project config
+// Get them from: Firebase Console → Project Settings → General → Your apps
+(function initFCM() {
+    // Check if Firebase is loaded
+    if (typeof firebase === 'undefined') {
+        console.warn('[FCM] Firebase SDK not loaded, skipping FCM init');
+        return;
+    }
+
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_PROJECT.appspot.com",
+        messagingSenderId: "YOUR_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+
+    try {
+        // Initialize Firebase (only if not already initialized)
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const messaging = firebase.messaging();
+
+        // Register Service Worker for background notifications
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/firebase-messaging-sw.js')
+                .then((registration) => {
+                    console.log('[FCM] Service Worker registered:', registration.scope);
+                    messaging.useServiceWorker(registration);
+                    requestNotificationPermission(messaging);
+                })
+                .catch((err) => {
+                    console.error('[FCM] Service Worker registration failed:', err);
+                    // Still try to request permission without explicit SW
+                    requestNotificationPermission(messaging);
+                });
+        } else {
+            console.warn('[FCM] Service Workers not supported');
+        }
+
+        // Handle foreground messages (show toast)
+        messaging.onMessage((payload) => {
+            console.log('[FCM] Foreground message:', payload);
+
+            const title = payload.notification?.title || '🚨 Vi phạm giao thông';
+            const body = payload.notification?.body || 'Có vi phạm mới được phát hiện';
+
+            // Show in-app toast
+            showToast(`📩 ${title}: ${body}`, 'warning');
+
+            // Also show browser notification (if permitted)
+            if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: body,
+                    icon: '/static/favicon.png',
+                    tag: 'violation-' + (payload.data?.violation_id || Date.now()),
+                });
+            }
+
+            // Refresh snapshots gallery if on realtime tab
+            loadSnapshots();
+        });
+
+        // Listen for messages from service worker (notification click)
+        navigator.serviceWorker?.addEventListener('message', (event) => {
+            if (event.data?.type === 'NOTIFICATION_CLICK') {
+                console.log('[FCM] Notification clicked:', event.data.data);
+                // Navigate to realtime tab to show detection results
+                const realtimeTab = document.querySelector('.nav-link[data-tab="realtime"]');
+                if (realtimeTab) realtimeTab.click();
+            }
+        });
+
+    } catch (e) {
+        console.error('[FCM] Initialization error:', e);
+    }
+})();
+
+// Request notification permission and get FCM token
+async function requestNotificationPermission(messaging) {
+    try {
+        const permission = await Notification.requestPermission();
+        console.log('[FCM] Permission:', permission);
+
+        if (permission !== 'granted') {
+            console.warn('[FCM] Notification permission denied');
+            return;
+        }
+
+        // Get FCM token
+        const token = await messaging.getToken({
+            // vapidKey: 'YOUR_VAPID_KEY_HERE'  // Uncomment and set for production
+        });
+
+        if (token) {
+            console.log('[FCM] Token:', token.substring(0, 20) + '...');
+
+            // Register token with backend
+            try {
+                const resp = await fetch('/api/fcm/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: 'default_user',
+                        fcm_token: token,
+                        platform: 'web',
+                        device_info: navigator.userAgent.substring(0, 100),
+                    })
+                });
+                const data = await resp.json();
+                console.log('[FCM] Token registered:', data);
+            } catch (e) {
+                console.warn('[FCM] Token registration failed (backend may be offline):', e);
+            }
+        }
+    } catch (e) {
+        console.error('[FCM] Permission/token error:', e);
+    }
+}

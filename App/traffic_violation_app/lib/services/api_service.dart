@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
+import 'package:flutter/foundation.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 
 /// Service to communicate with the Detection Web backend.
@@ -10,7 +11,7 @@ import 'package:traffic_violation_app/models/violation.dart';
 class ApiService {
   // ── Configuration ──────────────────────────────────────────────
   // Change this to your backend server IP (same WiFi network)
-  static String serverIp = '192.168.1.12';
+  static String serverIp = '192.168.1.93';
   static int serverPort = 8000;
   static String get baseUrl => 'http://$serverIp:$serverPort';
   static String get wsUrl => 'ws://$serverIp:$serverPort/ws/app';
@@ -32,7 +33,9 @@ class ApiService {
   Timer? _pingTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int _maxReconnectAttempts = 20;
+  static const int _maxReconnectAttempts = 5;
+  bool _intentionalDisconnect = false;
+  bool _isReconnecting = false;
 
   // Connection state
   final StreamController<bool> _connectionStream =
@@ -75,20 +78,35 @@ class ApiService {
 
   /// Connect to backend WebSocket for real-time violation push.
   void connectWebSocket() {
-    _disconnectWebSocket();
+    // Prevent multiple simultaneous connection attempts
+    if (_isReconnecting) return;
+
+    _intentionalDisconnect = false;
+    _disconnectWebSocket(intentional: false);
 
     try {
-      print('📱 Connecting WebSocket: $wsUrl');
-      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      debugPrint('📱 Connecting WebSocket: $wsUrl');
+      _isReconnecting = true;
+
+      _wsChannel = WebSocketChannel.connect(
+        Uri.parse(wsUrl),
+      );
 
       _wsChannel!.stream.listen(
-        (message) => _handleWsMessage(message),
+        (message) {
+          _isReconnecting = false;
+          _handleWsMessage(message);
+        },
         onDone: () {
-          print('📱 WebSocket closed');
-          _onWsDisconnected();
+          _isReconnecting = false;
+          if (!_intentionalDisconnect) {
+            debugPrint('📱 WebSocket closed unexpectedly');
+            _onWsDisconnected();
+          }
         },
         onError: (error) {
-          print('📱 WebSocket error: $error');
+          _isReconnecting = false;
+          debugPrint('📱 WebSocket error: $error');
           _onWsDisconnected();
         },
       );
@@ -96,10 +114,13 @@ class ApiService {
       // Start ping timer to keep connection alive (every 25s)
       _pingTimer?.cancel();
       _pingTimer = Timer.periodic(const Duration(seconds: 25), (_) {
-        _sendWsMessage({'action': 'ping'});
+        if (_wsConnected) {
+          _sendWsMessage({'action': 'ping'});
+        }
       });
     } catch (e) {
-      print('📱 WebSocket connect error: $e');
+      _isReconnecting = false;
+      debugPrint('📱 WebSocket connect error: $e');
       _scheduleReconnect();
     }
   }
@@ -111,12 +132,12 @@ class ApiService {
 
       switch (type) {
         case 'connected':
-          // Welcome message from server
+          // Welcome message from server — connection is stable now
           _wsConnected = true;
           _isConnected = true;
-          _reconnectAttempts = 0;
+          _reconnectAttempts = 0; // Reset reconnect counter
           _connectionStream.add(true);
-          print('📱 WebSocket connected! '
+          debugPrint('📱 ✅ WebSocket connected! '
               'Pending: ${msg['pending_violations']}, '
               'Total: ${msg['total_violations']}');
 
@@ -132,7 +153,7 @@ class ApiService {
             _violations.insert(0, violation);
             _newViolationStream.add(violation);
             _violationStream.add(List.unmodifiable(_violations));
-            print('🚨 Real-time violation: ${violation.violationType}');
+            debugPrint('🚨 Real-time violation: ${violation.violationType}');
           }
           break;
 
@@ -147,7 +168,7 @@ class ApiService {
           break;
 
         case 'pong':
-          // Heartbeat response — connection alive
+          // Heartbeat response — connection alive, no log needed
           break;
 
         case 'stats':
@@ -155,53 +176,85 @@ class ApiService {
           break;
       }
     } catch (e) {
-      print('📱 WS message parse error: $e');
+      debugPrint('📱 WS message parse error: $e');
     }
   }
 
   void _sendWsMessage(Map<String, dynamic> data) {
     try {
-      _wsChannel?.sink.add(json.encode(data));
+      if (_wsChannel != null) {
+        _wsChannel!.sink.add(json.encode(data));
+      }
     } catch (e) {
-      print('📱 WS send error: $e');
+      // Silently handle send errors — connection might be closing
     }
   }
 
   void _onWsDisconnected() {
+    if (_intentionalDisconnect) return;
+
+    final wasConnected = _wsConnected;
     _wsConnected = false;
     _isConnected = false;
     _pingTimer?.cancel();
-    _connectionStream.add(false);
+
+    // Only notify UI if state actually changed
+    if (wasConnected) {
+      _connectionStream.add(false);
+      debugPrint('📱 Connection lost, will attempt reconnect');
+    }
+
     _scheduleReconnect();
   }
 
   void _scheduleReconnect() {
+    if (_intentionalDisconnect) return;
+
     if (_reconnectAttempts >= _maxReconnectAttempts) {
-      print('📱 Max reconnect attempts reached, falling back to polling');
+      debugPrint('📱 Max reconnect attempts reached ($_maxReconnectAttempts), '
+          'falling back to polling. Tap "Reconnect" to try again.');
+      _connectionStream.add(false);
       startPolling();
       return;
     }
 
     _reconnectTimer?.cancel();
-    // Exponential backoff: 1s, 2s, 4s, 8s, ... max 30s
-    final delay = Duration(
-        seconds: (1 << _reconnectAttempts).clamp(1, 30));
+    // Exponential backoff: 2s, 4s, 8s, 16s, 30s
+    final delaySec = (2 << _reconnectAttempts).clamp(2, 30);
     _reconnectAttempts++;
-    print('📱 Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
 
-    _reconnectTimer = Timer(delay, () {
-      connectWebSocket();
+    if (_reconnectAttempts <= 2) {
+      // Only log first 2 attempts to avoid spam
+      debugPrint('📱 Reconnecting in ${delaySec}s (attempt $_reconnectAttempts/$_maxReconnectAttempts)');
+    }
+
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      if (!_intentionalDisconnect) {
+        connectWebSocket();
+      }
     });
   }
 
-  void _disconnectWebSocket() {
+  void _disconnectWebSocket({bool intentional = true}) {
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
+    if (intentional) {
+      _intentionalDisconnect = true;
+    }
     try {
       _wsChannel?.sink.close(ws_status.goingAway);
     } catch (_) {}
     _wsChannel = null;
     _wsConnected = false;
+    _isReconnecting = false;
+  }
+
+  /// Manually trigger a reconnect (e.g., from UI button)
+  void reconnect() {
+    _reconnectAttempts = 0;
+    _intentionalDisconnect = false;
+    stopPolling();
+    connectWebSocket();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -261,10 +314,11 @@ class ApiService {
   }
 
   // ── Polling ────────────────────────────────────────────────────
-  void startPolling({Duration interval = const Duration(seconds: 10)}) {
+  void startPolling({Duration interval = const Duration(seconds: 15)}) {
     stopPolling();
     fetchViolations();
     _pollTimer = Timer.periodic(interval, (_) => fetchViolations());
+    debugPrint('📱 Started polling mode (every ${interval.inSeconds}s)');
   }
 
   void stopPolling() {
@@ -275,7 +329,7 @@ class ApiService {
   // ── Dispose ────────────────────────────────────────────────────
   void dispose() {
     stopPolling();
-    _disconnectWebSocket();
+    _disconnectWebSocket(intentional: true);
     _violationStream.close();
     _newViolationStream.close();
     _connectionStream.close();
@@ -307,6 +361,6 @@ class ApiService {
     _lastFetchTime = null;
     _violations.clear();
     // Reconnect WebSocket with new address
-    connectWebSocket();
+    reconnect();
   }
 }

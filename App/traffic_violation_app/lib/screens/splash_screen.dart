@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
+import 'package:traffic_violation_app/services/auth_service.dart';
 import 'dart:async';
 
 class SplashScreen extends StatefulWidget {
@@ -34,7 +35,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/login');
+        // Auth-aware routing: skip login if already signed in
+        final route = AuthService().isLoggedIn ? '/home' : '/login';
+        Navigator.pushReplacementNamed(context, route);
       }
     });
   }

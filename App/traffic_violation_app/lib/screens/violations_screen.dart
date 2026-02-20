@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:traffic_violation_app/data/mock_data.dart';
 import 'package:traffic_violation_app/models/violation.dart';
-import 'package:traffic_violation_app/services/api_service.dart';
+import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'dart:async';
 
 class ViolationsScreen extends StatefulWidget {
@@ -17,7 +16,7 @@ class ViolationsScreen extends StatefulWidget {
 class _ViolationsScreenState extends State<ViolationsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final ApiService _api = ApiService();
+  final FirestoreService _firestore = FirestoreService();
   List<Violation> _violations = [];
   bool _isLoading = true;
   StreamSubscription? _sub;
@@ -29,29 +28,19 @@ class _ViolationsScreenState extends State<ViolationsScreen>
     _loadData();
   }
 
-  Future<void> _loadData() async {
-    // Listen to API stream or fallback to mock
-    _sub = _api.violationsStream.listen((list) {
+  void _loadData() {
+    // Listen to Firestore real-time stream
+    _sub = _firestore.violationsStream().listen((list) {
       if (mounted) setState(() { _violations = list; _isLoading = false; });
     });
-
-    if (_api.violations.isNotEmpty) {
-      setState(() { _violations = _api.violations; _isLoading = false; });
-    } else {
-      // Fallback to mock
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (mounted && _violations.isEmpty) {
-        setState(() { _violations = MockData.violations; _isLoading = false; });
-      }
-    }
   }
 
   Future<void> _refresh() async {
     setState(() => _isLoading = true);
-    await _api.fetchViolations();
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted && _violations.isEmpty) {
-      setState(() { _violations = MockData.violations; _isLoading = false; });
+    // Re-fetch from Firestore (one-shot)
+    final violations = await _firestore.getViolations();
+    if (mounted) {
+      setState(() { _violations = violations; _isLoading = false; });
     }
   }
 
