@@ -11,6 +11,7 @@ import 'package:traffic_violation_app/screens/profile_screen.dart';
 import 'package:traffic_violation_app/screens/traffic_laws_screen.dart';
 import 'package:traffic_violation_app/screens/notifications_screen.dart';
 import 'package:traffic_violation_app/screens/register_screen.dart';
+import 'package:traffic_violation_app/screens/complaint_screen.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
 import 'package:traffic_violation_app/services/push_notification_service.dart';
 
@@ -53,6 +54,7 @@ class MyApp extends StatelessWidget {
         '/traffic-laws': (context) => const TrafficLawsScreen(),
         '/notifications': (context) => const NotificationsScreen(),
         '/register': (context) => const RegisterScreen(),
+        '/complaint': (context) => const ComplaintScreen(),
       },
     );
   }

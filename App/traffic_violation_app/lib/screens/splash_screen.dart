@@ -14,6 +14,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
+  late Animation<double> _slideAnimation;
 
   @override
   void initState() {
@@ -31,11 +32,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       CurvedAnimation(parent: _controller, curve: Curves.easeIn),
     );
 
+    _slideAnimation = Tween<double>(begin: 30, end: 0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+
     _controller.forward();
 
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
-        // Auth-aware routing: skip login if already signed in
         final route = AuthService().isLoggedIn ? '/home' : '/login';
         Navigator.pushReplacementNamed(context, route);
       }
@@ -53,7 +57,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          gradient: AppTheme.primaryGradient,
+          gradient: LinearGradient(
+            colors: [Color(0xFFD32F2F), Color(0xFFB71C1C), Color(0xFF880E4F)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
         child: Center(
           child: Column(
@@ -64,49 +72,77 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 child: FadeTransition(
                   opacity: _fadeAnimation,
                   child: Container(
-                    width: 120,
-                    height: 120,
+                    width: 110,
+                    height: 110,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.25),
+                        width: 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.15),
+                          blurRadius: 30,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
                     ),
                     child: const Icon(
-                      Icons.traffic,
-                      size: 60,
+                      Icons.shield_rounded,
+                      size: 54,
                       color: Colors.white,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: const Text(
-                  'Traffic Monitor',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: Text(
-                  'Hệ thống phạt nguội giao thông',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
-                  ),
+              const SizedBox(height: 28),
+              AnimatedBuilder(
+                animation: _fadeAnimation,
+                builder: (context, child) {
+                  return Opacity(
+                    opacity: _fadeAnimation.value,
+                    child: Transform.translate(
+                      offset: Offset(0, _slideAnimation.value),
+                      child: child,
+                    ),
+                  );
+                },
+                child: Column(
+                  children: [
+                    const Text(
+                      'Traffic Monitor',
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Hệ thống phạt nguội giao thông',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.white.withOpacity(0.85),
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 60),
               FadeTransition(
                 opacity: _fadeAnimation,
-                child: const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                    strokeWidth: 2.5,
+                    backgroundColor: Colors.white.withOpacity(0.2),
+                  ),
                 ),
               ),
             ],

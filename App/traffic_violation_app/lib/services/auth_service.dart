@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -26,11 +27,15 @@ class AuthService {
       final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
-      );
+      ).timeout(const Duration(seconds: 15));
       debugPrint('✅ Signed in: ${credential.user?.email}');
       return credential;
     } on fb.FirebaseAuthException catch (e) {
       throw _mapAuthError(e.code);
+    } on TimeoutException {
+      throw 'Kết nối quá chậm. Vui lòng thử lại';
+    } catch (e) {
+      throw 'Đăng nhập thất bại: ${e.toString()}';
     }
   }
 

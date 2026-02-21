@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/violation.dart';
-
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -13,557 +12,529 @@ class PaymentScreen extends StatefulWidget {
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
-class _PaymentScreenState extends State<PaymentScreen> {
-  String selectedMethod = 'bank_transfer';
-  String selectedBank = 'vietcombank';
-  
-  final Map<String, Map<String, String>> bankInfo = {
-    'vietcombank': {
-      'name': 'Vietcombank',
-      'accountNumber': '1234567890',
-      'accountName': 'CỤC CSGT - BỘ CÔNG AN',
-      'logo': 'https://api.vietqr.io/img/VCB.png',
-    },
-    'techcombank': {
-      'name': 'Techcombank',
-      'accountNumber': '9876543210',
-      'accountName': 'CỤC CSGT - BỘ CÔNG AN',
-      'logo': 'https://api.vietqr.io/img/TCB.png',
-    },
-    'vietinbank': {
-      'name': 'VietinBank',
-      'accountNumber': '5555666677',
-      'accountName': 'CỤC CSGT - BỘ CÔNG AN',
-      'logo': 'https://api.vietqr.io/img/CTG.png',
-    },
-  };
+class _PaymentScreenState extends State<PaymentScreen>
+    with SingleTickerProviderStateMixin {
+  int _selectedMethod = 0;
+  bool _isProcessing = false;
+  bool _paymentDone = false;
+
+  late AnimationController _animController;
+  late Animation<double> _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _animController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final violation = ModalRoute.of(context)!.settings.arguments as Violation;
-    final currencyFormatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Thanh toán'),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Amount Card
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryColor.withOpacity(0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    'Số tiền cần thanh toán',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    currencyFormatter.format(violation.fineAmount),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 40,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Vi phạm: ${violation.violationType}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-            
-            // Payment Methods
-            const Text(
-              'Phương thức thanh toán',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            _buildPaymentMethod(
-              'bank_transfer',
-              'Chuyển khoản ngân hàng',
-              Icons.account_balance,
-              'Miễn phí',
-            ),
-            const SizedBox(height: 12),
-            _buildPaymentMethod(
-              'momo',
-              'Ví MoMo',
-              Icons.account_balance_wallet,
-              'Miễn phí',
-            ),
-            const SizedBox(height: 12),
-            _buildPaymentMethod(
-              'vnpay',
-              'VNPay',
-              Icons.payment,
-              'Miễn phí',
-            ),
-            const SizedBox(height: 32),
-            
-            // Payment Details
-            if (selectedMethod == 'bank_transfer') ...[
-              const Text(
-                'Chọn ngân hàng',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args == null || args is! Violation) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Nộp phạt'),
+          backgroundColor: AppTheme.primaryColor,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppTheme.textHint.withOpacity(0.15),
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(Icons.error_outline, size: 36, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 16),
-              
-              ...bankInfo.entries.map((entry) => _buildBankOption(entry.key, entry.value)),
-              
-              const SizedBox(height: 24),
-              
-              // Bank Transfer Details
+              const Text('Không tìm thấy thông tin vi phạm', style: TextStyle(color: AppTheme.textSecondary)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final violation = args;
+    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+
+    if (_paymentDone) return _buildSuccessPage(violation, formatter);
+
+    return Scaffold(
+      backgroundColor: AppTheme.surfaceColor,
+      appBar: AppBar(
+        title: const Text('Nộp phạt'),
+        backgroundColor: AppTheme.primaryColor,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              // ── Fine Summary Card ─────────────────────────
               Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey[300]!),
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                decoration: const BoxDecoration(
+                  color: AppTheme.primaryColor,
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(28),
+                    bottomRight: Radius.circular(28),
+                  ),
                 ),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Số tiền phạt',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        formatter.format(violation.fineAmount),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          violation.violationType,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── Violation Info ─────────────────────────
                     const Text(
-                      'Thông tin chuyển khoản',
+                      'Thông tin vi phạm',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    
-                    _buildTransferInfo(
-                      'Ngân hàng',
-                      bankInfo[selectedBank]!['name']!,
-                      false,
-                    ),
-                    _buildTransferInfo(
-                      'Số tài khoản',
-                      bankInfo[selectedBank]!['accountNumber']!,
-                      true,
-                    ),
-                    _buildTransferInfo(
-                      'Tên tài khoản',
-                      bankInfo[selectedBank]!['accountName']!,
-                      false,
-                    ),
-                    _buildTransferInfo(
-                      'Số tiền',
-                      currencyFormatter.format(violation.fineAmount),
-                      true,
-                    ),
-                    _buildTransferInfo(
-                      'Nội dung',
-                      'PHAT ${violation.licensePlate} ${violation.violationCode}',
-                      true,
-                    ),
-                    
-                    const SizedBox(height: 24),
-                    
-                    // QR Code
-                    Center(
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(AppTheme.radiusL),
+                        boxShadow: AppTheme.cardShadow,
+                      ),
                       child: Column(
                         children: [
-                          const Text(
-                            'Quét mã QR để thanh toán',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: AppTheme.primaryColor, width: 2),
-                            ),
-                            child: QrImageView(
-                              data: _generateQRData(violation),
-                              version: QrVersions.auto,
-                              size: 200,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Hỗ trợ tất cả ứng dụng ngân hàng',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
+                          _buildInfoRow(Icons.qr_code_rounded, 'Mã vi phạm', violation.violationCode.isNotEmpty ? violation.violationCode : violation.id),
+                          Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
+                          _buildInfoRow(Icons.directions_car_rounded, 'Biển số', violation.licensePlate),
+                          Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
+                          _buildInfoRow(Icons.location_on_rounded, 'Địa điểm', violation.location.isNotEmpty ? violation.location : 'Camera giám sát'),
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ],
-            
-            if (selectedMethod == 'momo' || selectedMethod == 'vnpay') ...[
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      selectedMethod == 'momo'
-                          ? Icons.account_balance_wallet
-                          : Icons.payment,
-                      size: 64,
-                      color: AppTheme.primaryColor,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Bạn sẽ được chuyển đến ứng dụng ${selectedMethod == 'momo' ? 'MoMo' : 'VNPay'}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            
-            const SizedBox(height: 32),
-            
-            // Warning
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.warningColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppTheme.warningColor.withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.info_outline,
-                    color: AppTheme.warningColor,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Vui lòng chuyển khoản đúng nội dung để hệ thống tự động xác nhận thanh toán',
+
+                    const SizedBox(height: 24),
+
+                    // ── Payment Method ────────────────────────
+                    const Text(
+                      'Phương thức thanh toán',
                       style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[800],
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    _buildPaymentMethod(0, Icons.qr_code_2_rounded, 'QR Code', 'Quét mã QR để thanh toán', AppTheme.primaryColor),
+                    const SizedBox(height: 8),
+                    _buildPaymentMethod(1, Icons.account_balance_rounded, 'Chuyển khoản', 'Chuyển khoản ngân hàng', AppTheme.infoColor),
+                    const SizedBox(height: 8),
+                    _buildPaymentMethod(2, Icons.credit_card_rounded, 'Thẻ ngân hàng', 'Visa, Mastercard, JCB', AppTheme.secondaryColor),
+
+                    const SizedBox(height: 24),
+
+                    // ── QR Code Section ───────────────────────
+                    if (_selectedMethod == 0) _buildQRSection(violation, formatter),
+
+                    // ── Bank Transfer Section ─────────────────
+                    if (_selectedMethod == 1) _buildBankSection(violation, formatter),
+
+                    const SizedBox(height: 24),
+
+                    // ── Pay Button ────────────────────────────
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: AppTheme.primaryGradient,
+                          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                          boxShadow: AppTheme.redShadow,
+                        ),
+                        child: ElevatedButton.icon(
+                          onPressed: _isProcessing ? null : () => _processPayment(),
+                          icon: _isProcessing
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.payment_rounded),
+                          label: Text(
+                            _isProcessing ? 'Đang xử lý...' : 'Xác nhận thanh toán',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppTheme.textSecondary),
+          const SizedBox(width: 10),
+          Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+          const Spacer(),
+          Flexible(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary),
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentMethod(int index, IconData icon, String title, String subtitle, Color color) {
+    final isSelected = _selectedMethod == index;
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedMethod = index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusL),
+          border: Border.all(
+            color: isSelected ? color : AppTheme.dividerColor,
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected ? [BoxShadow(color: color.withOpacity(0.12), blurRadius: 10, offset: const Offset(0, 4))] : null,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withOpacity(isSelected ? 0.12 : 0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: isSelected ? color : AppTheme.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 100),
-          ],
-        ),
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
+            Icon(
+              isSelected ? Icons.check_circle_rounded : Icons.radio_button_off_rounded,
+              color: isSelected ? color : AppTheme.textHint,
+              size: 22,
             ),
           ],
         ),
-        child: SizedBox(
-          width: double.infinity,
-          height: 56,
-          child: Container(
+      ),
+    );
+  }
+
+  Widget _buildQRSection(Violation v, NumberFormat fmt) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'Quét mã QR để thanh toán',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryColor.withOpacity(0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppTheme.radiusL),
+              border: Border.all(color: AppTheme.dividerColor),
             ),
-            child: ElevatedButton(
+            child: QrImageView(
+              data: 'VIOLATION|${v.id}|${v.fineAmount}|${v.licensePlate}',
+              version: QrVersions.auto,
+              size: 180,
+              eyeStyle: const QrEyeStyle(
+                eyeShape: QrEyeShape.square,
+                color: AppTheme.primaryDark,
+              ),
+              dataModuleStyle: const QrDataModuleStyle(
+                dataModuleShape: QrDataModuleShape.square,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            fmt.format(v.fineAmount),
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.primaryColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Mã: ${v.id}',
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBankSection(Violation v, NumberFormat fmt) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Thông tin chuyển khoản',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+          ),
+          const SizedBox(height: 14),
+          _buildBankRow('Ngân hàng', 'Vietcombank'),
+          _buildBankRow('Số TK', '1234 5678 9012'),
+          _buildBankRow('Chủ TK', 'KHO BẠC NHÀ NƯỚC'),
+          _buildBankRow('Nội dung', 'NP ${v.id}'),
+          _buildBankRow('Số tiền', fmt.format(v.fineAmount)),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
               onPressed: () {
-                _showPaymentConfirmation(context, violation);
+                Clipboard.setData(ClipboardData(text: 'NP ${v.id}'));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Đã sao chép nội dung chuyển khoản'),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                );
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text(
-                'Xác nhận thanh toán',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Sao chép nội dung CK'),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildPaymentMethod(String value, String title, IconData icon, String subtitle) {
-    final isSelected = selectedMethod == value;
-    
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: RadioListTile(
-        value: value,
-        groupValue: selectedMethod,
-        onChanged: (v) => setState(() => selectedMethod = v.toString()),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        subtitle: Text(subtitle),
-        secondary: Icon(
-          icon,
-          color: isSelected ? AppTheme.primaryColor : Colors.grey,
-        ),
-        activeColor: AppTheme.primaryColor,
-      ),
-    );
-  }
-
-  Widget _buildBankOption(String value, Map<String, String> info) {
-    final isSelected = selectedBank == value;
-    
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: RadioListTile(
-        value: value,
-        groupValue: selectedBank,
-        onChanged: (v) => setState(() => selectedBank = v.toString()),
-        title: Text(
-          info['name']!,
-          style: TextStyle(
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        subtitle: Text(info['accountNumber']!),
-        secondary: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            info['logo']!,
-            width: 40,
-            height: 40,
-            fit: BoxFit.cover,
-          ),
-        ),
-        activeColor: AppTheme.primaryColor,
-      ),
-    );
-  }
-
-  Widget _buildTransferInfo(String label, String value, bool canCopy) {
+  Widget _buildBankRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-          ),
-          Row(
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (canCopy) ...[
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: value));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Đã sao chép')),
-                    );
+          Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+          Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  void _processPayment() async {
+    setState(() => _isProcessing = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) {
+      setState(() {
+        _isProcessing = false;
+        _paymentDone = true;
+      });
+    }
+  }
+
+  Widget _buildSuccessPage(Violation v, NumberFormat fmt) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: 1),
+                  duration: const Duration(milliseconds: 600),
+                  curve: Curves.elasticOut,
+                  builder: (context, anim, child) {
+                    return Transform.scale(scale: anim, child: child);
                   },
-                  child: const Icon(
-                    Icons.copy,
-                    size: 16,
-                    color: AppTheme.primaryColor,
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE8F5E9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle_rounded,
+                      size: 60,
+                      color: AppTheme.successColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Thanh toán thành công!',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.successColor,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  fmt.format(v.fineAmount),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  v.violationType,
+                  style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+                    },
+                    child: const Text('Về trang chủ'),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Xem lại vi phạm',
+                    style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
-            ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
-
-  String _generateQRData(Violation violation) {
-    final bank = bankInfo[selectedBank]!;
-    return 'bank=${bank['name']}&account=${bank['accountNumber']}&amount=${violation.fineAmount.toInt()}&content=PHAT ${violation.licensePlate} ${violation.violationCode}';
-  }
-
-  void _showPaymentConfirmation(BuildContext context, Violation violation) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Xác nhận thanh toán'),
-        content: const Text(
-          'Bạn đã hoàn tất chuyển khoản?\n\nHệ thống sẽ xác nhận giao dịch trong vòng 5-10 phút.',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Hủy'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showSuccessDialog(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryColor,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Đã chuyển khoản'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccessDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.successColor.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle,
-                color: AppTheme.successColor,
-                size: 50,
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Đã ghi nhận thanh toán',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Chúng tôi đã nhận được yêu cầu thanh toán của bạn. Hệ thống sẽ xác nhận trong vòng 5-10 phút.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.pop(context);
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Về trang chủ'),
-            ),
-          ),
-        ],
       ),
     );
   }
