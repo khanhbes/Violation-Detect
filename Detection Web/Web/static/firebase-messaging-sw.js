@@ -17,12 +17,13 @@ importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-com
 // ⚠️ REPLACE these values with your Firebase project config
 // Get them from: Firebase Console → Project Settings → General → Your apps → Web app
 firebase.initializeApp({
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyDu_wLcXBjiS1gWiyxmdAQXgev7TSL8gvA",
+    authDomain: "traffic-violation-c9270.firebaseapp.com",
+    projectId: "traffic-violation-c9270",
+    storageBucket: "traffic-violation-c9270.firebasestorage.app",
+    messagingSenderId: "775726122925",
+    appId: "1:775726122925:web:a5f24c639f105c70d3c324",
+    measurementId: "G-7T0M6Y5PHH"
 });
 
 const messaging = firebase.messaging();

@@ -3,14 +3,16 @@ import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/data/mock_data.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+  final bool embedded;
+
+  const ProfileScreen({super.key, this.embedded = false});
 
   @override
   Widget build(BuildContext context) {
     final user = MockData.currentUser;
     
     return Scaffold(
-      appBar: AppBar(
+      appBar: embedded ? null : AppBar(
         title: const Text('Tài khoản'),
         actions: [
           IconButton(
