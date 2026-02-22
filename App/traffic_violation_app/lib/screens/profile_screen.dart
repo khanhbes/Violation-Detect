@@ -227,9 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: Row(
                           children: [
-                            _buildStatItem(s.userIdCard.length > 8 ? '${s.userIdCard.substring(0, 4)}...${s.userIdCard.substring(s.userIdCard.length - 4)}' : s.userIdCard, 'CCCD'),
-                            _buildStatDivider(),
-                            _buildStatItem('12', s.tr('Điểm', 'Points')),
+                            _buildStatItem('12', s.tr('Điểm', 'Points'), valueColor: Colors.amber),
                             _buildStatDivider(),
                             _buildStatItem('2', s.tr('Phương tiện', 'Vehicles')),
                           ],
@@ -313,7 +311,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   // Menu
                   Text(
-                    s.tr('Tiện ích', 'Utilities'),
+                    s.tr('Cài đặt', 'Settings'),
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -362,14 +360,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ═══════════════════════════════════════════════════════════════
   //  STAT HELPERS (Profile header)
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildStatItem(String value, String label) {
+  Widget _buildStatItem(String value, String label, {Color? valueColor}) {
     return Expanded(
       child: Column(
         children: [
           Text(
             value,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: valueColor ?? Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.5,
@@ -719,8 +717,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           _buildMenuItem(Icons.notifications_outlined, AppTheme.warningColor,
               s.tr('Thông báo', 'Notifications'), textPrimary, textSecondary, () {
-            Navigator.pushNamed(context, '/notifications');
-          }),
+            s.toggleNotifications();
+          },
+              trailing: Switch(
+                value: s.notificationsEnabled,
+                onChanged: (v) => s.setNotificationsEnabled(v),
+                activeColor: AppTheme.primaryColor,
+              )),
           _menuDivider(divider),
           _buildMenuItem(Icons.router_rounded, AppTheme.primaryColor,
               s.tr('Chỉnh IP máy chủ', 'Server IP Settings'), textPrimary, textSecondary, () {

@@ -58,6 +58,20 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Notification Toggle (on/off) ───────────────────────────────
+  bool _notificationsEnabled = true;
+  bool get notificationsEnabled => _notificationsEnabled;
+
+  void setNotificationsEnabled(bool enabled) {
+    _notificationsEnabled = enabled;
+    notifyListeners();
+  }
+
+  void toggleNotifications() {
+    _notificationsEnabled = !_notificationsEnabled;
+    notifyListeners();
+  }
+
   // ── User Profile Editable Fields ───────────────────────────────
   String _userName = '';
   String _userEmail = '';

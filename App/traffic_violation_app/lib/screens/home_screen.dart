@@ -153,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               // Ví giấy tờ
               Expanded(child: _buildNavItem(2, Icons.account_balance_wallet_outlined, Icons.account_balance_wallet_rounded, _settings.tr('Ví giấy tờ', 'Wallet'))),
               // Cá nhân
-              Expanded(child: _buildNavItem(3, Icons.settings_outlined, Icons.settings_rounded, _settings.tr('Cài đặt', 'Settings'))),
+              Expanded(child: _buildNavItem(3, Icons.person_outline_rounded, Icons.person_rounded, _settings.tr('Cá nhân', 'Profile'))),
             ],
           ),
         ),
@@ -298,11 +298,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 children: [
                   _buildSheetItem(Icons.search_rounded, _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'), const Color(0xFFE53935), () {
                     Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/violations');
+                    _showViolationLookup();
                   }),
                   _buildSheetItem(Icons.payment_rounded, _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'), const Color(0xFFF57C00), () {
                     Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/payment');
+                    _showPaymentList();
                   }),
                   _buildSheetItem(Icons.history_rounded, _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'), const Color(0xFF1565C0), () {
                     Navigator.pop(ctx);
@@ -1102,11 +1102,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required int points,
   }) {
     final isExpiring = expiryDate != 'Không thời hạn' && expiryDate != 'No expiry' && points <= 4;
-    final pointColor = points >= 8
-        ? Colors.green
-        : points >= 4
-            ? Colors.orange
-            : AppTheme.dangerColor;
+    const pointColor = Colors.amber;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -1411,7 +1407,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final user = MockData.currentUser;
     final displayName = _settings.profileInitialized ? _settings.userName : user.fullName;
 
-    final pointColor = points >= 8 ? Colors.green : points >= 4 ? Colors.orange : AppTheme.dangerColor;
+    const pointColor = Colors.amber;
     final pointPercent = points / 12.0;
 
     // Build list of violations that deducted points
@@ -1647,13 +1643,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 icon: Icons.search_rounded,
                 label: _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'),
                 gradientColors: [const Color(0xFFE53935), const Color(0xFFD32F2F)],
-                onTap: () => Navigator.pushNamed(context, '/violations'),
+                onTap: () => _showViolationLookup(),
               ),
               _buildMenuCard(
                 icon: Icons.payment_rounded,
                 label: _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
                 gradientColors: [const Color(0xFFF57C00), const Color(0xFFE65100)],
-                onTap: () => Navigator.pushNamed(context, '/payment'),
+                onTap: () => _showPaymentList(),
               ),
               _buildMenuCard(
                 icon: Icons.history_rounded,
@@ -1917,6 +1913,609 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  VIOLATION LOOKUP (Tra cứu vi phạm)
+  //  Search by license plate, ID, or violation info
+  // ═══════════════════════════════════════════════════════════════
+  void _showViolationLookup() {
+    final searchController = TextEditingController();
+    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final query = searchController.text.trim().toLowerCase();
+            final hasQuery = query.isNotEmpty;
+            final results = hasQuery
+                ? _violations.where((v) {
+                    return v.licensePlate.toLowerCase().contains(query) ||
+                        v.violationType.toLowerCase().contains(query) ||
+                        v.location.toLowerCase().contains(query) ||
+                        v.id.toLowerCase().contains(query);
+                  }).toList()
+                : <Violation>[];
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                children: [
+                  // Handle
+                  Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(top: 12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.dividerColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  // Title
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFE53935), Color(0xFFD32F2F)],
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.search_rounded, color: Colors.white, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _settings.tr('Tra cứu vi phạm', 'Violation Lookup'),
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Search bar
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: TextField(
+                      controller: searchController,
+                      onChanged: (_) => setSheetState(() {}),
+                      decoration: InputDecoration(
+                        hintText: _settings.tr(
+                          'Nhập biển số xe, loại vi phạm, địa điểm...',
+                          'Enter license plate, violation type, location...',
+                        ),
+                        hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 14),
+                        prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary),
+                        suffixIcon: searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, color: AppTheme.textSecondary),
+                                onPressed: () {
+                                  searchController.clear();
+                                  setSheetState(() {});
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: AppTheme.surfaceColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Results count (only when searching)
+                  if (hasQuery)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      child: Row(
+                        children: [
+                          Text(
+                            _settings.tr(
+                              'Tìm thấy ${results.length} kết quả',
+                              'Found ${results.length} results',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const Divider(color: AppTheme.dividerColor),
+                  // Results list
+                  Expanded(
+                    child: !hasQuery
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.manage_search_rounded, size: 56, color: AppTheme.textHint.withOpacity(0.35)),
+                                const SizedBox(height: 14),
+                                Text(
+                                  _settings.tr('Nhập thông tin để tra cứu', 'Enter info to search'),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                                  child: Text(
+                                    _settings.tr(
+                                      'Tìm kiếm theo biển số xe, loại vi phạm, hoặc địa điểm để xem lịch sử vi phạm chi tiết',
+                                      'Search by license plate, violation type, or location to view detailed violation history',
+                                    ),
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.textHint.withOpacity(0.7),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : results.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.search_off, size: 48, color: AppTheme.textHint.withOpacity(0.4)),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      _settings.tr('Không tìm thấy vi phạm', 'No violations found'),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _settings.tr('Thử từ khóa khác', 'Try a different keyword'),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textHint.withOpacity(0.6),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                        : ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                            itemCount: results.length,
+                            itemBuilder: (context, index) {
+                              final v = results[index];
+                              final isPaid = v.isPaid;
+                              final statusColor = isPaid ? AppTheme.successColor : AppTheme.warningColor;
+                              final statusText = isPaid
+                                  ? _settings.tr('Đã thanh toán', 'Paid')
+                                  : _settings.tr('Chưa thanh toán', 'Unpaid');
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: AppTheme.dividerColor),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(14),
+                                  onTap: () {
+                                    Navigator.pop(ctx);
+                                    Navigator.pushNamed(context, '/violation-detail', arguments: v);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(14),
+                                    child: Row(
+                                      children: [
+                                        // Icon
+                                        Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryColor.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: const Icon(Icons.warning_amber_rounded, color: AppTheme.primaryColor, size: 22),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        // Content
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                v.violationType,
+                                                style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.textPrimary,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: AppTheme.infoColor.withOpacity(0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      v.licensePlate,
+                                                      style: const TextStyle(
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: AppTheme.infoColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    DateFormat('dd/MM/yyyy').format(v.timestamp),
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: AppTheme.textSecondary,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Right side: fine + status
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              formatter.format(v.fineAmount),
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppTheme.dangerColor,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: statusColor.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                statusText,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: statusColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  PAYMENT LIST (Nộp phạt trực tuyến)
+  //  Shows all unpaid violations for payment
+  // ═══════════════════════════════════════════════════════════════
+  void _showPaymentList() {
+    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final unpaidViolations = _violations.where((v) => v.isPending).toList();
+        final totalFine = unpaidViolations.fold<double>(0, (sum, v) => sum + v.fineAmount);
+
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.85,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(top: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.dividerColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Title
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFF57C00), Color(0xFFE65100)],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.payment_rounded, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _settings.tr('Nộp phạt trực tuyến', 'Online Payment'),
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            _settings.tr(
+                              '${unpaidViolations.length} khoản chưa thanh toán',
+                              '${unpaidViolations.length} unpaid fines',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Total summary
+              Container(
+                margin: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFD32F2F), Color(0xFFB71C1C)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 24),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _settings.tr('Tổng tiền phạt', 'Total fines'),
+                          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12),
+                        ),
+                        Text(
+                          formatter.format(totalFine),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: AppTheme.dividerColor),
+              // Violations list
+              Expanded(
+                child: unpaidViolations.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 64, height: 64,
+                              decoration: BoxDecoration(
+                                color: AppTheme.successColor.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.check_circle_outline, size: 36, color: AppTheme.successColor),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              _settings.tr('Không có khoản phạt nào', 'No pending fines'),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _settings.tr('Tất cả vi phạm đã được thanh toán', 'All violations have been paid'),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.textHint,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        itemCount: unpaidViolations.length,
+                        itemBuilder: (context, index) {
+                          final v = unpaidViolations[index];
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppTheme.dividerColor),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                Navigator.pushNamed(context, '/payment', arguments: v);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Row(
+                                  children: [
+                                    // Icon
+                                    Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.warningColor.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Icon(Icons.pending_actions_rounded, color: AppTheme.warningColor, size: 22),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    // Content
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            v.violationType,
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: AppTheme.infoColor.withOpacity(0.1),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  v.licensePlate,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: AppTheme.infoColor,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                DateFormat('dd/MM/yyyy').format(v.timestamp),
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: AppTheme.textSecondary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    // Right side: fine + pay button
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          formatter.format(v.fineAmount),
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.dangerColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFF57C00),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            _settings.tr('Nộp phạt', 'Pay'),
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
