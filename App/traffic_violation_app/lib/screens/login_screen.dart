@@ -12,7 +12,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _cccdController = TextEditingController();
   final _passwordController = TextEditingController();
   final _auth = AuthService();
   bool _isPasswordVisible = false;
@@ -41,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void dispose() {
     _animController.dispose();
-    _emailController.dispose();
+    _cccdController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -55,8 +55,11 @@ class _LoginScreenState extends State<LoginScreen>
     });
 
     try {
+      // Map CCCD to email format for Firebase Auth
+      final cccd = _cccdController.text.trim();
+      final email = '$cccd@vnetraffic.vn';
       await _auth.signIn(
-        _emailController.text,
+        email,
         _passwordController.text,
       );
 
@@ -75,15 +78,15 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleForgotPassword() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty) {
+    final cccd = _cccdController.text.trim();
+    if (cccd.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Row(
             children: [
               Icon(Icons.info_outline, color: Colors.white, size: 18),
               SizedBox(width: 8),
-              Text('Vui lòng nhập email trước'),
+              Text('Vui lòng nhập số CCCD trước'),
             ],
           ),
           backgroundColor: AppTheme.infoColor,
@@ -95,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     try {
+      final email = '$cccd@vnetraffic.vn';
       await _auth.resetPassword(email);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -255,21 +259,24 @@ class _LoginScreenState extends State<LoginScreen>
                                 const SizedBox(height: 16),
                               ],
 
-                              // ── Tài khoản Label ──────────────
-                              _buildFieldLabel('Tài khoản', true),
+                              // ── Số CCCD Label ──────────────
+                              _buildFieldLabel('Số căn cước công dân', true),
                               const SizedBox(height: 8),
 
-                              // Email Field
+                              // CCCD Field
                               TextFormField(
-                                controller: _emailController,
-                                keyboardType: TextInputType.emailAddress,
-                                style: const TextStyle(fontSize: 15),
+                                controller: _cccdController,
+                                keyboardType: TextInputType.number,
+                                maxLength: 12,
+                                style: const TextStyle(fontSize: 15, letterSpacing: 1),
                                 decoration: InputDecoration(
-                                  hintText: 'CCCD/Mã định danh',
+                                  hintText: 'Nhập 12 số CCCD',
                                   hintStyle: TextStyle(
                                     color: AppTheme.textHint,
                                     fontSize: 14,
+                                    letterSpacing: 0,
                                   ),
+                                  counterText: '',
                                   prefixIcon: Padding(
                                     padding: const EdgeInsets.all(12),
                                     child: Icon(
@@ -303,8 +310,9 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                                 validator: (value) {
-                                  if (value == null || value.isEmpty) return 'Vui lòng nhập email';
-                                  if (!value.contains('@')) return 'Email không hợp lệ';
+                                  if (value == null || value.isEmpty) return 'Vui lòng nhập số CCCD';
+                                  if (value.length != 12) return 'Số CCCD phải gồm 12 chữ số';
+                                  if (!RegExp(r'^[0-9]{12}$').hasMatch(value)) return 'CCCD chỉ bao gồm chữ số';
                                   return null;
                                 },
                               ),
@@ -371,7 +379,11 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                                 validator: (value) {
                                   if (value == null || value.isEmpty) return 'Vui lòng nhập mật khẩu';
-                                  if (value.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
+                                  if (value.length < 8) return 'Mật khẩu phải có ít nhất 8 ký tự';
+                                  if (!RegExp(r'[A-Z]').hasMatch(value)) return 'Phải có ít nhất 1 chữ hoa';
+                                  if (!RegExp(r'[a-z]').hasMatch(value)) return 'Phải có ít nhất 1 chữ thường';
+                                  if (!RegExp(r'[0-9]').hasMatch(value)) return 'Phải có ít nhất 1 chữ số';
+                                  if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) return 'Phải có ít nhất 1 ký tự đặc biệt';
                                   return null;
                                 },
                               ),

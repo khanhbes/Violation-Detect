@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/data/mock_data.dart';
 import 'package:intl/intl.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 class TrafficLawsScreen extends StatefulWidget {
   const TrafficLawsScreen({super.key});
@@ -12,6 +13,7 @@ class TrafficLawsScreen extends StatefulWidget {
 
 class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final AppSettings _s = AppSettings();
   String _searchQuery = '';
   String _selectedCategory = 'Tất cả';
 
@@ -40,7 +42,7 @@ class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tra cứu luật giao thông'),
+        title: Text(_s.tr('Tra cứu luật giao thông', 'Traffic Law Lookup')),
       ),
       body: Column(
         children: [
@@ -60,7 +62,7 @@ class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'Tìm kiếm luật, mức phạt...',
+                hintText: _s.tr('Tìm kiếm luật, mức phạt...', 'Search laws, fines...'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -124,7 +126,7 @@ class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Không tìm thấy kết quả',
+                          _s.tr('Không tìm thấy kết quả', 'No results found'),
                           style: TextStyle(
                             fontSize: 18,
                             color: Colors.grey[600],
@@ -347,9 +349,9 @@ class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
                     ),
                     const SizedBox(height: 24),
                     
-                    const Text(
-                      'Mức phạt',
-                      style: TextStyle(
+                    Text(
+                      _s.tr('Mức phạt', 'Fine levels'),
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -413,7 +415,7 @@ class _TrafficLawsScreenState extends State<TrafficLawsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Căn cứ pháp lý',
+                            _s.tr('Căn cứ pháp lý', 'Legal basis'),
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.grey[600],

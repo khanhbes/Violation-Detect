@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/data/mock_data.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 class VehiclesScreen extends StatelessWidget {
   const VehiclesScreen({super.key});
+
+  static final AppSettings _s = AppSettings();
 
   @override
   Widget build(BuildContext context) {
@@ -28,10 +31,10 @@ class VehiclesScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Phương tiện',
-                        style: TextStyle(
+                        _s.tr('Phương tiện', 'Vehicles'),
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.w700,
@@ -47,7 +50,7 @@ class VehiclesScreen extends StatelessWidget {
                         icon: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
                         onPressed: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Thêm phương tiện - Đang phát triển')),
+                            SnackBar(content: Text(_s.tr('Thêm phương tiện - Đang phát triển', 'Add vehicle - Coming soon'))),
                           );
                         },
                       ),
@@ -75,18 +78,18 @@ class VehiclesScreen extends StatelessWidget {
                           child: const Icon(Icons.directions_car_outlined, size: 36, color: AppTheme.primaryColor),
                         ),
                         const SizedBox(height: 16),
-                        const Text(
-                          'Chưa có phương tiện nào',
-                          style: TextStyle(
+                        Text(
+                          _s.tr('Chưa có phương tiện nào', 'No vehicles yet'),
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'Thêm phương tiện để tra cứu vi phạm',
-                          style: TextStyle(
+                        Text(
+                          _s.tr('Thêm phương tiện để tra cứu vi phạm', 'Add vehicles to look up violations'),
+                          style: const TextStyle(
                             fontSize: 13,
                             color: AppTheme.textSecondary,
                           ),
@@ -95,7 +98,7 @@ class VehiclesScreen extends StatelessWidget {
                         ElevatedButton.icon(
                           onPressed: () {},
                           icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('Thêm phương tiện'),
+                          label: Text(_s.tr('Thêm phương tiện', 'Add vehicle')),
                         ),
                       ],
                     ),
@@ -205,15 +208,15 @@ class VehiclesScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildDetailRow(Icons.branding_watermark_rounded, 'Hãng xe', vehicle.brand),
+                  _buildDetailRow(Icons.branding_watermark_rounded, _s.tr('Hãng xe', 'Brand'), vehicle.brand),
                   const SizedBox(height: 10),
-                  _buildDetailRow(Icons.directions_car_filled_rounded, 'Dòng xe', vehicle.model),
+                  _buildDetailRow(Icons.directions_car_filled_rounded, _s.tr('Dòng xe', 'Model'), vehicle.model),
                   const SizedBox(height: 10),
-                  _buildDetailRow(Icons.palette_rounded, 'Màu sắc', vehicle.color),
+                  _buildDetailRow(Icons.palette_rounded, _s.tr('Màu sắc', 'Color'), vehicle.color),
                   const SizedBox(height: 10),
                   _buildDetailRow(
                     Icons.person_rounded,
-                    'Chủ sở hữu',
+                    _s.tr('Chủ sở hữu', 'Owner'),
                     vehicle.ownerName,
                   ),
                 ],
@@ -231,9 +234,9 @@ class VehiclesScreen extends StatelessWidget {
                     child: TextButton.icon(
                       onPressed: () {},
                       icon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.infoColor),
-                      label: const Text(
-                        'Tra cứu vi phạm',
-                        style: TextStyle(color: AppTheme.infoColor, fontWeight: FontWeight.w600, fontSize: 13),
+                      label: Text(
+                        _s.tr('Tra cứu vi phạm', 'Look up violations'),
+                        style: const TextStyle(color: AppTheme.infoColor, fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                     ),
                   ),
@@ -242,9 +245,9 @@ class VehiclesScreen extends StatelessWidget {
                     child: TextButton.icon(
                       onPressed: () {},
                       icon: const Icon(Icons.edit_outlined, size: 16, color: AppTheme.textSecondary),
-                      label: const Text(
-                        'Chỉnh sửa',
-                        style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
+                      label: Text(
+                        _s.tr('Chỉnh sửa', 'Edit'),
+                        style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                     ),
                   ),

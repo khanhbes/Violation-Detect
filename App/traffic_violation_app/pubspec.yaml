@@ -30,6 +30,9 @@ dependencies:
   # QR Code
   qr_flutter: ^4.1.0
   
+  # Image Picker
+  image_picker: ^1.0.7
+  
   # Date & Time
   intl: ^0.20.2
 

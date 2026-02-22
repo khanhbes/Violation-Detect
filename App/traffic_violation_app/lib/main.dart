@@ -14,6 +14,7 @@ import 'package:traffic_violation_app/screens/register_screen.dart';
 import 'package:traffic_violation_app/screens/complaint_screen.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
 import 'package:traffic_violation_app/services/push_notification_service.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,17 +31,41 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final AppSettings _settings = AppSettings();
+
+  @override
+  void initState() {
+    super.initState();
+    _settings.addListener(_onSettingsChanged);
+  }
+
+  @override
+  void dispose() {
+    _settings.removeListener(_onSettingsChanged);
+    super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    setState(() {}); // Rebuild MaterialApp when settings change
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Vi Phạm Giao Thông',
+      title: _settings.isVietnamese ? 'Vi Phạm Giao Thông' : 'Traffic Violations',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.light,
+      themeMode: _settings.themeMode,
+      locale: _settings.locale,
       navigatorKey: PushNotificationService.navigatorKey,
       initialRoute: '/',
       routes: {

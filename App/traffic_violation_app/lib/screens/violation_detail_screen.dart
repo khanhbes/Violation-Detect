@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 class ViolationDetailScreen extends StatefulWidget {
   const ViolationDetailScreen({super.key});
@@ -12,6 +13,7 @@ class ViolationDetailScreen extends StatefulWidget {
 
 class _ViolationDetailScreenState extends State<ViolationDetailScreen>
     with SingleTickerProviderStateMixin {
+  final AppSettings _settings = AppSettings();
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
@@ -44,7 +46,7 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
     if (args == null || args is! Violation) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Chi tiết vi phạm'),
+          title: Text(_settings.tr('Chi tiết vi phạm', 'Violation Detail')),
           backgroundColor: AppTheme.primaryColor,
           foregroundColor: Colors.white,
         ),
@@ -62,9 +64,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                 child: const Icon(Icons.error_outline, size: 36, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Không tìm thấy thông tin vi phạm',
-                style: TextStyle(fontSize: 16, color: AppTheme.textSecondary),
+              Text(
+                _settings.tr('Không tìm thấy thông tin vi phạm', 'Violation info not found'),
+                style: const TextStyle(fontSize: 16, color: AppTheme.textSecondary),
               ),
             ],
           ),
@@ -192,9 +194,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                         child: const Icon(Icons.monetization_on_rounded, color: Colors.white, size: 18),
                                       ),
                                       const SizedBox(width: 8),
-                                      const Text(
-                                        'Mức tiền phạt',
-                                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                                      Text(
+                                        _settings.tr('Mức tiền phạt', 'Fine amount'),
+                                        style: const TextStyle(color: Colors.white70, fontSize: 13),
                                       ),
                                     ],
                                   ),
@@ -227,9 +229,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                       const SizedBox(height: 24),
 
                       // ── Info Cards ──────────────────────────────
-                      const Text(
-                        'Thông tin vi phạm',
-                        style: TextStyle(
+                      Text(
+                        _settings.tr('Thông tin vi phạm', 'Violation info'),
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary,
@@ -247,30 +249,30 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                             _buildInfoRow(
                               Icons.access_time_rounded,
                               AppTheme.infoColor,
-                              'Thời gian',
+                              _settings.tr('Thời gian', 'Time'),
                               df.format(violation.timestamp),
                             ),
                             _divider(),
                             _buildInfoRow(
                               Icons.location_on_rounded,
                               AppTheme.successColor,
-                              'Địa điểm',
+                              _settings.tr('Địa điểm', 'Location'),
                               violation.location.isNotEmpty
                                   ? violation.location
-                                  : 'Camera giám sát giao thông',
+                                  : _settings.tr('Camera giám sát giao thông', 'Traffic surveillance camera'),
                             ),
                             _divider(),
                             _buildInfoRow(
                               Icons.directions_car_rounded,
                               AppTheme.secondaryColor,
-                              'Biển số xe',
+                              _settings.tr('Biển số xe', 'License plate'),
                               violation.licensePlate,
                             ),
                             _divider(),
                             _buildInfoRow(
                               Icons.warning_amber_rounded,
                               AppTheme.primaryColor,
-                              'Loại vi phạm',
+                              _settings.tr('Loại vi phạm', 'Violation type'),
                               violation.violationType,
                             ),
                             if (violation.violationCode.isNotEmpty) ...[
@@ -278,7 +280,7 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                               _buildInfoRow(
                                 Icons.qr_code_rounded,
                                 Colors.purple,
-                                'Mã vi phạm',
+                                _settings.tr('Mã vi phạm', 'Violation code'),
                                 violation.violationCode,
                               ),
                             ],
@@ -312,9 +314,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                     child: const Icon(Icons.description_rounded, size: 16, color: AppTheme.infoColor),
                                   ),
                                   const SizedBox(width: 8),
-                                  const Text(
-                                    'Mô tả vi phạm',
-                                    style: TextStyle(
+                                  Text(
+                                    _settings.tr('Mô tả vi phạm', 'Violation description'),
+                                    style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                       color: AppTheme.infoColor,
                                       fontSize: 14,
@@ -360,9 +362,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                 Navigator.pushNamed(context, '/payment', arguments: violation);
                               },
                               icon: const Icon(Icons.payment_rounded),
-                              label: const Text(
-                                'Nộp phạt ngay',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              label: Text(
+                                _settings.tr('Nộp phạt ngay', 'Pay fine now'),
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.transparent,
@@ -385,9 +387,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                               Navigator.pushNamed(context, '/complaint');
                             },
                             icon: const Icon(Icons.rate_review_rounded),
-                            label: const Text(
-                              'Khiếu nại vi phạm',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                            label: Text(
+                              _settings.tr('Khiếu nại vi phạm', 'File complaint'),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                             ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppTheme.primaryColor,
@@ -421,9 +423,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                 child: const Icon(Icons.check_rounded, color: AppTheme.successColor, size: 20),
                               ),
                               const SizedBox(width: 10),
-                              const Text(
-                                'Đã nộp phạt',
-                                style: TextStyle(
+                              Text(
+                                _settings.tr('Đã nộp phạt', 'Fine paid'),
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                   color: AppTheme.successColor,
@@ -462,7 +464,7 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
           ),
           const SizedBox(width: 4),
           Text(
-            v.isPending ? 'Chưa nộp phạt' : 'Đã nộp phạt',
+            v.isPending ? _settings.tr('Chưa nộp phạt', 'Unpaid') : _settings.tr('Đã nộp phạt', 'Paid'),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12,
@@ -548,9 +550,9 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                 child: const Icon(Icons.gavel_rounded, size: 16, color: AppTheme.warningColor),
               ),
               const SizedBox(width: 8),
-              const Text(
-                'Căn cứ pháp luật',
-                style: TextStyle(
+              Text(
+                _settings.tr('Căn cứ pháp luật', 'Legal basis'),
+                style: const TextStyle(
                   fontWeight: FontWeight.w600,
                   color: AppTheme.warningColor,
                   fontSize: 14,

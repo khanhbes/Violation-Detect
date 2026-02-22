@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 import 'dart:async';
 
 class ViolationsScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class _ViolationsScreenState extends State<ViolationsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final FirestoreService _firestore = FirestoreService();
+  final AppSettings _settings = AppSettings();
   List<Violation> _violations = [];
   bool _isLoading = true;
   StreamSubscription? _sub;
@@ -103,10 +105,10 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                             ),
                           ),
                         if (!widget.embedded) const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            'Vi phạm giao thông',
-                            style: TextStyle(
+                            _settings.tr('Vi phạm giao thông', 'Traffic Violations'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
@@ -121,7 +123,7 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              '$pending chưa nộp',
+                              '$pending ${_settings.tr('chưa nộp', 'unpaid')}',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,
@@ -137,13 +139,13 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                       children: [
                         _buildHeaderStat(
                           icon: Icons.folder_outlined,
-                          label: 'Tổng',
+                          label: _settings.tr('Tổng', 'Total'),
                           value: _violations.length.toString(),
                         ),
                         const SizedBox(width: 10),
                         _buildHeaderStat(
                           icon: Icons.pending_actions_rounded,
-                          label: 'Chưa nộp',
+                          label: _settings.tr('Chưa nộp', 'Unpaid'),
                           value: pending.toString(),
                         ),
                         const SizedBox(width: 10),
@@ -159,7 +161,7 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Tiền phạt',
+                                  _settings.tr('Tiền phạt', 'Total fines'),
                                   style: TextStyle(
                                     color: Colors.white.withOpacity(0.7),
                                     fontSize: 11,
@@ -205,9 +207,9 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                 unselectedLabelColor: AppTheme.textSecondary,
                 dividerColor: Colors.transparent,
                 tabs: [
-                  Tab(text: 'Tất cả (${_violations.length})'),
-                  Tab(text: 'Chưa nộp ($pending)'),
-                  Tab(text: 'Đã nộp ($paid)'),
+                  Tab(text: '${_settings.tr('Tất cả', 'All')} (${_violations.length})'),
+                  Tab(text: '${_settings.tr('Chưa nộp', 'Unpaid')} ($pending)'),
+                  Tab(text: '${_settings.tr('Đã nộp', 'Paid')} ($paid)'),
                 ],
               ),
             ),
@@ -294,10 +296,10 @@ class _ViolationsScreenState extends State<ViolationsScreen>
             const SizedBox(height: 14),
             Text(
               tab == 1
-                  ? 'Không có vi phạm chưa nộp'
+                  ? _settings.tr('Không có vi phạm chưa nộp', 'No unpaid violations')
                   : tab == 2
-                      ? 'Không có vi phạm đã nộp'
-                      : 'Không có vi phạm nào',
+                      ? _settings.tr('Không có vi phạm đã nộp', 'No paid violations')
+                      : _settings.tr('Không có vi phạm nào', 'No violations found'),
               style: const TextStyle(
                 fontSize: 15,
                 color: AppTheme.textSecondary,
@@ -457,7 +459,7 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                v.isPending ? 'Chưa nộp' : 'Đã nộp',
+                                v.isPending ? _settings.tr('Chưa nộp', 'Unpaid') : _settings.tr('Đã nộp', 'Paid'),
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,

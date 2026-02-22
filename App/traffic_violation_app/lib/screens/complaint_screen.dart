@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 import 'dart:async';
 
 class ComplaintScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final FirestoreService _firestore = FirestoreService();
+  final AppSettings _s = AppSettings();
   List<Violation> _violations = [];
   bool _isLoading = true;
   StreamSubscription? _sub;
@@ -50,7 +52,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
-        title: const Text('Khiếu nại vi phạm'),
+        title: Text(_s.tr('Khiếu nại vi phạm', 'File Complaint')),
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -90,7 +92,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Bạn có quyền khiếu nại trong vòng 30 ngày kể từ ngày xử phạt.',
+                          _s.tr('Bạn có quyền khiếu nại trong vòng 30 ngày kể từ ngày xử phạt.', 'You have the right to file a complaint within 30 days of the penalty.'),
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.9),
                             fontSize: 13,
@@ -123,9 +125,9 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                 labelColor: Colors.white,
                 unselectedLabelColor: AppTheme.textSecondary,
                 dividerColor: Colors.transparent,
-                tabs: const [
-                  Tab(text: 'Có thể khiếu nại'),
-                  Tab(text: 'Đã khiếu nại'),
+                tabs: [
+                  Tab(text: _s.tr('Có thể khiếu nại', 'Complainable')),
+                  Tab(text: _s.tr('Đã khiếu nại', 'Complained')),
                 ],
               ),
             ),
@@ -156,8 +158,8 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     if (pending.isEmpty) {
       return _buildEmptyState(
         icon: Icons.verified_rounded,
-        title: 'Không có vi phạm nào',
-        subtitle: 'Hiện không có vi phạm nào cần khiếu nại',
+        title: _s.tr('Không có vi phạm nào', 'No violations'),
+        subtitle: _s.tr('Hiện không có vi phạm nào cần khiếu nại', 'No violations to file complaint'),
       );
     }
 
@@ -171,8 +173,8 @@ class _ComplaintScreenState extends State<ComplaintScreen>
   Widget _buildComplainedList() {
     return _buildEmptyState(
       icon: Icons.fact_check_outlined,
-      title: 'Chưa có khiếu nại',
-      subtitle: 'Các khiếu nại đã gửi sẽ hiển thị ở đây',
+      title: _s.tr('Chưa có khiếu nại', 'No complaints yet'),
+      subtitle: _s.tr('Các khiếu nại đã gửi sẽ hiển thị ở đây', 'Submitted complaints will appear here'),
     );
   }
 
@@ -302,14 +304,14 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   Expanded(
                     child: GestureDetector(
                       onTap: () => Navigator.pushNamed(context, '/violation-detail', arguments: v),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.visibility_outlined, size: 16, color: AppTheme.infoColor),
-                          SizedBox(width: 6),
+                          const Icon(Icons.visibility_outlined, size: 16, color: AppTheme.infoColor),
+                          const SizedBox(width: 6),
                           Text(
-                            'Xem chi tiết',
-                            style: TextStyle(
+                            _s.tr('Xem chi tiết', 'View detail'),
+                            style: const TextStyle(
                               color: AppTheme.infoColor,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -324,14 +326,14 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   Expanded(
                     child: GestureDetector(
                       onTap: () => _showComplaintDialog(v),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.rate_review_outlined, size: 16, color: AppTheme.primaryColor),
-                          SizedBox(width: 6),
+                          const Icon(Icons.rate_review_outlined, size: 16, color: AppTheme.primaryColor),
+                          const SizedBox(width: 6),
                           Text(
-                            'Gửi khiếu nại',
-                            style: TextStyle(
+                            _s.tr('Gửi khiếu nại', 'Submit complaint'),
+                            style: const TextStyle(
                               color: AppTheme.primaryColor,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -355,12 +357,12 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     String? selectedReason;
 
     final reasons = [
-      'Nhầm lẫn biển số xe',
-      'Không phải phương tiện của tôi',
-      'Thông tin vi phạm không chính xác',
-      'Hình ảnh không rõ ràng',
-      'Tín hiệu giao thông hỏng',
-      'Lý do khác',
+      _s.tr('Nhầm lẫn biển số xe', 'Wrong license plate'),
+      _s.tr('Không phải phương tiện của tôi', 'Not my vehicle'),
+      _s.tr('Thông tin vi phạm không chính xác', 'Incorrect violation info'),
+      _s.tr('Hình ảnh không rõ ràng', 'Unclear image'),
+      _s.tr('Tín hiệu giao thông hỏng', 'Broken traffic signal'),
+      _s.tr('Lý do khác', 'Other reason'),
     ];
 
     showModalBottomSheet(
@@ -395,9 +397,9 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Gửi khiếu nại',
-                    style: TextStyle(
+                  Text(
+                    _s.tr('Gửi khiếu nại', 'Submit Complaint'),
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.textPrimary,
@@ -405,7 +407,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Vi phạm: ${v.violationType}',
+                    '${_s.tr('Vi phạm', 'Violation')}: ${v.violationType}',
                     style: const TextStyle(
                       fontSize: 14,
                       color: AppTheme.textSecondary,
@@ -414,9 +416,9 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   const SizedBox(height: 20),
 
                   // Reason selector
-                  const Text(
-                    'Lý do khiếu nại',
-                    style: TextStyle(
+                  Text(
+                    _s.tr('Lý do khiếu nại', 'Complaint reason'),
+                    style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary,
@@ -455,9 +457,9 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   const SizedBox(height: 20),
 
                   // Description
-                  const Text(
-                    'Mô tả chi tiết',
-                    style: TextStyle(
+                  Text(
+                    _s.tr('Mô tả chi tiết', 'Detailed description'),
+                    style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary,
@@ -468,7 +470,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                     controller: controller,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: 'Nhập mô tả chi tiết lý do khiếu nại...',
+                      hintText: _s.tr('Nhập mô tả chi tiết lý do khiếu nại...', 'Enter detailed complaint description...'),
                       hintStyle: const TextStyle(color: AppTheme.textHint),
                       filled: true,
                       fillColor: AppTheme.surfaceColor,
@@ -489,11 +491,11 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                         Navigator.pop(context);
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Row(
+                            content: Row(
                               children: [
-                                Icon(Icons.check_circle, color: Colors.white, size: 18),
-                                SizedBox(width: 8),
-                                Text('Khiếu nại đã được gửi thành công'),
+                                const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                const SizedBox(width: 8),
+                                Text(_s.tr('Khiếu nại đã được gửi thành công', 'Complaint submitted successfully')),
                               ],
                             ),
                             backgroundColor: AppTheme.successColor,
@@ -505,7 +507,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                         );
                       },
                       icon: const Icon(Icons.send_rounded, size: 18),
-                      label: const Text('Gửi khiếu nại'),
+                      label: Text(_s.tr('Gửi khiếu nại', 'Submit complaint')),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryColor,
                         foregroundColor: Colors.white,

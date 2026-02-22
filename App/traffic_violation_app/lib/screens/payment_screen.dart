@@ -4,6 +4,7 @@ import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
@@ -17,6 +18,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   int _selectedMethod = 0;
   bool _isProcessing = false;
   bool _paymentDone = false;
+  final AppSettings _s = AppSettings();
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
@@ -44,7 +46,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     if (args == null || args is! Violation) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Nộp phạt'),
+          title: Text(_s.tr('Nộp phạt', 'Payment')),
           backgroundColor: AppTheme.primaryColor,
           foregroundColor: Colors.white,
         ),
@@ -62,7 +64,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                 child: const Icon(Icons.error_outline, size: 36, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 16),
-              const Text('Không tìm thấy thông tin vi phạm', style: TextStyle(color: AppTheme.textSecondary)),
+              Text(_s.tr('Không tìm thấy thông tin vi phạm', 'Violation info not found'), style: const TextStyle(color: AppTheme.textSecondary)),
             ],
           ),
         ),
@@ -77,7 +79,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
-        title: const Text('Nộp phạt'),
+        title: Text(_s.tr('Nộp phạt', 'Payment')),
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -107,7 +109,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                   child: Column(
                     children: [
                       Text(
-                        'Số tiền phạt',
+                        _s.tr('Số tiền phạt', 'Fine amount'),
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.8),
                           fontSize: 14,
@@ -150,9 +152,9 @@ class _PaymentScreenState extends State<PaymentScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── Violation Info ─────────────────────────
-                    const Text(
-                      'Thông tin vi phạm',
-                      style: TextStyle(
+                    Text(
+                      _s.tr('Thông tin vi phạm', 'Violation info'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.textPrimary,
@@ -167,11 +169,11 @@ class _PaymentScreenState extends State<PaymentScreen>
                       ),
                       child: Column(
                         children: [
-                          _buildInfoRow(Icons.qr_code_rounded, 'Mã vi phạm', violation.violationCode.isNotEmpty ? violation.violationCode : violation.id),
+                          _buildInfoRow(Icons.qr_code_rounded, _s.tr('Mã vi phạm', 'Violation code'), violation.violationCode.isNotEmpty ? violation.violationCode : violation.id),
                           Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
-                          _buildInfoRow(Icons.directions_car_rounded, 'Biển số', violation.licensePlate),
+                          _buildInfoRow(Icons.directions_car_rounded, _s.tr('Biển số', 'License plate'), violation.licensePlate),
                           Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
-                          _buildInfoRow(Icons.location_on_rounded, 'Địa điểm', violation.location.isNotEmpty ? violation.location : 'Camera giám sát'),
+                          _buildInfoRow(Icons.location_on_rounded, _s.tr('Địa điểm', 'Location'), violation.location.isNotEmpty ? violation.location : _s.tr('Camera giám sát', 'Surveillance camera')),
                         ],
                       ),
                     ),
@@ -179,20 +181,20 @@ class _PaymentScreenState extends State<PaymentScreen>
                     const SizedBox(height: 24),
 
                     // ── Payment Method ────────────────────────
-                    const Text(
-                      'Phương thức thanh toán',
-                      style: TextStyle(
+                    Text(
+                      _s.tr('Phương thức thanh toán', 'Payment method'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 10),
-                    _buildPaymentMethod(0, Icons.qr_code_2_rounded, 'QR Code', 'Quét mã QR để thanh toán', AppTheme.primaryColor),
+                    _buildPaymentMethod(0, Icons.qr_code_2_rounded, 'QR Code', _s.tr('Quét mã QR để thanh toán', 'Scan QR to pay'), AppTheme.primaryColor),
                     const SizedBox(height: 8),
-                    _buildPaymentMethod(1, Icons.account_balance_rounded, 'Chuyển khoản', 'Chuyển khoản ngân hàng', AppTheme.infoColor),
+                    _buildPaymentMethod(1, Icons.account_balance_rounded, _s.tr('Chuyển khoản', 'Bank transfer'), _s.tr('Chuyển khoản ngân hàng', 'Bank transfer payment'), AppTheme.infoColor),
                     const SizedBox(height: 8),
-                    _buildPaymentMethod(2, Icons.credit_card_rounded, 'Thẻ ngân hàng', 'Visa, Mastercard, JCB', AppTheme.secondaryColor),
+                    _buildPaymentMethod(2, Icons.credit_card_rounded, _s.tr('Thẻ ngân hàng', 'Bank card'), 'Visa, Mastercard, JCB', AppTheme.secondaryColor),
 
                     const SizedBox(height: 24),
 
@@ -224,7 +226,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                                 )
                               : const Icon(Icons.payment_rounded),
                           label: Text(
-                            _isProcessing ? 'Đang xử lý...' : 'Xác nhận thanh toán',
+                            _isProcessing ? _s.tr('Đang xử lý...', 'Processing...') : _s.tr('Xác nhận thanh toán', 'Confirm payment'),
                             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                           ),
                           style: ElevatedButton.styleFrom(
@@ -341,9 +343,9 @@ class _PaymentScreenState extends State<PaymentScreen>
       ),
       child: Column(
         children: [
-          const Text(
-            'Quét mã QR để thanh toán',
-            style: TextStyle(
+          Text(
+            _s.tr('Quét mã QR để thanh toán', 'Scan QR code to pay'),
+            style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary,
@@ -382,7 +384,7 @@ class _PaymentScreenState extends State<PaymentScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            'Mã: ${v.id}',
+            '${_s.tr('Mã', 'Code')}: ${v.id}',
             style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
           ),
         ],
@@ -401,16 +403,16 @@ class _PaymentScreenState extends State<PaymentScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Thông tin chuyển khoản',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+          Text(
+            _s.tr('Thông tin chuyển khoản', 'Bank transfer info'),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
           ),
           const SizedBox(height: 14),
-          _buildBankRow('Ngân hàng', 'Vietcombank'),
-          _buildBankRow('Số TK', '1234 5678 9012'),
-          _buildBankRow('Chủ TK', 'KHO BẠC NHÀ NƯỚC'),
-          _buildBankRow('Nội dung', 'NP ${v.id}'),
-          _buildBankRow('Số tiền', fmt.format(v.fineAmount)),
+          _buildBankRow(_s.tr('Ngân hàng', 'Bank'), 'Vietcombank'),
+          _buildBankRow(_s.tr('Số TK', 'Account'), '1234 5678 9012'),
+          _buildBankRow(_s.tr('Chủ TK', 'Owner'), _s.tr('KHO BẠC NHÀ NƯỚC', 'STATE TREASURY')),
+          _buildBankRow(_s.tr('Nội dung', 'Content'), 'NP ${v.id}'),
+          _buildBankRow(_s.tr('Số tiền', 'Amount'), fmt.format(v.fineAmount)),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
@@ -419,14 +421,14 @@ class _PaymentScreenState extends State<PaymentScreen>
                 Clipboard.setData(ClipboardData(text: 'NP ${v.id}'));
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: const Text('Đã sao chép nội dung chuyển khoản'),
+                    content: Text(_s.tr('Đã sao chép nội dung chuyển khoản', 'Transfer content copied')),
                     behavior: SnackBarBehavior.floating,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 );
               },
               icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('Sao chép nội dung CK'),
+              label: Text(_s.tr('Sao chép nội dung CK', 'Copy transfer content')),
             ),
           ),
         ],
@@ -490,9 +492,9 @@ class _PaymentScreenState extends State<PaymentScreen>
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Thanh toán thành công!',
-                  style: TextStyle(
+                Text(
+                  _s.tr('Thanh toán thành công!', 'Payment successful!'),
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.successColor,
@@ -520,15 +522,15 @@ class _PaymentScreenState extends State<PaymentScreen>
                     onPressed: () {
                       Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
                     },
-                    child: const Text('Về trang chủ'),
+                    child: Text(_s.tr('Về trang chủ', 'Go to home')),
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'Xem lại vi phạm',
-                    style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
+                  child: Text(
+                    _s.tr('Xem lại vi phạm', 'View violation'),
+                    style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
