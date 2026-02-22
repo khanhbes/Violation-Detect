@@ -45,3 +45,8 @@ App/traffic_violation_app/build/
 App/traffic_violation_app/.dart_tool/
 App/traffic_violation_app/.flutter-plugins
 App/traffic_violation_app/.flutter-plugins-dependencies
+
+# Firebase secrets - do not commit
+google-services.json
+serviceAccountKey.json
+GoogleService-Info.plist
