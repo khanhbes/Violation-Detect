@@ -14,17 +14,14 @@ importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
 
 // ─── Firebase Configuration ────────────────────────────────────────────
-// ⚠️ REPLACE these values with your Firebase project config
-// Get them from: Firebase Console → Project Settings → General → Your apps → Web app
-firebase.initializeApp({
-    apiKey: "AIzaSyDu_wLcXBjiS1gWiyxmdAQXgev7TSL8gvA",
-    authDomain: "traffic-violation-c9270.firebaseapp.com",
-    projectId: "traffic-violation-c9270",
-    storageBucket: "traffic-violation-c9270.firebasestorage.app",
-    messagingSenderId: "775726122925",
-    appId: "1:775726122925:web:a5f24c639f105c70d3c324",
-    measurementId: "G-7T0M6Y5PHH"
-});
+// Load config from separate file (not committed to git)
+try {
+    importScripts('/static/firebase-config.js');
+} catch (e) {
+    console.error('[SW] Failed to load firebase-config.js:', e);
+}
+
+firebase.initializeApp(typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG : {});
 
 const messaging = firebase.messaging();
 

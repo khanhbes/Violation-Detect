@@ -616,15 +616,11 @@ if (scrollTopBtn) {
         return;
     }
 
-    const firebaseConfig = {
-        apiKey: "AIzaSyDu_wLcXBjiS1gWiyxmdAQXgev7TSL8gvA",
-        authDomain: "traffic-violation-c9270.firebaseapp.com",
-        projectId: "traffic-violation-c9270",
-        storageBucket: "traffic-violation-c9270.firebasestorage.app",
-        messagingSenderId: "775726122925",
-        appId: "1:775726122925:web:a5f24c639f105c70d3c324",
-        measurementId: "G-7T0M6Y5PHH"
-    };
+    const firebaseConfig = typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG : null;
+    if (!firebaseConfig) {
+        console.warn('[FCM] Firebase config not found. Load firebase-config.js before app.js');
+        return;
+    }
 
     try {
         // Initialize Firebase (only if not already initialized)
