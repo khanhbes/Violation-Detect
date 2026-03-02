@@ -11,7 +11,7 @@ import 'package:traffic_violation_app/models/violation.dart';
 class ApiService {
   // ── Configuration ──────────────────────────────────────────────
   // Change this to your backend server IP (same WiFi network)
-  static String serverIp = '192.168.1.93';
+  static String serverIp = '192.168.1.11';
   static int serverPort = 8000;
   static String get baseUrl => 'http://$serverIp:$serverPort';
   static String get wsUrl => 'ws://$serverIp:$serverPort/ws/app';

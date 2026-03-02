@@ -22,6 +22,16 @@
                 <a href="#" class="nav-link" data-tab="realtime">Real-Time</a>
                 <a href="#" class="nav-link" data-tab="lookup">Look Up</a>
             </div>
+            <div class="server-ip-badge" id="serverIpBadge" title="Nhập IP này vào app Flutter để kết nối">
+                <span class="server-ip-icon">📡</span>
+                <span class="server-ip-label">Server:</span>
+                <span class="server-ip-value" id="serverIpValue">Loading...</span>
+                <button class="server-ip-copy" id="serverIpCopy" title="Copy IP">📋</button>
+            </div>
+            <button class="lang-toggle" id="langToggle" title="Switch Language">
+                <span class="lang-flag" id="langFlag">🇻🇳</span>
+                <span class="lang-code" id="langCode">VI</span>
+            </button>
         </div>
     </nav>
 
@@ -38,7 +48,8 @@
                     <h1 class="hero-title animate-in">Traffic Violation<br><span
                             class="gradient-text animated-gradient">Detection
                             System</span></h1>
-                    <p class="hero-desc animate-in">Hệ thống phát hiện vi phạm giao thông thời gian thực</p>
+                    <p class="hero-desc animate-in" data-i18n="hero_desc">Hệ thống phát hiện vi phạm giao thông thời
+                        gian thực</p>
                     <p class="hero-typed-line animate-in"><span class="typing-text"></span></p>
                     <div class="hero-stats animate-in">
                         <div class="hero-stat tilt-card"><span class="hero-stat-value" data-count="40">0</span><span
@@ -46,125 +57,146 @@
                         <div class="hero-stat tilt-card"><span class="hero-stat-value" data-count="6">0</span><span
                                 class="hero-stat-label">Violation Types</span></div>
                         <div class="hero-stat tilt-card"><span class="hero-stat-value"
-                                data-text="Real-Time">—</span><span class="hero-stat-label">Detection Speed</span></div>
+                                data-text="Real-Time">—</span><span class="hero-stat-label"
+                                data-i18n="stat_speed">Detection Speed</span></div>
                         <div class="hero-stat tilt-card"><span class="hero-stat-value" data-text="YOLOv12">—</span><span
                                 class="hero-stat-label">AI Model</span></div>
                     </div>
                     <div class="hero-cta animate-in">
-                        <a href="#" class="btn btn-hero-primary" data-tab="realtime">🚀 Bắt đầu ngay</a>
-                        <a href="#" class="btn btn-hero-outline" data-tab="image">🖼️ Thử với ảnh</a>
+                        <a href="#" class="btn btn-hero-primary" data-tab="realtime" data-i18n="hero_cta_start">🚀 Bắt
+                            đầu ngay</a>
+                        <a href="#" class="btn btn-hero-outline" data-tab="image" data-i18n="hero_cta_image">🖼️ Thử với
+                            ảnh</a>
                     </div>
                 </div>
             </div>
 
             <!-- About Section -->
             <div class="home-section">
-                <h2 class="section-title animate-in"><span class="icon">📋</span> Giới thiệu dự án</h2>
-                <p class="section-desc animate-in">Dự án nghiên cứu khoa học ứng dụng Deep Learning vào giám sát giao
-                    thông đô thị, phát hiện tự động các hành vi vi phạm luật giao thông thông qua camera giám sát.</p>
+                <h2 class="section-title animate-in"><span class="icon">📋</span> <span data-i18n="about_title">Giới
+                        thiệu dự án</span></h2>
+                <p class="section-desc animate-in">Dự án nghiên cứu khoa học <span data-i18n="about_desc">ứng dụng Deep
+                        Learning vào giám sát giao
+                        thông đô thị, phát hiện tự động các hành vi vi phạm luật giao thông thông qua camera giám
+                        sát.</span></p>
                 <div class="features-grid">
                     <div class="feature-card animate-in"><span class="feature-icon">🪖</span>
                         <h3>Helmet Detection</h3>
-                        <p>Phát hiện người điều khiển xe máy không đội mũ bảo hiểm</p>
+                        <p data-i18n="feat_helmet">Phát hiện người điều khiển xe máy không đội mũ bảo hiểm</p>
                     </div>
                     <div class="feature-card animate-in"><span class="feature-icon">🚦</span>
                         <h3>Red Light</h3>
-                        <p>Phát hiện phương tiện vượt đèn đỏ tại ngã tư</p>
+                        <p data-i18n="feat_redlight">Phát hiện phương tiện vượt đèn đỏ tại ngã tư</p>
                     </div>
                     <div class="feature-card animate-in"><span class="feature-icon">🚶</span>
                         <h3>Sidewalk</h3>
-                        <p>Phát hiện phương tiện chạy lên vỉa hè, dải phân cách</p>
+                        <p data-i18n="feat_sidewalk">Phát hiện phương tiện chạy lên vỉa hè, dải phân cách</p>
                     </div>
                     <div class="feature-card animate-in"><span class="feature-icon">⬅️</span>
                         <h3>Wrong Way</h3>
-                        <p>Phát hiện phương tiện chạy ngược chiều</p>
+                        <p data-i18n="feat_wrongway">Phát hiện phương tiện chạy ngược chiều</p>
                     </div>
                     <div class="feature-card animate-in"><span class="feature-icon">🛣️</span>
                         <h3>Wrong Lane</h3>
-                        <p>Phát hiện vi phạm sai làn đường, đè vạch kẻ đường</p>
+                        <p data-i18n="feat_wronglane">Phát hiện vi phạm sai làn đường, đè vạch kẻ đường</p>
                     </div>
                     <div class="feature-card animate-in"><span class="feature-icon">🚫</span>
                         <h3>Sign Violation</h3>
-                        <p>Phát hiện vi phạm biển báo giao thông</p>
+                        <p data-i18n="feat_sign">Phát hiện vi phạm biển báo giao thông</p>
                     </div>
                 </div>
             </div>
 
             <!-- Technology Section -->
             <div class="home-section">
-                <h2 class="section-title animate-in"><span class="icon">🧠</span> Mô hình & Công nghệ</h2>
+                <h2 class="section-title animate-in"><span class="icon">🧠</span> <span data-i18n="tech_title">Mô hình &
+                        Công nghệ</span></h2>
                 <div class="tech-grid">
                     <div class="tech-card animate-in">
                         <div class="tech-icon">🤖</div>
                         <h3>YOLOv12-Seg</h3>
-                        <p>Object Detection + Instance Segmentation, nhận diện 40 classes bao gồm phương tiện, đèn giao
+                        <p data-i18n="tech_yolo">Object Detection + Instance Segmentation, nhận diện 40 classes bao gồm
+                            phương tiện, đèn giao
                             thông, vạch kẻ, biển báo</p>
                     </div>
                     <div class="tech-card animate-in">
                         <div class="tech-icon">📊</div>
                         <h3>ByteTrack</h3>
-                        <p>Multi-object tracking cho theo dõi phương tiện liên tục qua nhiều frame, hỗ trợ phân tích
+                        <p data-i18n="tech_bytetrack">Multi-object tracking cho theo dõi phương tiện liên tục qua nhiều
+                            frame, hỗ trợ phân tích
                             hành vi</p>
                     </div>
                     <div class="tech-card animate-in">
                         <div class="tech-icon">⚡</div>
                         <h3>FastAPI + WebSocket</h3>
-                        <p>Backend hiệu suất cao với streaming real-time, xử lý đồng thời nhiều client</p>
+                        <p><span data-i18n="tech_fastapi" data-i18n="tech_fastapi">Backend hiệu suất cao với streaming
+                                real-time, xử lý đồng thời
+                                nhiều client</span></p>
                     </div>
                     <div class="tech-card animate-in">
                         <div class="tech-icon">🎯</div>
                         <h3>Calibration System</h3>
-                        <p>Tự động hiệu chỉnh vùng vi phạm (vỉa hè, vạch dừng, làn đường) trong 5-10 giây đầu</p>
+                        <p><span data-i18n="tech_calibration" data-i18n="tech_calibration">Tự động hiệu chỉnh vùng vi
+                                phạm (vỉa hè, vạch dừng, làn
+                                đường) trong 5-10 giây đầu</span></p>
                     </div>
                 </div>
             </div>
 
             <!-- Team Section -->
             <div class="home-section">
-                <h2 class="section-title animate-in"><span class="icon">👥</span> Thành viên nhóm</h2>
+                <h2 class="section-title animate-in"><span class="icon">👥</span> <span data-i18n="team_title">Thành
+                        viên nhóm</span></h2>
                 <div class="team-grid">
                     <div class="team-card animate-in">
                         <div class="team-avatar">👨‍💻</div>
                         <h3>Nguyễn Văn A</h3>
                         <p class="team-role">Team Leader</p>
-                        <p class="team-desc">Phụ trách kiến trúc hệ thống & training model</p>
+                        <p class="team-desc"><span data-i18n="team_a_desc" data-i18n="team_a_desc">Phụ trách kiến trúc
+                                hệ thống & training
+                                model</span></p>
                     </div>
                     <div class="team-card animate-in">
                         <div class="team-avatar">👩‍💻</div>
                         <h3>Trần Thị B</h3>
                         <p class="team-role">AI Developer</p>
-                        <p class="team-desc">Phát triển các module phát hiện vi phạm</p>
+                        <p class="team-desc"><span data-i18n="team_b_desc">Phát triển các module phát hiện vi
+                                phạm</span></p>
                     </div>
                     <div class="team-card animate-in">
                         <div class="team-avatar">👨‍🔬</div>
                         <h3>Lê Văn C</h3>
                         <p class="team-role">Data Engineer</p>
-                        <p class="team-desc">Thu thập, gán nhãn và xử lý dữ liệu huấn luyện</p>
+                        <p class="team-desc"><span data-i18n="team_c_desc">Thu thập, gán nhãn và xử lý dữ liệu huấn
+                                luyện</span></p>
                     </div>
                     <div class="team-card animate-in">
                         <div class="team-avatar">👩‍🎨</div>
                         <h3>Phạm Thị D</h3>
                         <p class="team-role">Frontend Developer</p>
-                        <p class="team-desc">Thiết kế giao diện web & trải nghiệm người dùng</p>
+                        <p class="team-desc"><span data-i18n="team_d_desc" data-i18n="team_d_desc">Thiết kế giao diện
+                                web & trải nghiệm người
+                                dùng</span></p>
                     </div>
                 </div>
             </div>
 
             <!-- Contact Section -->
             <div class="home-section">
-                <h2 class="section-title animate-in"><span class="icon">📞</span> Liên hệ</h2>
+                <h2 class="section-title animate-in"><span class="icon">📞</span> <span data-i18n="contact_title">Liên
+                        hệ</span></h2>
                 <div class="contact-grid">
                     <div class="contact-card animate-in"><span class="contact-icon">📧</span>
                         <h3>Email</h3>
                         <p>traffic.violation@university.edu.vn</p>
                     </div>
                     <div class="contact-card animate-in"><span class="contact-icon">📱</span>
-                        <h3>Điện thoại</h3>
+                        <h3 data-i18n="contact_phone">Điện thoại</h3>
                         <p>0123 456 789</p>
                     </div>
                     <div class="contact-card animate-in"><span class="contact-icon">🏫</span>
-                        <h3>Đơn vị</h3>
-                        <p>Khoa Công nghệ Thông tin</p>
+                        <h3 data-i18n="contact_org">Đơn vị</h3>
+                        <p><span data-i18n="contact_org_name">Khoa Công nghệ Thông tin</span></p>
                     </div>
                     <div class="contact-card animate-in"><span class="contact-icon">🌐</span>
                         <h3>GitHub</h3>
@@ -178,7 +210,8 @@
         <section id="tab-image" class="tab-panel">
             <header class="tab-header">
                 <h1><span class="icon">🖼️</span> Image Detection</h1>
-                <p class="subtitle">Tải lên hình ảnh để nhận diện tất cả các vật thể</p>
+                <p class="subtitle" data-i18n="image_subtitle" data-i18n="image_subtitle">Tải lên hình ảnh để nhận diện
+                    tất cả các vật thể</p>
             </header>
             <div class="detect-layout">
                 <div class="detect-main">
@@ -223,7 +256,8 @@
         <section id="tab-video" class="tab-panel">
             <header class="tab-header">
                 <h1><span class="icon">🎬</span> Video Detection</h1>
-                <p class="subtitle">Tải lên video để nhận diện và theo dõi vật thể</p>
+                <p class="subtitle" data-i18n="video_subtitle" data-i18n="video_subtitle">Tải lên video để nhận diện và
+                    theo dõi vật thể</p>
             </header>
             <div class="detect-layout">
                 <div class="detect-main">
@@ -252,7 +286,7 @@
                         <div class="card-title"><span class="icon">⏳</span> Processing</div>
                         <div class="process-status">
                             <div class="spinner" id="videoSpinner"></div>
-                            <p id="videoProcessText">Đang xử lý video...</p>
+                            <p id="videoProcessText" data-i18n="video_processing">Đang xử lý video...</p>
                             <div class="progress-bar">
                                 <div class="progress-fill" id="videoProgressFill" style="width:0%"></div>
                             </div>
@@ -279,7 +313,8 @@
         <section id="tab-realtime" class="tab-panel">
             <header class="tab-header">
                 <h1><span class="icon">📡</span> Real-Time Detection</h1>
-                <p class="subtitle">Phát hiện vi phạm giao thông theo thời gian thực</p>
+                <p class="subtitle" data-i18n="realtime_subtitle" data-i18n="realtime_subtitle">Phát hiện vi phạm giao
+                    thông theo thời gian thực</p>
             </header>
             <div class="main-layout">
                 <section class="video-panel">
@@ -288,7 +323,7 @@
                             <canvas id="videoCanvas" width="1280" height="720"></canvas>
                             <div id="videoOverlay" class="video-overlay">
                                 <span class="icon">🎬</span>
-                                <p>Select options and click Start Detection</p>
+                                <p data-i18n="realtime_overlay">Select options and click Start Detection</p>
                             </div>
                             <div class="video-stats" id="videoStats" style="display:none;">
                                 <div class="stat-item"><span>Frame:</span><span class="stat-value"
@@ -423,27 +458,34 @@
         <!-- ==================== LOOKUP TAB ==================== -->
         <section id="tab-lookup" class="tab-panel">
             <header class="tab-header">
-                <h1><span class="icon">🔍</span> Tra cứu vi phạm</h1>
-                <p class="subtitle">Tìm kiếm thông tin vi phạm theo biển số xe, CCCD hoặc số điện thoại</p>
+                <h1><span class="icon">🔍</span> <span data-i18n="lookup_title">Tra cứu vi phạm</span></h1>
+                <p class="subtitle" data-i18n="lookup_subtitle">Tìm kiếm thông tin vi phạm theo biển số xe, CCCD hoặc số
+                    điện thoại</p>
             </header>
             <div class="lookup-layout">
                 <div class="card lookup-form-card">
-                    <div class="card-title"><span class="icon">📝</span> Thông tin tra cứu</div>
+                    <div class="card-title"><span class="icon">📝</span> <span data-i18n="lookup_form_title">Thông tin
+                            tra cứu</span></div>
                     <div class="lookup-form">
-                        <div class="form-group"><label>🚗 Biển số xe</label><input type="text" id="lookupPlate"
-                                class="form-input" placeholder="VD: 51A-123.45"></div>
-                        <div class="form-group"><label>🪪 Số CCCD</label><input type="text" id="lookupCCCD"
-                                class="form-input" placeholder="VD: 012345678901"></div>
-                        <div class="form-group"><label>📱 Số điện thoại</label><input type="text" id="lookupPhone"
-                                class="form-input" placeholder="VD: 0901234567"></div>
+                        <div class="form-group"><label data-i18n="lookup_plate" data-i18n="lookup_plate">🚗 Biển số
+                                xe</label><input type="text" id="lookupPlate" class="form-input"
+                                placeholder="VD: 51A-123.45"></div>
+                        <div class="form-group"><label data-i18n="lookup_cccd" data-i18n="lookup_cccd">🪪 Số
+                                CCCD</label><input type="text" id="lookupCCCD" class="form-input"
+                                placeholder="VD: 012345678901"></div>
+                        <div class="form-group"><label data-i18n="lookup_phone" data-i18n="lookup_phone">📱 Số điện
+                                thoại</label><input type="text" id="lookupPhone" class="form-input"
+                                placeholder="VD: 0901234567"></div>
                         <button class="btn btn-primary" id="lookupBtn" style="width:100%;margin-top:10px;">🔍 Tra
                             cứu</button>
                     </div>
                 </div>
                 <div class="card lookup-results-card">
-                    <div class="card-title"><span class="icon">📋</span> Kết quả tra cứu</div>
+                    <div class="card-title"><span class="icon">📋</span> <span data-i18n="lookup_results_title">Kết quả
+                            tra cứu</span></div>
                     <div id="lookupResults" class="lookup-results">
-                        <p class="no-items">Nhập thông tin và nhấn Tra cứu để tìm kiếm vi phạm.</p>
+                        <p class="no-items" data-i18n="lookup_empty">Nhập thông tin và nhấn Tra cứu để tìm kiếm vi phạm.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -468,6 +510,7 @@
 
     <script src="/static/firebase-config.js"></script>
     <script src="/static/app.js"></script>
+    <script src="/static/i18n.js"></script>
 </body>
 
 </html>

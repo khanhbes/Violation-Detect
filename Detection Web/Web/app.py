@@ -407,6 +407,46 @@ async def unregister_fcm_token(req: FCMTokenRemoveRequest):
 
 
 # =============================================================================
+# SERVER INFO API (show IP for mobile app connection)
+# =============================================================================
+
+@app.get("/api/server-info")
+async def get_server_info():
+    """Return server's local IP addresses and port for mobile app connection."""
+    import socket
+    ips = []
+    try:
+        # Get all network interfaces
+        hostname = socket.gethostname()
+        addr_infos = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        seen = set()
+        for info in addr_infos:
+            ip = info[4][0]
+            if ip not in seen and not ip.startswith('127.'):
+                seen.add(ip)
+                ips.append(ip)
+    except Exception:
+        pass
+
+    # Fallback: get primary IP via UDP trick
+    if not ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+            s.close()
+        except Exception:
+            ips.append("127.0.0.1")
+
+    return JSONResponse({
+        "ips": ips,
+        "port": 8000,
+        "hostname": socket.gethostname(),
+        "ws_path": "/ws/app",
+    })
+
+
+# =============================================================================
 # APP SYNC API (for Flutter mobile app)
 # =============================================================================
 
