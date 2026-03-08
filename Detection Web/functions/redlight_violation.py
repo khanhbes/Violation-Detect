@@ -54,112 +54,128 @@ def get_distance_to_line(px: float, py: float, a: float, b: float, c: float) -> 
     """Tính khoảng cách tuyệt đối từ điểm đến đường thẳng"""
     return abs(get_signed_distance(px, py, a, b, c))
 
-
 # =============================================================================
-# RANSAC STOPLINE FITTING
+# STOPLINE MASK LINE FITTING (from reference: minAreaRect + walk-along-mask)
 # =============================================================================
 
-def fit_stopline_ransac(
-    points_xy: np.ndarray,
-    max_iters: int = 400,
-    inlier_thresh: float = 3.0,
-    min_inliers: int = 100
-) -> Optional[Tuple[float, float, float]]:
-    """
-    Fit đường thẳng ax + by + c = 0 sử dụng RANSAC
+def boxes_overlap(box_a, box_b):
+    """Kiểm tra 2 bounding box có overlap không"""
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    return inter_x2 > inter_x1 and inter_y2 > inter_y1
+
+
+def merge_overlapping_detections(detections):
+    """Gộp các detection overlap thành 1 (box + mask)"""
+    merged = []
+    used = [False] * len(detections)
+
+    for i in range(len(detections)):
+        if used[i]:
+            continue
+        used[i] = True
+        current_box = detections[i]["box"].copy()
+        current_conf = detections[i]["conf"]
+        current_mask = detections[i]["mask"].copy() if detections[i]["mask"] is not None else None
+
+        changed = True
+        while changed:
+            changed = False
+            for j in range(len(detections)):
+                if used[j]:
+                    continue
+                if boxes_overlap(current_box, detections[j]["box"]):
+                    box_j = detections[j]["box"]
+                    current_box = np.array([
+                        min(current_box[0], box_j[0]),
+                        min(current_box[1], box_j[1]),
+                        max(current_box[2], box_j[2]),
+                        max(current_box[3], box_j[3]),
+                    ], dtype=np.float32)
+                    current_conf = max(current_conf, detections[j]["conf"])
+                    if current_mask is None:
+                        if detections[j]["mask"] is not None:
+                            current_mask = detections[j]["mask"].copy()
+                    elif detections[j]["mask"] is not None:
+                        current_mask = np.logical_or(current_mask, detections[j]["mask"])
+                    used[j] = True
+                    changed = True
+
+        merged.append({"box": current_box, "conf": current_conf, "mask": current_mask})
+    return merged
+
+
+def line_inside_mask(mask):
+    """Tìm đường centerline bên trong mask bằng minAreaRect + walk.
     
-    Args:
-        points_xy: Mảng điểm (N, 2)
-        max_iters: Số vòng lặp tối đa
-        inlier_thresh: Ngưỡng khoảng cách để tính inlier
-        min_inliers: Số inlier tối thiểu để chấp nhận
-        
     Returns:
-        (a, b, c) đã normalize (sqrt(a²+b²)=1) hoặc None nếu thất bại
+        (x1, y1, x2, y2, length) hoặc None
     """
-    if points_xy is None or len(points_xy) < 2:
+    if mask is None:
         return None
 
-    pts = points_xy.astype(np.float32)
-    n = len(pts)
-
-    # Subsample nếu quá nhiều điểm
-    if n > 15000:
-        idx = np.random.choice(n, size=15000, replace=False)
-        pts = pts[idx]
-        n = len(pts)
-
-    best_inliers = 0
-    best_abc = None
-    rng = np.random.default_rng(42)
-
-    for _ in range(max_iters):
-        # Chọn 2 điểm ngẫu nhiên
-        i1, i2 = rng.integers(0, n, size=2)
-        if i1 == i2:
-            continue
-            
-        x1, y1 = pts[i1]
-        x2, y2 = pts[i2]
-        dx, dy = x2 - x1, y2 - y1
-        
-        if abs(dx) + abs(dy) < 1e-6:
-            continue
-
-        # Đường thẳng qua 2 điểm: (y1-y2)x + (x2-x1)y + (x1*y2 - x2*y1) = 0
-        a = (y1 - y2)
-        b = (x2 - x1)
-        c = (x1 * y2 - x2 * y1)
-
-        # Normalize
-        norm = np.sqrt(a * a + b * b) + 1e-12
-        a, b, c = a / norm, b / norm, c / norm
-
-        # Đếm inliers
-        distances = np.abs(a * pts[:, 0] + b * pts[:, 1] + c)
-        inlier_count = int(np.sum(distances <= inlier_thresh))
-
-        if inlier_count > best_inliers:
-            best_inliers = inlier_count
-            best_abc = (float(a), float(b), float(c))
-
-    if best_abc is None or best_inliers < min_inliers:
+    mask_u8 = (mask.astype(np.uint8) * 255)
+    if cv2.countNonZero(mask_u8) == 0:
         return None
 
-    return best_abc
-
-
-def line_to_segment(a: float, b: float, c: float, w: int, h: int) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
-    """Chuyển đường thẳng vô hạn thành đoạn thẳng trong frame"""
-    pts = []
-
-    def add_if_valid(x, y):
-        if 0 <= x < w and 0 <= y < h:
-            pts.append((int(round(x)), int(round(y))))
-
-    # Giao với các biên
-    if abs(b) > 1e-9:
-        add_if_valid(0, -c / b)
-        add_if_valid(w - 1, -(a * (w - 1) + c) / b)
-    if abs(a) > 1e-9:
-        add_if_valid(-c / a, 0)
-        add_if_valid(-(b * (h - 1) + c) / a, h - 1)
-
-    # Loại trùng
-    pts = list(set(pts))
-    if len(pts) < 2:
+    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return None
 
-    # Chọn 2 điểm xa nhất
-    max_dist = -1
-    p1, p2 = pts[0], pts[1]
-    for i in range(len(pts)):
-        for j in range(i + 1, len(pts)):
-            d = (pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2
-            if d > max_dist:
-                max_dist = d
-                p1, p2 = pts[i], pts[j]
-    return p1, p2
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 10:
+        return None
+
+    (cx, cy), (rw, rh), angle = cv2.minAreaRect(contour)
+    theta = np.deg2rad(angle if rw >= rh else angle + 90.0)
+    direction = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32)
+    norm = np.linalg.norm(direction)
+    if norm == 0:
+        return None
+    direction /= norm
+
+    h, w = mask_u8.shape
+    center_x = int(round(cx))
+    center_y = int(round(cy))
+    if (center_x < 0 or center_x >= w or center_y < 0 or center_y >= h
+            or mask_u8[center_y, center_x] == 0):
+        ys, xs = np.where(mask_u8 > 0)
+        if len(xs) == 0:
+            return None
+        idx = int(np.argmin((xs - cx) ** 2 + (ys - cy) ** 2))
+        cx = float(xs[idx])
+        cy = float(ys[idx])
+    else:
+        cx = float(center_x)
+        cy = float(center_y)
+
+    def walk(sign):
+        x, y = cx, cy
+        last_x, last_y = x, y
+        max_steps = int(max(h, w) * 4)
+        step_size = 0.5
+        for _ in range(max_steps):
+            x += direction[0] * step_size * sign
+            y += direction[1] * step_size * sign
+            xi = int(round(x))
+            yi = int(round(y))
+            if xi < 0 or xi >= w or yi < 0 or yi >= h or mask_u8[yi, xi] == 0:
+                break
+            last_x = x
+            last_y = y
+        return last_x, last_y
+
+    p1x, p1y = walk(-1)
+    p2x, p2y = walk(1)
+    length = float(np.hypot(p2x - p1x, p2y - p1y))
+    if length < 2.0:
+        return None
+
+    return int(round(p1x)), int(round(p1y)), int(round(p2x)), int(round(p2y)), length
 
 
 # =============================================================================
@@ -169,85 +185,69 @@ def line_to_segment(a: float, b: float, c: float, w: int, h: int) -> Optional[Tu
 @dataclass
 class TrackState:
     """Trạng thái tracking của mỗi xe"""
-    last_region: Optional[int] = None  # -1: Âm (đang tới), +1: Dương (đã qua)
-    first_seen: bool = False           # Đã thấy lần đầu chưa
-    last_event_frame: int = -1000      # Frame cuối xảy ra event
-    label: str = "Safe"                # Safe / WARNING / VIOLATION
+    last_region: Optional[int] = None
+    first_seen: bool = False
+    last_event_frame: int = -1000
+    label: str = "Safe"
     color: Tuple[int, int, int] = field(default_factory=lambda: (0, 255, 0))
-    positions: List[Tuple[float, float]] = field(default_factory=list)  # Lịch sử vị trí để phát hiện hướng đi
-    direction: str = "UNKNOWN"         # STRAIGHT, LEFT, RIGHT, UNKNOWN
+    positions: List[Tuple[float, float]] = field(default_factory=list)
+    direction: str = "UNKNOWN"
 
 
 @dataclass
 class TrafficLightState:
     """Trạng thái chi tiết của tất cả đèn giao thông"""
-    # Đèn tròn (circle)
-    circle_red: bool = False           # light_straight_circle_red (class 18)
-    circle_yellow: bool = False        # light_straight_circle_yellow (class 19)
-    circle_green: bool = False         # light_straight_circle_green (class 17)
-    
-    # Đèn mũi tên rẽ trái
-    left_red: bool = False             # light_left_red (class 11)
-    left_yellow: bool = False          # light_left_yellow (class 12)
-    left_green: bool = False           # light_left_green (class 10)
-    
-    # Đèn mũi tên đi thẳng
-    straight_red: bool = False         # light_straight_arrow_red (class 15)
-    straight_yellow: bool = False      # light_straight_arrow_yellow (class 16)
-    straight_green: bool = False       # light_straight_arrow_green (class 14)
-    
-    # Đèn mũi tên rẽ phải
-    right_green: bool = False          # light_right_green (class 13)
+    circle_red: bool = False
+    circle_yellow: bool = False
+    circle_green: bool = False
+    left_red: bool = False
+    left_yellow: bool = False
+    left_green: bool = False
+    straight_red: bool = False
+    straight_yellow: bool = False
+    straight_green: bool = False
+    right_green: bool = False
     
     def get_allowed_directions(self) -> Dict[str, bool]:
-        """
-        Trả về các hướng được phép đi dựa trên tổ hợp đèn
-        Returns: {'STRAIGHT': bool, 'LEFT': bool, 'RIGHT': bool}
-        """
-        allowed = {'STRAIGHT': True, 'LEFT': True, 'RIGHT': True}
-        
-        # Rule 1: circle_red + right_green -> tất cả được rẽ phải
-        if self.circle_red and self.right_green:
-            allowed = {'STRAIGHT': False, 'LEFT': False, 'RIGHT': True}
-            return allowed
-        
-        # Rule 2: circle_green + left_red -> đi thẳng OK, rẽ trái vi phạm
-        if self.circle_green and self.left_red:
-            allowed = {'STRAIGHT': True, 'LEFT': False, 'RIGHT': True}
-            return allowed
-        
-        # Rule 3: circle_red + left_green -> rẽ trái OK, đi thẳng vi phạm
-        if self.circle_red and self.left_green:
-            allowed = {'STRAIGHT': False, 'LEFT': True, 'RIGHT': True}
-            return allowed
-        
-        # Rule 5: straight_red + left_green -> rẽ trái/phải OK, đi thẳng vi phạm
-        if self.straight_red and self.left_green:
-            allowed = {'STRAIGHT': False, 'LEFT': True, 'RIGHT': True}
-            return allowed
-        
-        # Rule 6: chỉ có straight_red -> rẽ trái/phải OK, đi thẳng vi phạm
-        if self.straight_red and not self.left_green and not self.circle_green:
-            allowed = {'STRAIGHT': False, 'LEFT': True, 'RIGHT': True}
-            return allowed
-        
-        # Đèn đỏ tròn thông thường (không có đèn xanh nào khác)
-        if self.circle_red and not self.right_green and not self.left_green:
+        """Trả về các hướng được phép đi dựa trên tổ hợp đèn giao thông."""
+        if self.circle_red:
             allowed = {'STRAIGHT': False, 'LEFT': False, 'RIGHT': False}
+            if self.right_green:
+                allowed['RIGHT'] = True
+            if self.left_green:
+                allowed['LEFT'] = True
+            if self.straight_green:
+                allowed['STRAIGHT'] = True
             return allowed
         
+        if self.circle_green:
+            allowed = {'STRAIGHT': True, 'LEFT': True, 'RIGHT': True}
+            if self.left_red:
+                allowed['LEFT'] = False
+            if self.straight_red:
+                allowed['STRAIGHT'] = False
+            return allowed
+        
+        allowed = {'STRAIGHT': True, 'LEFT': True, 'RIGHT': True}
+        if self.straight_red:
+            allowed['STRAIGHT'] = False
+        if self.left_red:
+            allowed['LEFT'] = False
+        if self.straight_green:
+            allowed['STRAIGHT'] = True
+        if self.left_green:
+            allowed['LEFT'] = True
+        if self.right_green:
+            allowed['RIGHT'] = True
         return allowed
     
     def has_any_yellow(self) -> bool:
-        """Kiểm tra có bất kỳ đèn vàng nào sáng không"""
         return self.circle_yellow or self.left_yellow or self.straight_yellow
     
     def has_any_red(self) -> bool:
-        """Kiểm tra có bất kỳ đèn đỏ nào sáng không"""
         return self.circle_red or self.left_red or self.straight_red
     
     def get_simple_state(self) -> str:
-        """Trả về trạng thái đơn giản cho HUD"""
         if self.has_any_red():
             return "RED"
         if self.has_any_yellow():
@@ -267,10 +267,9 @@ class LightMemory:
             self.last_update_time = current_time
     
     def get(self, current_time: float) -> TrafficLightState:
-        # Nhớ trạng thái trong 2 giây
         if (current_time - self.last_update_time) <= config.LIGHT_MEMORY_DURATION:
             return self.last_state
-        return TrafficLightState()  # Mặc định tất cả False
+        return TrafficLightState()
 
 
 # =============================================================================
@@ -278,70 +277,69 @@ class LightMemory:
 # =============================================================================
 
 class StoplineCalibrator:
-    """Bộ calibration stopline sử dụng RANSAC"""
+    """Bộ calibration stopline: tìm centerline trong mask, khóa sau N giây"""
     
     def __init__(self, duration: float = 5.0):
         self.duration = duration
         self.start_time = None
-        self.points: List[np.ndarray] = []
         self.line_abc: Optional[Tuple[float, float, float]] = None
-        self.sign_flip: float = 1.0  # Để auto-orient dấu
-        self.min_x: int = 0  # Giới hạn trái của stopline
-        self.max_x: int = 0  # Giới hạn phải của stopline
+        self.sign_flip: float = 1.0
+        self.min_x: int = 0
+        self.max_x: int = 0
+        # Best line found during calibration
+        self.best_line: Optional[Tuple[int, int, int, int]] = None
+        self.best_line_length: float = 0.0
         
     def is_calibrated(self) -> bool:
         return self.line_abc is not None
     
     def start(self):
         self.start_time = time.time()
-        
-    def add_mask_points(self, mask: np.ndarray):
-        """Thêm các điểm từ mask stopline"""
-        ys, xs = np.where(mask > 0)
-        if len(xs) > 0:
-            pts = np.stack([xs, ys], axis=1)
-            self.points.append(pts)
+    
+    def update_line(self, line_info):
+        """Cập nhật line candidate từ line_inside_mask().
+        Giữ lại line dài nhất (phủ nhiều mặt đường nhất).
+        """
+        if line_info is None:
+            return
+        x1, y1, x2, y2, length = line_info
+        if length > self.best_line_length:
+            self.best_line = (x1, y1, x2, y2)
+            self.best_line_length = length
     
     def maybe_finish(self, frame_height: int, frame_width: int):
         """Kiểm tra và hoàn thành calibration"""
         if self.start_time is None or self.is_calibrated():
             return
-            
+        
         elapsed = time.time() - self.start_time
         if elapsed < self.duration:
             return
         
-        # Ghép tất cả điểm
-        if not self.points:
-            print("[ERROR] No stopline points collected!")
-            return
-            
-        all_pts = np.concatenate(self.points, axis=0)
-        print(f"[CALIBRATION] Collected {len(all_pts)} points")
-        
-        if len(all_pts) < config.STOPLINE_MIN_POINTS:
-            print(f"[ERROR] Not enough points: {len(all_pts)} < {config.STOPLINE_MIN_POINTS}")
+        if self.best_line is None:
+            print("[ERROR] No stopline found during calibration!")
             return
         
-        # Lưu giới hạn x của mask
-        self.min_x = int(np.min(all_pts[:, 0]))
-        self.max_x = int(np.max(all_pts[:, 0]))
+        x1, y1, x2, y2 = self.best_line
+        self.min_x = min(x1, x2)
+        self.max_x = max(x1, x2)
         
-        # Fit đường thẳng bằng RANSAC
-        abc = fit_stopline_ransac(all_pts)
-        if abc is None:
-            print("[ERROR] RANSAC failed to fit stopline!")
-            return
+        # Convert line segment → ax + by + c = 0
+        a = float(y1 - y2)
+        b = float(x2 - x1)
+        c = float(x1 * y2 - x2 * y1)
+        norm = np.sqrt(a * a + b * b) + 1e-12
+        a, b, c = a / norm, b / norm, c / norm
         
-        self.line_abc = abc
+        self.line_abc = (a, b, c)
         
         # Auto-orient: điểm dưới frame phải là ÂM (xe đang tới)
-        a, b, c = abc
         ref_x, ref_y = frame_width / 2.0, frame_height - 10
         signed = a * ref_x + b * ref_y + c
         self.sign_flip = -1.0 if signed > 0 else 1.0
         
-        print(f"[✓] Stopline calibrated: {a:.4f}x + {b:.4f}y + {c:.2f} = 0")
+        print(f"[✓] Stopline calibrated: ({x1},{y1})->({x2},{y2}), length={self.best_line_length:.0f}px")
+        print(f"    Line eq: {a:.4f}x + {b:.4f}y + {c:.2f} = 0")
 
 
 # =============================================================================
@@ -357,51 +355,48 @@ def get_all_light_classes():
 
 
 def get_light_color(cls_id: int) -> Tuple[Tuple[int, int, int], str]:
-    """Trả về màu và label cho đèn giao thông"""
-    all_red = config.RED_LIGHTS + config.ARROW_LEFT_RED + config.ARROW_STRAIGHT_RED
-    all_yellow = config.YELLOW_LIGHTS + config.ARROW_LEFT_YELLOW + config.ARROW_STRAIGHT_YELLOW
-    all_green = config.GREEN_LIGHTS + config.ARROW_LEFT_GREEN + config.ARROW_STRAIGHT_GREEN + config.ARROW_RIGHT_GREEN
+    """Trả về màu và label chi tiết cho đèn giao thông"""
+    # Mapping cls_id -> (color_bgr, short_english_label)
+    LIGHT_LABELS = {
+        # Đèn tròn (circle)
+        18: ((0, 0, 255),   "RED"),              # light_straight_circle_red
+        19: ((0, 255, 255), "YELLOW"),            # light_straight_circle_yellow
+        17: ((0, 255, 0),   "GREEN"),             # light_straight_circle_green
+        # Đèn mũi tên rẽ trái
+        11: ((0, 0, 255),   "RED LEFT"),           # light_left_red
+        12: ((0, 255, 255), "YEL LEFT"),           # light_left_yellow
+        10: ((0, 255, 0),   "GRN LEFT"),           # light_left_green
+        # Đèn mũi tên đi thẳng
+        15: ((0, 0, 255),   "RED STR"),            # light_straight_arrow_red
+        16: ((0, 255, 255), "YEL STR"),            # light_straight_arrow_yellow
+        14: ((0, 255, 0),   "GRN STR"),            # light_straight_arrow_green
+        # Đèn mũi tên rẽ phải
+        13: ((0, 255, 0),   "GRN RIGHT"),          # light_right_green
+    }
     
-    if cls_id in all_red:
-        return (0, 0, 255), "RED"
-    elif cls_id in all_yellow:
-        return (0, 255, 255), "YELLOW"
-    elif cls_id in all_green:
-        return (0, 255, 0), "GREEN"
+    if cls_id in LIGHT_LABELS:
+        return LIGHT_LABELS[cls_id]
     return (128, 128, 128), "UNKNOWN"
 
 
 def draw_traffic_lights(frame, boxes, cls_ids, confs):
-    """Vẽ bounding box cho đèn giao thông tốt nhất (confidence cao nhất cho mỗi loại, thêm NMS)"""
+    """Vẽ bounding box cho đèn giao thông - giữ best confidence per cls_id, NMS overlap"""
     all_light_classes = get_all_light_classes()
-    all_red = config.RED_LIGHTS + config.ARROW_LEFT_RED + config.ARROW_STRAIGHT_RED
-    all_yellow = config.YELLOW_LIGHTS + config.ARROW_LEFT_YELLOW + config.ARROW_STRAIGHT_YELLOW
-    all_green = config.GREEN_LIGHTS + config.ARROW_LEFT_GREEN + config.ARROW_STRAIGHT_GREEN + config.ARROW_RIGHT_GREEN
     
-    # Tìm đèn tốt nhất cho mỗi loại (RED, YELLOW, GREEN)
-    best_lights = {'RED': None, 'YELLOW': None, 'GREEN': None}
-    best_confs = {'RED': 0, 'YELLOW': 0, 'GREEN': 0}
+    # Giữ đèn có confidence cao nhất cho mỗi cls_id cụ thể
+    # (tránh trùng lặp cùng loại, nhưng cho phép khác loại tồn tại song song)
+    best_per_cls: Dict[int, Tuple] = {}
     
     for xyxy, cls_id, conf in zip(boxes, cls_ids, confs):
         if cls_id not in all_light_classes:
             continue
-        
-        # Xác định loại đèn
-        if cls_id in all_red:
-            light_type = 'RED'
-        elif cls_id in all_yellow:
-            light_type = 'YELLOW'
-        elif cls_id in all_green:
-            light_type = 'GREEN'
-        else:
-            continue
-        
-        # Lưu đèn có confidence cao nhất
-        if conf > best_confs[light_type]:
-            best_confs[light_type] = conf
-            best_lights[light_type] = (xyxy, cls_id, conf)
+        if cls_id not in best_per_cls or conf > best_per_cls[cls_id][2]:
+            best_per_cls[cls_id] = (xyxy, cls_id, conf)
     
-    # Helper function tính IoU
+    if not best_per_cls:
+        return
+    
+    # Helper IoU
     def calc_iou(box1, box2):
         x1 = max(box1[0], box2[0])
         y1 = max(box1[1], box2[1])
@@ -413,30 +408,21 @@ def draw_traffic_lights(frame, boxes, cls_ids, confs):
         union = area1 + area2 - inter
         return inter / union if union > 0 else 0
     
-    # Lọc đèn bị overlap - chỉ giữ đèn có confidence cao nhất
-    lights_to_draw = []
-    for light_type, light_data in best_lights.items():
-        if light_data is not None:
-            lights_to_draw.append((light_type, light_data))
-    
-    # Sắp xếp theo confidence giảm dần
-    lights_to_draw.sort(key=lambda x: x[1][2], reverse=True)
-    
-    # Lọc overlap
+    # NMS: nếu 2 đèn khác loại nhưng box chồng nhau → giữ conf cao hơn
+    lights_sorted = sorted(best_per_cls.values(), key=lambda x: x[2], reverse=True)
     final_lights = []
-    for light_type, light_data in lights_to_draw:
+    for light_data in lights_sorted:
         xyxy, cls_id, conf = light_data
         is_overlap = False
-        for _, existing_data in final_lights:
-            if calc_iou(xyxy, existing_data[0]) > 0.3:  # Threshold IoU = 0.3
+        for existing in final_lights:
+            if calc_iou(xyxy, existing[0]) > 0.5:  # Overlap > 50% → cùng vật thể
                 is_overlap = True
                 break
         if not is_overlap:
-            final_lights.append((light_type, light_data))
+            final_lights.append(light_data)
     
-    # Vẽ chỉ các đèn không bị overlap
-    for light_type, light_data in final_lights:
-        xyxy, cls_id, conf = light_data
+    # Vẽ
+    for xyxy, cls_id, conf in final_lights:
         color, label = get_light_color(cls_id)
         draw_bbox_with_label(frame, tuple(xyxy), f"{label} {conf:.2f}", color)
 
@@ -576,9 +562,14 @@ def check_violation(
             elif direction == "RIGHT" and not allowed['RIGHT']:
                 is_violation = True
             elif direction == "UNKNOWN":
-                # Nếu không xác định được hướng, kiểm tra đèn đỏ chung
-                if light_state.circle_red and not light_state.right_green and not light_state.left_green:
-                    is_violation = True
+                # Không xác định được hướng → kiểm tra đèn đỏ tròn
+                if light_state.circle_red:
+                    # Đèn đỏ tròn + không có mũi tên xanh nào → vi phạm chắc chắn
+                    if not light_state.right_green and not light_state.left_green and not light_state.straight_green:
+                        is_violation = True
+                    # Đèn đỏ tròn + có mũi tên xanh → không chắc, cho qua (benefit of doubt)
+                    else:
+                        is_violation = False
             
             if is_violation:
                 track_state.label = "VIOLATION"
@@ -679,6 +670,8 @@ def run(
     # Load model
     print(f"[INIT] Loading model: {model_path}")
     model = YOLO(model_path)
+    # Model riêng cho vật thể cố định (đèn, vạch, biển) — predict, không track
+    static_model = YOLO(model_path)
     
     # Initialize components
     calibrator = StoplineCalibrator(duration=config.STOPLINE_CALIBRATION_DURATION)
@@ -690,19 +683,15 @@ def run(
     # Counters
     violations = 0
     warnings = 0
-    
-    # FPS calculation
-    fps_start_time = time.time()
+    frame_idx = 0
     fps_frame_count = 0
+    fps_start_time = time.time()
     current_fps = 0.0
     
-    frame_idx = 0
+    print(f"\n[START] Processing video...")
+    print("Press 'q' to quit, 'd' to toggle debug")
     
-    # Debug mode - mặc định tắt, bấm 'd' để bật
     debug_on = False
-    
-    print("\n[START] Processing video...")
-    print("Press 'q' to quit, 'd' to toggle debug\n")
     
     while True:
         ret, frame = cap.read()
@@ -719,85 +708,119 @@ def run(
             fps_frame_count = 0
             fps_start_time = current_time
         
-        # YOLO inference với tracking
+        # === Track: vật thể chuyển động (xe, người) ===
         results = model.track(
             frame,
             persist=True,
-            conf=0.25,
+            conf=config.CONF_THRESHOLD_VEHICLE,
             iou=config.IOU_THRESHOLD,
             imgsz=config.IMG_SIZE,
             tracker=config.TRACKER,
             verbose=False
         )
-        r0 = results[0]
+        r0_track = results[0]
         
-        # Parse detections
-        if r0.boxes is None or len(r0.boxes) == 0:
+        # === Predict: vật thể cố định (đèn, vạch, biển) ===
+        static_results = static_model.predict(
+            frame,
+            imgsz=config.IMG_SIZE,
+            conf=config.CONF_THRESHOLD_STOPLINE,
+            retina_masks=True,
+            verbose=False
+        )
+        r0_static = static_results[0]
+        
+        # Parse VEHICLES from track
+        if r0_track.boxes is None or len(r0_track.boxes) == 0:
             boxes = np.zeros((0, 4), dtype=np.float32)
             cls_ids = np.zeros((0,), dtype=np.int32)
             confs = np.zeros((0,), dtype=np.float32)
             track_ids = np.zeros((0,), dtype=np.int32)
         else:
-            boxes = r0.boxes.xyxy.cpu().numpy().astype(np.float32)
-            cls_ids = r0.boxes.cls.cpu().numpy().astype(np.int32)
-            confs = r0.boxes.conf.cpu().numpy().astype(np.float32)
-            track_ids = r0.boxes.id.cpu().numpy().astype(np.int32) if r0.boxes.id is not None else np.array([-1] * len(cls_ids))
+            boxes = r0_track.boxes.xyxy.cpu().numpy().astype(np.float32)
+            cls_ids = r0_track.boxes.cls.cpu().numpy().astype(np.int32)
+            confs = r0_track.boxes.conf.cpu().numpy().astype(np.float32)
+            track_ids = r0_track.boxes.id.cpu().numpy().astype(np.int32) if r0_track.boxes.id is not None else np.array([-1] * len(cls_ids))
         
-        # Update light state - dùng detect_traffic_lights để lấy chi tiết
-        light_state = detect_traffic_lights(cls_ids)
+        # Parse STATIC objects from predict
+        if r0_static.boxes is None or len(r0_static.boxes) == 0:
+            static_cls = np.zeros((0,), dtype=np.int32)
+            static_boxes = np.zeros((0, 4), dtype=np.float32)
+            static_confs = np.zeros((0,), dtype=np.float32)
+        else:
+            static_cls = r0_static.boxes.cls.cpu().numpy().astype(np.int32)
+            static_boxes = r0_static.boxes.xyxy.cpu().numpy().astype(np.float32)
+            static_confs = r0_static.boxes.conf.cpu().numpy().astype(np.float32)
+        
+        # Traffic light state - từ static predict
+        light_state = detect_traffic_lights(static_cls)
         light_memory.update(light_state, current_time)
         light_state = light_memory.get(current_time)
         
-        # Parse stopline mask
+        # Stopline detection — merge overlapping + line_inside_mask
+        stopline_detections = []
         stopline_mask = np.zeros((h, w), dtype=np.uint8)
-        if r0.masks is not None and r0.masks.data is not None:
-            masks_data = r0.masks.data.cpu().numpy()
-            orig_cls = r0.boxes.cls.cpu().numpy().astype(np.int32) if r0.boxes is not None else np.array([])
-            stopline_idxs = np.where(np.isin(orig_cls, config.STOPLINE_CLASS))[0]
+        
+        if r0_static.masks is not None and r0_static.masks.data is not None:
+            stopline_idxs = np.where(np.isin(static_cls, config.STOPLINE_CLASS))[0]
+            masks_data = r0_static.masks.data.cpu().numpy()
             
-            if len(stopline_idxs) > 0 and stopline_idxs.max() < len(masks_data):
-                m = masks_data[stopline_idxs].max(axis=0)
-                if m.shape[0] != h or m.shape[1] != w:
-                    m = cv2.resize(m.astype(np.float32), (w, h))
-                stopline_mask = (m > 0.5).astype(np.uint8)
+            for idx in stopline_idxs:
+                if idx < len(masks_data):
+                    mask_raw = masks_data[idx]
+                    # Resize to frame resolution if needed
+                    if mask_raw.shape[0] != h or mask_raw.shape[1] != w:
+                        mask_raw = cv2.resize(mask_raw.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST)
+                    mask_bool = (mask_raw > 0.5)
+                    stopline_detections.append({
+                        'box': static_boxes[idx].copy(),
+                        'conf': float(static_confs[idx]),
+                        'mask': mask_bool
+                    })
+                    stopline_mask = np.maximum(stopline_mask, mask_bool.astype(np.uint8))
+        
+        # Merge overlapping detections + find centerline
+        merged_dets = merge_overlapping_detections(stopline_detections)
+        best_line_this_frame = None
+        for det in merged_dets:
+            line_info = line_inside_mask(det['mask'])
+            if line_info is not None:
+                if best_line_this_frame is None or line_info[4] > best_line_this_frame[4]:
+                    best_line_this_frame = line_info
         
         # Frame để vẽ
         frame_vis = frame.copy()
         
-        # Vẽ traffic light boxes
-        draw_traffic_lights(frame_vis, boxes, cls_ids, confs)
+        # Vẽ traffic light boxes - từ static predict
+        draw_traffic_lights(frame_vis, static_boxes, static_cls, static_confs)
         
-        # Calibration phase - Vẽ mask stopline trong 5s đầu
+        # Calibration phase
         if not calibrator.is_calibrated():
-            calibrator.add_mask_points(stopline_mask)
+            if best_line_this_frame is not None:
+                calibrator.update_line(best_line_this_frame)
             calibrator.maybe_finish(h, w)
             
-            # Vẽ mask stopline với overlay xanh lá
+            # Hiển thị mask trong quá trình calibration
             if np.any(stopline_mask > 0):
                 overlay = frame_vis.copy()
-                overlay[stopline_mask > 0] = [0, 255, 0]  # Green mask
+                overlay[stopline_mask > 0] = [0, 255, 0]
                 frame_vis = cv2.addWeighted(overlay, 0.4, frame_vis, 0.6, 0)
-                # Vẽ viền mask
                 contours, _ = cv2.findContours(stopline_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 cv2.drawContours(frame_vis, contours, -1, (0, 255, 0), 2)
             
-            # Hiển thị progress
+            # Hiển thị best line tạm thời
+            if best_line_this_frame is not None:
+                lx1, ly1, lx2, ly2, _ = best_line_this_frame
+                cv2.line(frame_vis, (lx1, ly1), (lx2, ly2), (0, 255, 255), 2)
+            
             elapsed = time.time() - calibrator.start_time
             progress = min(elapsed / calibrator.duration * 100, 100)
             remaining = max(0, calibrator.duration - elapsed)
-            # Calibration ngầm - không hiển thị text
         
-        # Vẽ stopline cố định sau khi calibrate (giới hạn trong phạm vi mask)
-        if calibrator.is_calibrated():
-            a, b, c = calibrator.line_abc
-            # Tính y tại min_x và max_x
-            if abs(b) > 1e-9:
-                y1 = int(-(a * calibrator.min_x + c) / b)
-                y2 = int(-(a * calibrator.max_x + c) / b)
-                # Giới hạn y trong frame
-                y1 = max(0, min(h - 1, y1))
-                y2 = max(0, min(h - 1, y2))
-                cv2.line(frame_vis, (calibrator.min_x, y1), (calibrator.max_x, y2), config.COLOR_STOPLINE, 3)
+        # Vẽ stopline cố định (đã lock)
+        if calibrator.is_calibrated() and calibrator.best_line is not None:
+            lx1, ly1, lx2, ly2 = calibrator.best_line
+            cv2.line(frame_vis, (lx1, ly1), (lx2, ly2), config.COLOR_STOPLINE, 3)
         
         # Dedup boxes
         boxes, cls_ids, confs, track_ids = dedup_boxes(boxes, cls_ids, confs, track_ids)

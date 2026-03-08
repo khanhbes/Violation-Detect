@@ -278,13 +278,13 @@ def main():
             # Display rule - sử dụng draw_utils
             if state.safe_latched:
                 live_safe += 1
-                draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id} Helmet", C_GREEN)
+                draw_bbox_with_label(frame, moto_bbox, f"motor:{moto_id} Helmet", C_GREEN)
             else:
                 if rider_cls == CLS_PERSON_NO_HELMET:
                     live_violations += 1
-                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id} NO HELMET", C_RED)
+                    draw_bbox_with_label(frame, moto_bbox, f"motor:{moto_id} NO HELMET", C_RED)
                 else:
-                    draw_bbox_with_label(frame, moto_bbox, f"Motorcycle:{moto_id}", C_ORANGE)
+                    draw_bbox_with_label(frame, moto_bbox, f"motor:{moto_id}", C_ORANGE)
 
             if debug_on and state.last_rider_bbox is not None:
                 mx, my = map(int, bbox_center(moto_bbox))

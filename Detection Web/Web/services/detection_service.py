@@ -30,7 +30,7 @@ from functions.redlight_violation import (
     StoplineCalibrator, LightMemory, TrackState as RedlightTrackState,
     detect_traffic_lights, check_violation as redlight_check_violation,
     get_bottom_center, get_signed_distance, dedup_boxes,
-    draw_traffic_lights, line_to_segment
+    draw_traffic_lights, merge_overlapping_detections, line_inside_mask
 )
 from functions.helmet_violation import (
     TrackState as HelmetTrackState,
@@ -146,13 +146,13 @@ class HelmetDetectorWrapper:
             
             if state.safe_latched:
                 live_safe += 1
-                draw_bbox_with_label(frame_vis, moto_bbox, f"MC:{moto_id} Helmet", C_GREEN)
+                draw_bbox_with_label(frame_vis, moto_bbox, f"motor:{moto_id} Helmet", C_GREEN)
             else:
                 if rider_cls == CLS_PERSON_NO_HELMET:
                     live_violations += 1
-                    draw_bbox_with_label(frame_vis, moto_bbox, f"MC:{moto_id} NO HELMET", C_RED)
+                    draw_bbox_with_label(frame_vis, moto_bbox, f"motor:{moto_id} NO HELMET", C_RED)
                 else:
-                    draw_bbox_with_label(frame_vis, moto_bbox, f"MC:{moto_id}", C_ORANGE)
+                    draw_bbox_with_label(frame_vis, moto_bbox, f"motor:{moto_id}", C_ORANGE)
         
         return frame_vis, violations
     
@@ -340,8 +340,14 @@ class RedlightDetectorWrapper:
         self.warnings = 0
         self.frame_idx = 0
     
-    def process_frame(self, frame: np.ndarray, r0) -> Tuple[np.ndarray, List[dict]]:
-        """Process frame with redlight logic"""
+    def process_frame(self, frame: np.ndarray, r0_track, r0_static) -> Tuple[np.ndarray, List[dict]]:
+        """Process frame with redlight logic.
+        
+        Args:
+            frame: Input frame (BGR)
+            r0_track: Results from model.track() - vehicles with tracking IDs
+            r0_static: Results from static_model.predict() - lights, stopline, signs
+        """
         h, w = frame.shape[:2]
         violations = []
         self.frame_idx += 1
@@ -349,42 +355,69 @@ class RedlightDetectorWrapper:
         
         frame_vis = frame
         
-        # Parse detections
-        if r0.boxes is None or len(r0.boxes) == 0:
-            boxes = np.zeros((0, 4), dtype=np.float32)
-            cls_ids = np.zeros((0,), dtype=np.int32)
-            confs = np.zeros((0,), dtype=np.float32)
-            track_ids = np.zeros((0,), dtype=np.int32)
+        # === Parse VEHICLES from track results ===
+        if r0_track.boxes is None or len(r0_track.boxes) == 0:
+            veh_boxes = np.zeros((0, 4), dtype=np.float32)
+            veh_cls = np.zeros((0,), dtype=np.int32)
+            veh_confs = np.zeros((0,), dtype=np.float32)
+            veh_tids = np.zeros((0,), dtype=np.int32)
         else:
-            boxes = r0.boxes.xyxy.cpu().numpy().astype(np.float32)
-            cls_ids = r0.boxes.cls.cpu().numpy().astype(np.int32)
-            confs = r0.boxes.conf.cpu().numpy().astype(np.float32)
-            track_ids = r0.boxes.id.cpu().numpy().astype(np.int32) if r0.boxes.id is not None else np.array([-1] * len(cls_ids))
+            veh_boxes = r0_track.boxes.xyxy.cpu().numpy().astype(np.float32)
+            veh_cls = r0_track.boxes.cls.cpu().numpy().astype(np.int32)
+            veh_confs = r0_track.boxes.conf.cpu().numpy().astype(np.float32)
+            veh_tids = r0_track.boxes.id.cpu().numpy().astype(np.int32) if r0_track.boxes.id is not None else np.array([-1] * len(veh_cls))
         
-        # Traffic light state
-        light_state = detect_traffic_lights(cls_ids)
+        # === Parse STATIC objects from predict results ===
+        if r0_static.boxes is None or len(r0_static.boxes) == 0:
+            static_boxes = np.zeros((0, 4), dtype=np.float32)
+            static_cls = np.zeros((0,), dtype=np.int32)
+            static_confs = np.zeros((0,), dtype=np.float32)
+        else:
+            static_boxes = r0_static.boxes.xyxy.cpu().numpy().astype(np.float32)
+            static_cls = r0_static.boxes.cls.cpu().numpy().astype(np.int32)
+            static_confs = r0_static.boxes.conf.cpu().numpy().astype(np.float32)
+        
+        # Traffic light state - từ static predict
+        light_state = detect_traffic_lights(static_cls)
         self.light_memory.update(light_state, current_time)
         light_state = self.light_memory.get(current_time)
         
-        # Stopline mask
+        # Stopline detection — merge overlapping + line_inside_mask
+        stopline_detections = []
         stopline_mask = np.zeros((h, w), dtype=np.uint8)
-        if r0.masks is not None and r0.masks.data is not None:
-            masks_data = r0.masks.data.cpu().numpy()
-            orig_cls = r0.boxes.cls.cpu().numpy().astype(np.int32) if r0.boxes is not None else np.array([])
-            stopline_idxs = np.where(np.isin(orig_cls, config.STOPLINE_CLASS))[0]
-            
-            if len(stopline_idxs) > 0 and stopline_idxs.max() < len(masks_data):
-                m = masks_data[stopline_idxs].max(axis=0)
-                if m.shape[0] != h or m.shape[1] != w:
-                    m = cv2.resize(m.astype(np.float32), (w, h))
-                stopline_mask = (m > 0.5).astype(np.uint8)
         
-        # Draw traffic lights
-        draw_traffic_lights(frame_vis, boxes, cls_ids, confs)
+        if r0_static.masks is not None and r0_static.masks.data is not None:
+            stopline_idxs = np.where(np.isin(static_cls, config.STOPLINE_CLASS))[0]
+            masks_data = r0_static.masks.data.cpu().numpy()
+            
+            for idx in stopline_idxs:
+                if idx < len(masks_data):
+                    mask_raw = masks_data[idx]
+                    if mask_raw.shape[0] != h or mask_raw.shape[1] != w:
+                        mask_raw = cv2.resize(mask_raw.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST)
+                    mask_bool = (mask_raw > 0.5)
+                    stopline_detections.append({
+                        'box': static_boxes[idx].copy(),
+                        'conf': float(static_confs[idx]),
+                        'mask': mask_bool
+                    })
+                    stopline_mask = np.maximum(stopline_mask, mask_bool.astype(np.uint8))
+        
+        merged_dets = merge_overlapping_detections(stopline_detections)
+        best_line_this_frame = None
+        for det in merged_dets:
+            line_info = line_inside_mask(det['mask'])
+            if line_info is not None:
+                if best_line_this_frame is None or line_info[4] > best_line_this_frame[4]:
+                    best_line_this_frame = line_info
+        
+        # Draw traffic lights - từ static predict
+        draw_traffic_lights(frame_vis, static_boxes, static_cls, static_confs)
         
         # Calibration
         if not self.calibrator.is_calibrated():
-            self.calibrator.add_mask_points(stopline_mask)
+            if best_line_this_frame is not None:
+                self.calibrator.update_line(best_line_this_frame)
             self.calibrator.maybe_finish(h, w)
             
             if np.any(stopline_mask > 0):
@@ -394,21 +427,16 @@ class RedlightDetectorWrapper:
                 contours, _ = cv2.findContours(stopline_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 cv2.drawContours(frame_vis, contours, -1, (0, 255, 0), 2)
         
-        # Draw stopline
-        if self.calibrator.is_calibrated():
-            a, b, c = self.calibrator.line_abc
-            if abs(b) > 1e-9:
-                y1 = int(-(a * self.calibrator.min_x + c) / b)
-                y2 = int(-(a * self.calibrator.max_x + c) / b)
-                y1 = max(0, min(h - 1, y1))
-                y2 = max(0, min(h - 1, y2))
-                cv2.line(frame_vis, (self.calibrator.min_x, y1), (self.calibrator.max_x, y2), config.COLOR_STOPLINE, 3)
+        # Draw stopline cố định (đã lock)
+        if self.calibrator.is_calibrated() and self.calibrator.best_line is not None:
+            lx1, ly1, lx2, ly2 = self.calibrator.best_line
+            cv2.line(frame_vis, (lx1, ly1), (lx2, ly2), config.COLOR_STOPLINE, 3)
         
-        # Dedup
-        boxes, cls_ids, confs, track_ids = dedup_boxes(boxes, cls_ids, confs, track_ids)
+        # Dedup vehicles
+        veh_boxes, veh_cls, veh_confs, veh_tids = dedup_boxes(veh_boxes, veh_cls, veh_confs, veh_tids)
         
-        # Process vehicles
-        for xyxy, cls_id, conf, tid in zip(boxes, cls_ids, confs, track_ids):
+        # Process vehicles - từ track results (có tracking IDs)
+        for xyxy, cls_id, conf, tid in zip(veh_boxes, veh_cls, veh_confs, veh_tids):
             if cls_id not in config.VEHICLE_CLASSES:
                 continue
             if conf < config.CONF_THRESHOLD_VEHICLE:
@@ -502,6 +530,8 @@ class UnifiedDetector:
         self.model_path = model_path or config.MODEL_PATH
         print(f"🔄 Loading YOLO model: {self.model_path}")
         self.model = YOLO(self.model_path)
+        # Model riêng cho vật thể cố định (lights, stopline, signs, road markings)
+        self.static_model = YOLO(self.model_path)
         print("✅ Model loaded!")
         
         # Sub-detectors
@@ -528,6 +558,7 @@ class UnifiedDetector:
         self.start_time = time.time()
         # Reset tracker state 
         self.model = YOLO(self.model_path)
+        self.static_model = YOLO(self.model_path)
         print("🔄 All detectors reset")
     
     def process_frame(self, frame: np.ndarray, enabled: List[str], conf: float = 0.25, debug: bool = False) -> Tuple[np.ndarray, List[dict]]:
@@ -545,10 +576,10 @@ class UnifiedDetector:
         all_violations = []
         frame_vis = frame.copy()
         
-        # All detectors share YOLO results (wrong_way no longer loads its own model)
         needs_shared_model = bool(set(enabled) & {'helmet', 'sidewalk', 'redlight', 'wrong_lane', 'wrong_way'})
         
-        r0 = None
+        # === Track: vật thể chuyển động (xe, người) ===
+        r0_track = None
         if needs_shared_model:
             results = self.model.track(
                 frame,
@@ -559,27 +590,40 @@ class UnifiedDetector:
                 verbose=False,
                 tracker=config.TRACKER
             )
-            r0 = results[0]
+            r0_track = results[0]
+        
+        # === Predict: vật thể cố định (đèn, vạch, biển, vỉa hè) ===
+        r0_static = None
+        needs_static = bool(set(enabled) & {'redlight', 'sidewalk'})
+        if needs_static:
+            static_results = self.static_model.predict(
+                frame,
+                imgsz=config.IMG_SIZE,
+                conf=config.CONF_THRESHOLD_STOPLINE,
+                retina_masks=True,
+                verbose=False
+            )
+            r0_static = static_results[0]
         
         if 'wrong_way' in enabled:
-            frame_vis, ww_viols = self.wrong_way.process_frame(frame_vis, r0=r0, conf=conf, debug=debug)
+            frame_vis, ww_viols = self.wrong_way.process_frame(frame_vis, r0=r0_track, conf=conf, debug=debug)
             all_violations.extend(ww_viols)
         
-        if 'helmet' in enabled and r0 is not None:
-            frame_vis, h_viols = self.helmet.process_frame(frame_vis, r0)
+        if 'helmet' in enabled and r0_track is not None:
+            frame_vis, h_viols = self.helmet.process_frame(frame_vis, r0_track)
             all_violations.extend(h_viols)
         
         if 'sidewalk' in enabled:
-            frame_vis, sw_viols = self.sidewalk.process_frame(frame_vis, self.model, r0, conf=conf)
+            frame_vis, sw_viols = self.sidewalk.process_frame(frame_vis, self.model, r0_track, conf=conf)
             all_violations.extend(sw_viols)
         
-        if 'redlight' in enabled and r0 is not None:
-            frame_vis, rl_viols = self.redlight.process_frame(frame_vis, r0)
+        if 'redlight' in enabled and r0_track is not None and r0_static is not None:
+            frame_vis, rl_viols = self.redlight.process_frame(frame_vis, r0_track, r0_static)
             all_violations.extend(rl_viols)
 
         if 'wrong_lane' in enabled:
             frame_vis, wl_viols = self.wrong_lane.process_frame(
-                frame_vis, r0=r0, model=self.model,
+                frame_vis, r0=r0_track, model=self.model,
                 conf_track=conf, conf_calib=min(conf, 0.25), debug=debug
             )
             all_violations.extend(wl_viols)

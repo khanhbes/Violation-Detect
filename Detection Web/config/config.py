@@ -24,7 +24,7 @@ class Config:
     OUTPUT_DIR.mkdir(exist_ok=True)
     SNAPSHOT_DIR.mkdir(exist_ok=True)
     
-    MODEL_PATH = str(MODEL_DIR / 'best_yolo12s_seg.pt')
+    MODEL_PATH = str(MODEL_DIR / 'yolo26_rbf.pt')
     DEFAULT_VIDEO = str(VIDEO_DIR / 'test_2.mp4')
     OUTPUT_VIDEO = str(OUTPUT_DIR / 'output_violations.mp4')
     
@@ -37,14 +37,15 @@ class Config:
     
     # Confidence thresholds
     CONF_THRESHOLD_LIGHT = 0.25
-    CONF_THRESHOLD_VEHICLE = 0.50
+    CONF_THRESHOLD_VEHICLE = 0.25
     CONF_THRESHOLD_LANE = 0.30
+    CONF_THRESHOLD_STOPLINE = 0.10         # Stopline conf thấp hơn (YOLOv26 detect yếu)
     
     # ========================================
     # CALIBRATION - Hiệu chỉnh
     # ========================================
     STOPLINE_CALIBRATION_DURATION = 5.0    # seconds
-    STOPLINE_MIN_POINTS = 100
+    STOPLINE_MIN_POINTS = 50               # Giảm xuống cho model detect yếu stopline
     LIGHT_MEMORY_DURATION = 2.0            # seconds
     
     # ========================================
@@ -87,16 +88,17 @@ class Config:
     SOLID_YELLOW_LINE = [38]               # Vạch liền vàng - 2 chiều, không được sang
     DASHED_YELLOW_LINE = [8]               # Vạch đứt vàng - 2 chiều, được vượt
     
-    # Traffic Signs (biển báo)
+    # Traffic Signs (biển báo) - theo model thực tế
     SIGN_CLASSES = {
-        22: 'no_left_turn',
-        23: 'no_right_turn',
-        24: 'no_straight',
-        31: 'straight_and_left_turn_only',
-        32: 'straight_and_right_turn_only',
-        33: 'straight_only',
-        34: 'turn_left_only',
-        35: 'turn_right_only',
+        28: 'sign_no_car',
+        29: 'sign_no_entry',
+        30: 'sign_no_left_and_return',
+        31: 'sign_no_left_turn',
+        32: 'sign_no_parking',
+        33: 'sign_no_return',
+        34: 'sign_no_right_and_return',
+        35: 'sign_no_right_turn',
+        36: 'sign_no_stopping',
     }
     
     # Infrastructure
@@ -114,7 +116,7 @@ class Config:
         0: 'ambulance',
         6: 'car',
         9: 'fire_truck',
-        21: 'motorcycle',
+        21: 'motor',
         26: 'police_car',
     }
     
@@ -183,7 +185,7 @@ class Config:
     HUD_TEXT_THICKNESS = 2
     
     # ========================================
-    # CLASS NAMES - Tên đầy đủ
+    # CLASS NAMES - Tên đầy đủ (khớp với model.names)
     # ========================================
     CLASS_NAMES = {
         0: 'ambulance',
@@ -207,25 +209,25 @@ class Config:
         18: 'light_straight_circle_red',
         19: 'light_straight_circle_yellow',
         20: 'median',
-        21: 'motorcycle',
-        22: 'no_left_turn',
-        23: 'no_right_turn',
-        24: 'no_straight',
-        25: 'pedestrian',
+        21: 'motor',
+        22: 'pedestrian_crossing',
+        23: 'person',
+        24: 'person_no_helmet',
+        25: 'person_with_helmet',
         26: 'police_car',
         27: 'sidewalk',
-        28: 'solid_white_line',
-        29: 'solid_yellow_line',
-        30: 'stopline',
-        31: 'straight_and_left_turn_only',
-        32: 'straight_and_right_turn_only',
-        33: 'straight_only',
-        34: 'turn_left_only',
-        35: 'turn_right_only',
-        36: 'u_turn',
+        28: 'sign_no_car',
+        29: 'sign_no_entry',
+        30: 'sign_no_left_and_return',
+        31: 'sign_no_left_turn',
+        32: 'sign_no_parking',
+        33: 'sign_no_return',
+        34: 'sign_no_right_and_return',
+        35: 'sign_no_right_turn',
+        36: 'sign_no_stopping',
         37: 'solid_white_line',
         38: 'solid_yellow_line',
-        39: 'stopline'
+        39: 'stop_line'
     }
 
 # Instance mặc định
