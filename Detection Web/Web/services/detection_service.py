@@ -339,6 +339,7 @@ class RedlightDetectorWrapper:
         self.violations = 0
         self.warnings = 0
         self.frame_idx = 0
+        self.vehicle_labels: Dict[int, Tuple] = {}  # {tid: (label, color, cls_id, bbox, pos)}
     
     def process_frame(self, frame: np.ndarray, r0_track, r0_static) -> Tuple[np.ndarray, List[dict]]:
         """Process frame with redlight logic.
@@ -435,6 +436,9 @@ class RedlightDetectorWrapper:
         # Dedup vehicles
         veh_boxes, veh_cls, veh_confs, veh_tids = dedup_boxes(veh_boxes, veh_cls, veh_confs, veh_tids)
         
+        # Clear vehicle labels for this frame
+        self.vehicle_labels = {}  # {tid: (display_label, color, cls_id, bbox)}
+        
         # Process vehicles - từ track results (có tracking IDs)
         for xyxy, cls_id, conf, tid in zip(veh_boxes, veh_cls, veh_confs, veh_tids):
             if cls_id not in config.VEHICLE_CLASSES:
@@ -458,8 +462,11 @@ class RedlightDetectorWrapper:
                 a, b, c = self.calibrator.line_abc
                 signed = get_signed_distance(px, py, a, b, c) * self.calibrator.sign_flip
                 
+                ref_vec = (a * self.calibrator.sign_flip, b * self.calibrator.sign_flip)
+                
                 label, color = redlight_check_violation(
-                    self.tracks[tid], signed, light_state, self.frame_idx, px, py
+                    self.tracks[tid], signed, light_state, self.frame_idx, px, py,
+                    ref_vector=ref_vec
                 )
                 
                 if label == "VIOLATION" and self.tracks[tid].last_event_frame == self.frame_idx:
@@ -474,6 +481,7 @@ class RedlightDetectorWrapper:
                 elif label == "WARNING" and self.tracks[tid].last_event_frame == self.frame_idx:
                     self.warnings += 1
             
+            # Lưu label vào dict (KHÔNG vẽ box ở đây)
             vehicle_name = config.CLASS_NAMES.get(cls_id, "Vehicle")
             if label == "VIOLATION":
                 display_label = "Violation"
@@ -481,8 +489,7 @@ class RedlightDetectorWrapper:
                 display_label = "Warning"
             else:
                 display_label = f"{vehicle_name}:{tid}"
-            draw_bbox_with_label(frame_vis, (x1, y1, x2, y2), display_label, color)
-            cv2.circle(frame_vis, (int(px), int(py)), 4, color, -1)
+            self.vehicle_labels[tid] = (display_label, color, cls_id, (x1, y1, x2, y2), (px, py))
         
         return frame_vis, violations
     
@@ -620,14 +627,26 @@ class UnifiedDetector:
         if 'redlight' in enabled and r0_track is not None and r0_static is not None:
             frame_vis, rl_viols = self.redlight.process_frame(frame_vis, r0_track, r0_static)
             all_violations.extend(rl_viols)
+        
+        # Collect redlight labels for synchronization
+        redlight_labels = getattr(self.redlight, 'vehicle_labels', {}) if 'redlight' in enabled else {}
 
         if 'wrong_lane' in enabled:
             frame_vis, wl_viols = self.wrong_lane.process_frame(
                 frame_vis, r0=r0_track, model=self.model,
-                conf_track=conf, conf_calib=min(conf, 0.25), debug=debug
+                conf_track=conf, conf_calib=min(conf, 0.25), debug=debug,
+                external_labels=redlight_labels
             )
             all_violations.extend(wl_viols)
         
+        # Vẽ box cho xe chỉ có label từ redlight (không xử lý bởi wrong_lane)
+        wrong_lane_drawn = getattr(self.wrong_lane, 'vehicle_labels', {}) if 'wrong_lane' in enabled else {}
+        for tid, (display_label, color, cls_id, bbox, pos) in redlight_labels.items():
+            if tid not in wrong_lane_drawn:
+                # Xe này chỉ có label từ redlight, vẽ ở đây
+                draw_bbox_with_label(frame_vis, bbox, display_label, color)
+                cv2.circle(frame_vis, (int(pos[0]), int(pos[1])), 4, color, -1)
+
         # FPS calculation (no HUD overlay - stats sent via WebSocket)
         current_time = time.time()
         dt = max(1e-6, current_time - self.prev_time)

@@ -47,6 +47,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Import shared config and draw utilities
 from config.config import config
 from utils.draw_utils import draw_bbox_with_label, draw_info_hud, draw_calibration_hud, save_violation_snapshot
+from functions.redlight_violation import (
+    merge_overlapping_detections, line_inside_mask,
+    boxes_overlap
+)
 
 
 # =========================
@@ -202,17 +206,21 @@ def line_x_at_y(a: float, b: float, c: float, y: float) -> Optional[float]:
 
 
 # =========================
-# STOPLINE CALIBRATOR (copy style from redlight)
+# STOPLINE CALIBRATOR (synced with redlight_violation.py: merge + line_inside_mask)
 # =========================
 class StoplineCalibrator:
+    """Bộ calibration stopline: tìm centerline trong mask, khóa sau N giây"""
+
     def __init__(self, duration: float = 5.0):
         self.duration = duration
         self.start_time: Optional[float] = None
-        self.points: List[np.ndarray] = []
         self.line_abc: Optional[Tuple[float, float, float]] = None
         self.sign_flip: float = 1.0
         self.min_x: int = 0
         self.max_x: int = 0
+        # Best line found during calibration
+        self.best_line: Optional[Tuple[int, int, int, int]] = None
+        self.best_line_length: float = 0.0
 
     def start(self):
         self.start_time = time.time()
@@ -220,41 +228,50 @@ class StoplineCalibrator:
     def is_calibrated(self) -> bool:
         return self.line_abc is not None
 
-    def add_mask_points(self, mask01: np.ndarray):
-        ys, xs = np.where(mask01 > 0)
-        if len(xs) > 0:
-            pts = np.stack([xs, ys], axis=1)
-            self.points.append(pts)
+    def update_line(self, line_info):
+        """Cập nhật line candidate từ line_inside_mask().
+        Giữ lại line dài nhất (phủ nhiều mặt đường nhất).
+        """
+        if line_info is None:
+            return
+        x1, y1, x2, y2, length = line_info
+        if length > self.best_line_length:
+            self.best_line = (x1, y1, x2, y2)
+            self.best_line_length = length
 
-    def maybe_finish(self, frame_h: int, frame_w: int, min_points: int = 800):
+    def maybe_finish(self, frame_h: int, frame_w: int, **kwargs):
+        """Kiểm tra và hoàn thành calibration"""
         if self.start_time is None or self.is_calibrated():
             return
+
         elapsed = time.time() - self.start_time
         if elapsed < self.duration:
             return
-        if not self.points:
+
+        if self.best_line is None:
+            print("[ERROR] No stopline found during calibration!")
             return
 
-        all_pts = np.concatenate(self.points, axis=0)
-        if len(all_pts) < min_points:
-            return
+        x1, y1, x2, y2 = self.best_line
+        self.min_x = min(x1, x2)
+        self.max_x = max(x1, x2)
 
-        self.min_x = int(np.min(all_pts[:, 0]))
-        self.max_x = int(np.max(all_pts[:, 0]))
+        # Convert line segment → ax + by + c = 0
+        a = float(y1 - y2)
+        b = float(x2 - x1)
+        c = float(x1 * y2 - x2 * y1)
+        norm = float(np.sqrt(a * a + b * b) + 1e-12)
+        a, b, c = a / norm, b / norm, c / norm
 
-        abc = fit_line_ransac(all_pts, max_iters=800, inlier_thresh=3.0, min_inliers=max(260, min_points // 2))
-        if abc is None:
-            return
+        self.line_abc = (a, b, c)
 
-        self.line_abc = abc
-        a, b, c = abc
-
-        # sign flip so that "before stopline" is negative at bottom center
+        # Auto-orient: điểm dưới frame phải là ÂM (xe đang tới)
         ref_x, ref_y = frame_w / 2.0, frame_h - 10.0
         s = a * ref_x + b * ref_y + c
         self.sign_flip = -1.0 if s > 0 else 1.0
 
-        print(f"[✓] Stopline calibrated: {a:.4f}x + {b:.4f}y + {c:.2f} = 0 | x-range=({self.min_x},{self.max_x})")
+        print(f"[✓] Stopline calibrated: ({x1},{y1})->({x2},{y2}), length={self.best_line_length:.0f}px")
+        print(f"    Line eq: {a:.4f}x + {b:.4f}y + {c:.2f} = 0")
 
 
 # =========================
@@ -686,6 +703,14 @@ class WrongLaneDetector:
         self.wrong_count = 0
         self.cham_count = 0
         self.is_frozen = False
+        
+        # Per-element frozen flags: mỗi vật thể có thể lock riêng
+        self.stopline_locked = False
+        self.lines_locked = False
+        self.arrows_locked = False
+        
+        # Vehicle labels for external synchronization
+        self.vehicle_labels: Dict[int, Tuple] = {}
 
         self.fps_t0 = time.time()
         self.fps_cnt = 0
@@ -737,7 +762,8 @@ class WrongLaneDetector:
         model=None,
         conf_track: float = 0.25,
         conf_calib: float = 0.25,
-        debug: bool = False
+        debug: bool = False,
+        external_labels: Optional[Dict[int, Tuple]] = None
     ) -> Tuple[np.ndarray, List[dict]]:
         if frame is None:
             return frame, []
@@ -823,57 +849,178 @@ class WrongLaneDetector:
                         m01 = smooth_binary(mask_data_to_binary(m, fw, fh, thr=0.5))
                         self.union_line[cls_line] = m01 if self.union_line[cls_line] is None else (self.union_line[cls_line] | m01)
 
+                # Stopline: merge overlapping + line_inside_mask (giống redlight)
                 idx39 = np.where(cls_ids == STOPLINE_ID)[0]
+                stopline_detections = []
                 if len(idx39) > 0:
-                    m = masks_data[idx39].max(axis=0)
-                    m01 = smooth_binary(mask_data_to_binary(m, fw, fh, thr=0.5))
-                    self.union_stop = m01 if self.union_stop is None else (self.union_stop | m01)
-                    self.stop_cal.add_mask_points(m01)
+                    for idx in idx39:
+                        if idx < len(masks_data):
+                            mask_raw = masks_data[idx]
+                            m01 = mask_data_to_binary(mask_raw, fw, fh, thr=0.5)
+                            mask_bool = (m01 > 0)
+                            box = boxes[idx] if idx < len(boxes) else np.array([0, 0, fw, fh], dtype=np.float32)
+                            stopline_detections.append({
+                                'box': box.copy(),
+                                'conf': 1.0,
+                                'mask': mask_bool
+                            })
+                            # Vẫn cập nhật union_stop để hiển thị overlay
+                            self.union_stop = m01 if self.union_stop is None else np.maximum(self.union_stop, m01)
+
+                merged_dets = merge_overlapping_detections(stopline_detections)
+                for det in merged_dets:
+                    line_info = line_inside_mask(det['mask'])
+                    if line_info is not None:
+                        self.stop_cal.update_line(line_info)
 
             self.stop_cal.maybe_finish(fh, fw)
 
         # ================= FREEZE AFTER 5s =================
         if (not calibrating) and (not self.is_frozen):
-            if not self.stop_cal.is_calibrated() and self.union_stop is not None:
-                self.stop_cal.add_mask_points(self.union_stop)
-                self.stop_cal.maybe_finish(fh, fw, min_points=600)
+            # --- Lock stopline (nếu tìm thấy) ---
+            if not self.stopline_locked:
+                if not self.stop_cal.is_calibrated() and self.union_stop is not None:
+                    union_bool = (self.union_stop > 0)
+                    line_info = line_inside_mask(union_bool)
+                    if line_info is not None:
+                        self.stop_cal.update_line(line_info)
+                    self.stop_cal.maybe_finish(fh, fw)
 
-            if self.stop_cal.is_calibrated():
-                a, b, c = self.stop_cal.line_abc
-                if abs(b) > 1e-9:
-                    y1 = int(-(a * self.stop_cal.min_x + c) / b)
-                    y2 = int(-(a * self.stop_cal.max_x + c) / b)
-                    y1 = max(0, min(fh - 1, y1))
-                    y2 = max(0, min(fh - 1, y2))
+                if self.stop_cal.is_calibrated() and self.stop_cal.best_line is not None:
+                    lx1, ly1, lx2, ly2 = self.stop_cal.best_line
+                    a, b, c = self.stop_cal.line_abc
                     self.stopline_segment = (
-                        (self.stop_cal.min_x, y1),
-                        (self.stop_cal.max_x, y2),
+                        (lx1, ly1),
+                        (lx2, ly2),
                         (a, b, c),
                         self.stop_cal.min_x,
                         self.stop_cal.max_x
                     )
                     self.stop_vref = (float(a), float(b))
+                    self.stopline_locked = True
+                    print("[LOCK] Stopline locked")
 
-            self.all_lines = []
-            for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
-                self.all_lines.extend(extract_component_lines(self.union_line.get(cls_line), cls_line, fw, fh))
+            # --- Lock lane lines (nếu tìm thấy) ---
+            if not self.lines_locked:
+                self.all_lines = []
+                for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
+                    self.all_lines.extend(extract_component_lines(self.union_line.get(cls_line), cls_line, fw, fh))
 
-            self.lane_boundaries = [ln for ln in self.all_lines if ln.cls_id in (DASH_WHITE, SOLID_WHITE)]
+                self.lane_boundaries = [ln for ln in self.all_lines if ln.cls_id in (DASH_WHITE, SOLID_WHITE)]
 
-            y_ref = 0.75 * fh
-            tmp = []
-            for ln in self.lane_boundaries:
-                x = ln.x_at(y_ref)
-                if x is None or not np.isfinite(x):
-                    continue
-                tmp.append((float(x), ln))
-            tmp.sort(key=lambda t: t[0])
-            self.lane_boundaries = [ln for _, ln in tmp]
+                y_ref = 0.75 * fh
+                tmp = []
+                for ln in self.lane_boundaries:
+                    x = ln.x_at(y_ref)
+                    if x is None or not np.isfinite(x):
+                        continue
+                    tmp.append((float(x), ln))
+                tmp.sort(key=lambda t: t[0])
+                self.lane_boundaries = [ln for _, ln in tmp]
 
-            self.lane_rules = build_lane_rules_from_arrows(self.poly_acc, self.lane_boundaries)
-            self.lane_ref_vecs = build_lane_ref_vectors(self.lane_boundaries, fh)
+                if len(self.lane_boundaries) >= 2:
+                    self.lines_locked = True
+                    print(f"[LOCK] Lane lines locked: {len(self.lane_boundaries)} boundaries")
+
+            # --- Lock arrows / lane rules ---
+            if not self.arrows_locked and self.lines_locked:
+                self.lane_rules = build_lane_rules_from_arrows(self.poly_acc, self.lane_boundaries)
+                self.lane_ref_vecs = build_lane_ref_vectors(self.lane_boundaries, fh)
+                if self.lane_rules:
+                    self.arrows_locked = True
+                    print(f"[LOCK] Lane rules locked: {self.lane_rules}")
 
             self.is_frozen = True
+        
+        # ================= CONTINUOUS DETECTION (tìm vật thể chưa lock) =================
+        if self.is_frozen and not (self.stopline_locked and self.lines_locked and self.arrows_locked):
+            # Cần tiếp tục detect static elements chưa khóa
+            if masks_data is not None and masks_data.shape[0] == len(cls_ids):
+                # --- Tiếp tục tìm stopline ---
+                if not self.stopline_locked:
+                    idx39 = np.where(cls_ids == STOPLINE_ID)[0]
+                    stopline_detections = []
+                    if len(idx39) > 0:
+                        for idx in idx39:
+                            if idx < len(masks_data):
+                                mask_raw = masks_data[idx]
+                                m01 = mask_data_to_binary(mask_raw, fw, fh, thr=0.5)
+                                mask_bool = (m01 > 0)
+                                box = boxes[idx] if idx < len(boxes) else np.array([0, 0, fw, fh], dtype=np.float32)
+                                stopline_detections.append({
+                                    'box': box.copy(),
+                                    'conf': 1.0,
+                                    'mask': mask_bool
+                                })
+                                self.union_stop = m01 if self.union_stop is None else np.maximum(self.union_stop, m01)
+
+                    merged_dets = merge_overlapping_detections(stopline_detections)
+                    for det in merged_dets:
+                        line_info = line_inside_mask(det['mask'])
+                        if line_info is not None:
+                            self.stop_cal.update_line(line_info)
+                    
+                    # Thử lock ngay
+                    self.stop_cal.maybe_finish(fh, fw)
+                    if self.stop_cal.is_calibrated() and self.stop_cal.best_line is not None:
+                        lx1, ly1, lx2, ly2 = self.stop_cal.best_line
+                        a, b, c = self.stop_cal.line_abc
+                        self.stopline_segment = (
+                            (lx1, ly1),
+                            (lx2, ly2),
+                            (a, b, c),
+                            self.stop_cal.min_x,
+                            self.stop_cal.max_x
+                        )
+                        self.stop_vref = (float(a), float(b))
+                        self.stopline_locked = True
+                        print("[LOCK] Stopline locked (continuous detection)")
+
+                # --- Tiếp tục tìm lane lines ---
+                if not self.lines_locked:
+                    for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
+                        idxs = np.where(cls_ids == cls_line)[0]
+                        if len(idxs) > 0:
+                            m = masks_data[idxs].max(axis=0)
+                            m01 = smooth_binary(mask_data_to_binary(m, fw, fh, thr=0.5))
+                            self.union_line[cls_line] = m01 if self.union_line[cls_line] is None else (self.union_line[cls_line] | m01)
+                    
+                    # Thử lock
+                    self.all_lines = []
+                    for cls_line in [DASH_WHITE, DASH_YELLOW, SOLID_WHITE, SOLID_YELLOW]:
+                        self.all_lines.extend(extract_component_lines(self.union_line.get(cls_line), cls_line, fw, fh))
+                    self.lane_boundaries = [ln for ln in self.all_lines if ln.cls_id in (DASH_WHITE, SOLID_WHITE)]
+                    y_ref = 0.75 * fh
+                    tmp = []
+                    for ln in self.lane_boundaries:
+                        x = ln.x_at(y_ref)
+                        if x is None or not np.isfinite(x):
+                            continue
+                        tmp.append((float(x), ln))
+                    tmp.sort(key=lambda t: t[0])
+                    self.lane_boundaries = [ln for _, ln in tmp]
+                    if len(self.lane_boundaries) >= 2:
+                        self.lines_locked = True
+                        print(f"[LOCK] Lane lines locked (continuous): {len(self.lane_boundaries)} boundaries")
+
+                # --- Tiếp tục tìm arrows ---
+                if not self.arrows_locked and self.lines_locked:
+                    if masks_xy is not None:
+                        for i, cid in enumerate(cls_ids):
+                            cid = int(cid)
+                            if cid not in ARROW_CLASSES:
+                                continue
+                            if i >= len(masks_xy):
+                                continue
+                            poly = np.array(masks_xy[i], dtype=np.int32)
+                            if poly is not None and len(poly) >= 3:
+                                self.poly_acc[cid].append(poly)
+                    
+                    self.lane_rules = build_lane_rules_from_arrows(self.poly_acc, self.lane_boundaries)
+                    self.lane_ref_vecs = build_lane_ref_vectors(self.lane_boundaries, fh)
+                    if self.lane_rules:
+                        self.arrows_locked = True
+                        print(f"[LOCK] Lane rules locked (continuous): {self.lane_rules}")
 
         # ================= MONITORING =================
         if self.is_frozen:
@@ -983,17 +1130,46 @@ class WrongLaneDetector:
                                         'label': 'Wrong Lane'
                                     })
 
-                # ---- Draw bbox ----
+                # ---- Merge labels + Draw bbox ----
+                # Độ ưu tiên: VIOLATION > WARNING > Cham Vach > Safe
+                PRIORITY = {'Violation': 3, 'Warning': 2, 'Cham Vach': 1}
+                
+                # Label từ wrong_lane detector
                 vehicle_name = config.CLASS_NAMES.get(cid, "Vehicle")
-                col = COLOR_SAFE
-                label = f"{vehicle_name}:{tid}"
+                wl_col = COLOR_SAFE
+                wl_label = f"{vehicle_name}:{tid}"
+                if st.wrong_dir_violation:
+                    wl_col = COLOR_VIOLATION
+                    wl_label = "Violation"
+                elif st.touch_violation:
+                    wl_col = COLOR_VIOLATION
+                    wl_label = "Cham Vach"
+                
+                # Merge với external labels (vd: từ redlight detector)
+                final_label = wl_label
+                final_col = wl_col
+                
+                if external_labels and tid in external_labels:
+                    ext = external_labels[tid]
+                    ext_label = ext[0]  # display_label
+                    ext_color = ext[1]  # color
+                    
+                    ext_pri = PRIORITY.get(ext_label, 0)
+                    wl_pri = PRIORITY.get(wl_label, 0)
+                    
+                    if ext_pri > wl_pri:
+                        final_label = ext_label
+                        final_col = ext_color
+                    elif ext_pri == wl_pri and ext_pri > 0:
+                        # Cùng mức ưu tiên, hiển thị cả hai
+                        final_label = f"{ext_label}+{wl_label}" if ext_label != wl_label else ext_label
+                        final_col = ext_color
 
-                if st.wrong_dir_violation or st.touch_violation:
-                    col = COLOR_VIOLATION
-                    label = "Violation"
-
-                draw_bbox_with_label(vis, (x1, y1, x2, y2), label, col)
-                cv2.circle(vis, (int(px), int(py)), 4, col, -1)
+                draw_bbox_with_label(vis, (x1, y1, x2, y2), final_label, final_col)
+                cv2.circle(vis, (int(px), int(py)), 4, final_col, -1)
+                
+                # Lưu label cho external use
+                self.vehicle_labels[tid] = (final_label, final_col, cid, (x1, y1, x2, y2), (px, py))
 
                 if debug:
                     allow_now = allowed_to_label(self.lane_rules.get(lane_now, set()))

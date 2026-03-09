@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -14,68 +15,181 @@ class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
   final _settings = AppSettings();
 
-  late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _slideAnimation;
+  // Main entrance animation
+  late AnimationController _mainController;
+  late Animation<double> _logoScale;
+  late Animation<double> _logoFade;
+  late Animation<double> _logoRotate;
 
-  // Ring pulse animation
+  // Text stagger animation
+  late AnimationController _textController;
+  late Animation<double> _titleSlide;
+  late Animation<double> _titleFade;
+  late Animation<double> _subtitleSlide;
+  late Animation<double> _subtitleFade;
+
+  // Pulsing glow rings
   late AnimationController _ringController;
-  late Animation<double> _ring1Anim;
-  late Animation<double> _ring2Anim;
+  late Animation<double> _ring1Scale;
+  late Animation<double> _ring2Scale;
+  late Animation<double> _ring3Scale;
+
+  // Shimmer gradient rotation
+  late AnimationController _shimmerController;
 
   // Progress bar
   late AnimationController _progressController;
   late Animation<double> _progressAnim;
 
+  // Particle system
+  late AnimationController _particleController;
+
+  // Loading text animation
+  int _loadingStep = 0;
+  late Timer _loadingTimer;
+
+  final List<_Particle> _particles = [];
+  final math.Random _rng = math.Random();
+
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+    _initParticles();
+    _initAnimations();
+    _startSequence();
+  }
+
+  void _initParticles() {
+    for (int i = 0; i < 20; i++) {
+      _particles.add(_Particle(
+        x: _rng.nextDouble(),
+        y: _rng.nextDouble(),
+        size: _rng.nextDouble() * 3 + 1,
+        speed: _rng.nextDouble() * 0.3 + 0.1,
+        opacity: _rng.nextDouble() * 0.4 + 0.1,
+        delay: _rng.nextDouble(),
+      ));
+    }
+  }
+
+  void _initAnimations() {
+    // Logo entrance: scale + fade + slight rotation
+    _mainController = AnimationController(
+      duration: const Duration(milliseconds: 1200),
       vsync: this,
     );
-
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    _logoScale = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _mainController, curve: Curves.elasticOut),
     );
-
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
-
-    _slideAnimation = Tween<double>(begin: 30, end: 0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
-
-    // Pulsing rings
-    _ringController = AnimationController(
-      duration: const Duration(milliseconds: 2000),
-      vsync: this,
-    )..repeat();
-    _ring1Anim = Tween<double>(begin: 1.0, end: 1.6).animate(
-      CurvedAnimation(parent: _ringController, curve: Curves.easeOut),
-    );
-    _ring2Anim = Tween<double>(begin: 1.0, end: 1.9).animate(
+    _logoFade = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
-        parent: _ringController,
-        curve: const Interval(0.3, 1.0, curve: Curves.easeOut),
+        parent: _mainController,
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+      ),
+    );
+    _logoRotate = Tween<double>(begin: -0.08, end: 0.0).animate(
+      CurvedAnimation(parent: _mainController, curve: Curves.easeOutCubic),
+    );
+
+    // Text stagger: title then subtitle
+    _textController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _titleSlide = Tween<double>(begin: 40, end: 0).animate(
+      CurvedAnimation(
+        parent: _textController,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
+      ),
+    );
+    _titleFade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _textController,
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+      ),
+    );
+    _subtitleSlide = Tween<double>(begin: 30, end: 0).animate(
+      CurvedAnimation(
+        parent: _textController,
+        curve: const Interval(0.3, 0.8, curve: Curves.easeOutCubic),
+      ),
+    );
+    _subtitleFade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _textController,
+        curve: const Interval(0.3, 0.7, curve: Curves.easeOut),
       ),
     );
 
-    // Progress bar fills over 2.8s
+    // Pulsing glow rings (3 rings with stagger)
+    _ringController = AnimationController(
+      duration: const Duration(milliseconds: 2500),
+      vsync: this,
+    )..repeat();
+    _ring1Scale = Tween<double>(begin: 1.0, end: 1.8).animate(
+      CurvedAnimation(parent: _ringController, curve: Curves.easeOut),
+    );
+    _ring2Scale = Tween<double>(begin: 1.0, end: 2.2).animate(
+      CurvedAnimation(
+        parent: _ringController,
+        curve: const Interval(0.2, 1.0, curve: Curves.easeOut),
+      ),
+    );
+    _ring3Scale = Tween<double>(begin: 1.0, end: 2.6).animate(
+      CurvedAnimation(
+        parent: _ringController,
+        curve: const Interval(0.4, 1.0, curve: Curves.easeOut),
+      ),
+    );
+
+    // Shimmer rotation
+    _shimmerController = AnimationController(
+      duration: const Duration(milliseconds: 3000),
+      vsync: this,
+    )..repeat();
+
+    // Particles
+    _particleController = AnimationController(
+      duration: const Duration(seconds: 10),
+      vsync: this,
+    )..repeat();
+
+    // Progress bar (fills in 3s)
     _progressController = AnimationController(
-      duration: const Duration(milliseconds: 2800),
+      duration: const Duration(milliseconds: 3000),
       vsync: this,
     );
-    _progressAnim = CurvedAnimation(parent: _progressController, curve: Curves.easeInOut);
+    _progressAnim = CurvedAnimation(
+      parent: _progressController,
+      curve: Curves.easeInOut,
+    );
+  }
 
-    _controller.forward();
-    Future.delayed(const Duration(milliseconds: 600), () {
+  void _startSequence() {
+    // Step 1: Logo entrance
+    _mainController.forward();
+
+    // Step 2: Text appears after logo
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) _textController.forward();
+    });
+
+    // Step 3: Progress bar starts
+    Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted) _progressController.forward();
     });
 
-    Timer(const Duration(seconds: 3), () {
+    // Loading text cycling
+    _loadingTimer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
+      if (mounted) {
+        setState(() {
+          _loadingStep = (_loadingStep + 1) % 4;
+        });
+      }
+    });
+
+    // Navigate after splash
+    Timer(const Duration(milliseconds: 3500), () {
       if (mounted) {
         final route = AuthService().isLoggedIn ? '/home' : '/login';
         Navigator.pushReplacementNamed(context, route);
@@ -85,207 +199,429 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   void dispose() {
-    _controller.dispose();
+    _mainController.dispose();
+    _textController.dispose();
     _ringController.dispose();
+    _shimmerController.dispose();
+    _particleController.dispose();
     _progressController.dispose();
+    _loadingTimer.cancel();
     super.dispose();
+  }
+
+  String get _loadingText {
+    final vi = _settings.isVietnamese;
+    switch (_loadingStep) {
+      case 0: return vi ? 'Khởi tạo hệ thống...' : 'Initializing system...';
+      case 1: return vi ? 'Đang tải mô hình AI...' : 'Loading AI models...';
+      case 2: return vi ? 'Kết nối server...' : 'Connecting to server...';
+      case 3: return vi ? 'Sắp xong...' : 'Almost ready...';
+      default: return vi ? 'Đang tải...' : 'Loading...';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFD32F2F), Color(0xFFB71C1C), Color(0xFF880E4F)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── Background gradient ────────────────────────────────
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFFD32F2F),
+                  Color(0xFFB71C1C),
+                  Color(0xFF880E4F),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
           ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // ── Logo with pulsing rings ──────────────────
-              SizedBox(
-                width: 180,
-                height: 180,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Ring 2 (outer)
-                    AnimatedBuilder(
-                      animation: _ringController,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _ring2Anim.value,
-                          child: Opacity(
-                            opacity: (1.0 - (_ring2Anim.value - 1.0) / 0.9).clamp(0.0, 0.3),
-                            child: Container(
-                              width: 110,
-                              height: 110,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    // Ring 1 (inner)
-                    AnimatedBuilder(
-                      animation: _ringController,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _ring1Anim.value,
-                          child: Opacity(
-                            opacity: (1.0 - (_ring1Anim.value - 1.0) / 0.6).clamp(0.0, 0.4),
-                            child: Container(
-                              width: 110,
-                              height: 110,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    // Main icon
-                    ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Container(
-                          width: 110,
-                          height: 110,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(30),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.25),
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.15),
-                                blurRadius: 30,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Icon(
-                                Icons.shield_rounded,
-                                size: 54,
-                                color: Colors.white.withValues(alpha: 0.95),
-                              ),
-                              const Positioned(
-                                bottom: 20,
-                                child: Icon(
-                                  Icons.local_police_rounded,
-                                  size: 18,
-                                  color: Colors.amber,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
 
-              // ── App Name ───────────────────────────────────
-              AnimatedBuilder(
-                animation: _fadeAnimation,
-                builder: (context, child) {
-                  return Opacity(
-                    opacity: _fadeAnimation.value,
-                    child: Transform.translate(
-                      offset: Offset(0, _slideAnimation.value),
-                      child: child,
-                    ),
-                  );
-                },
-                child: Column(
-                  children: [
-                    const Text(
-                      'VNeTraffic',
-                      style: TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _settings.tr(
-                        'Hệ thống phạt nguội giao thông',
-                        'Traffic Violation Detection System',
-                      ),
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Colors.white.withValues(alpha: 0.85),
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 50),
+          // ── Subtle pattern overlay ─────────────────────────────
+          Opacity(
+            opacity: 0.04,
+            child: Image.asset(
+              'assets/images/app_icon.png',
+              fit: BoxFit.none,
+              repeat: ImageRepeat.repeat,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
 
-              // ── Progress Bar ───────────────────────────────
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 60),
-                  child: Column(
+          // ── Animated particles ─────────────────────────────────
+          AnimatedBuilder(
+            animation: _particleController,
+            builder: (context, _) {
+              return CustomPaint(
+                painter: _ParticlePainter(
+                  particles: _particles,
+                  progress: _particleController.value,
+                ),
+                size: Size.infinite,
+              );
+            },
+          ),
+
+          // ── Main content ───────────────────────────────────────
+          SafeArea(
+            child: Column(
+              children: [
+                const Spacer(flex: 3),
+
+                // ── Logo with glow rings ───────────────────────
+                SizedBox(
+                  width: 260,
+                  height: 260,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
+                      // Ring 3 (outermost)
+                      _buildRing(_ring3Scale, 0.12, 160),
+                      // Ring 2
+                      _buildRing(_ring2Scale, 0.18, 160),
+                      // Ring 1 (innermost)
+                      _buildRing(_ring1Scale, 0.25, 160),
+                      
+                      // Shimmer border around logo
                       AnimatedBuilder(
-                        animation: _progressAnim,
-                        builder: (context, _) {
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: _progressAnim.value,
-                              backgroundColor: Colors.white.withValues(alpha: 0.15),
-                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                              minHeight: 4,
+                        animation: _shimmerController,
+                        builder: (context, child) {
+                          return Transform.rotate(
+                            angle: _shimmerController.value * 2 * math.pi,
+                            child: Container(
+                              width: 172,
+                              height: 172,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(32),
+                                gradient: SweepGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.0),
+                                    Colors.white.withValues(alpha: 0.3),
+                                    Colors.amber.withValues(alpha: 0.4),
+                                    Colors.white.withValues(alpha: 0.0),
+                                  ],
+                                ),
+                              ),
                             ),
                           );
                         },
                       ),
-                      const SizedBox(height: 14),
-                      Text(
-                        _settings.tr('Đang tải...', 'Loading...'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontWeight: FontWeight.w500,
+
+                      // Main logo
+                      ScaleTransition(
+                        scale: _logoScale,
+                        child: FadeTransition(
+                          opacity: _logoFade,
+                          child: AnimatedBuilder(
+                            animation: _logoRotate,
+                            builder: (context, child) {
+                              return Transform.rotate(
+                                angle: _logoRotate.value,
+                                child: child,
+                              );
+                            },
+                            child: Container(
+                              width: 160,
+                              height: 160,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(34),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 30,
+                                    offset: const Offset(0, 12),
+                                  ),
+                                  BoxShadow(
+                                    color: const Color(0xFFFF6F00).withValues(alpha: 0.2),
+                                    blurRadius: 40,
+                                    spreadRadius: 5,
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(34),
+                                child: Image.asset(
+                                  'assets/images/app_icon.png',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: Colors.white.withValues(alpha: 0.15),
+                                    child: const Icon(
+                                      Icons.shield_rounded,
+                                      size: 54,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 28),
+
+                // ── App title ───────────────────────────────────
+                AnimatedBuilder(
+                  animation: _textController,
+                  builder: (context, _) {
+                    return Column(
+                      children: [
+                        // Title
+                        Opacity(
+                          opacity: _titleFade.value,
+                          child: Transform.translate(
+                            offset: Offset(0, _titleSlide.value),
+                            child: ShaderMask(
+                              shaderCallback: (bounds) => const LinearGradient(
+                                colors: [Colors.white, Color(0xFFFFD54F)],
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                              ).createShader(bounds),
+                              child: const Text(
+                                'VNeTraffic',
+                                style: TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                  letterSpacing: 1.5,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // Subtitle
+                        Opacity(
+                          opacity: _subtitleFade.value,
+                          child: Transform.translate(
+                            offset: Offset(0, _subtitleSlide.value),
+                            child: Text(
+                              _settings.tr(
+                                'Hệ thống phạt nguội giao thông',
+                                'Traffic Violation Detection System',
+                              ),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontWeight: FontWeight.w400,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+
+                const Spacer(flex: 2),
+
+                // ── Progress section ────────────────────────────
+                FadeTransition(
+                  opacity: _logoFade,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 56),
+                    child: Column(
+                      children: [
+                        // Animated progress bar
+                        AnimatedBuilder(
+                          animation: _progressAnim,
+                          builder: (context, _) {
+                            return Container(
+                              height: 4,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(2),
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FractionallySizedBox(
+                                  widthFactor: _progressAnim.value,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(2),
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          Colors.white,
+                                          Color(0xFFFFD54F),
+                                          Colors.white,
+                                        ],
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.white.withValues(alpha: 0.5),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Loading text with fade transition
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 400),
+                          transitionBuilder: (child, animation) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: SlideTransition(
+                                position: Tween<Offset>(
+                                  begin: const Offset(0, 0.3),
+                                  end: Offset.zero,
+                                ).animate(animation),
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Text(
+                            _loadingText,
+                            key: ValueKey<int>(_loadingStep),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+
+                // ── Footer ──────────────────────────────────────
+                FadeTransition(
+                  opacity: _logoFade,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.security_rounded,
+                              size: 14,
+                              color: Colors.white.withValues(alpha: 0.4),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Powered by YOLOv12 & Deep Learning',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white.withValues(alpha: 0.4),
+                                fontWeight: FontWeight.w400,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '© 2025 AI Research Project',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white.withValues(alpha: 0.3),
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
+
+  Widget _buildRing(Animation<double> scaleAnim, double maxOpacity, double size) {
+    return AnimatedBuilder(
+      animation: _ringController,
+      builder: (context, child) {
+        final scale = scaleAnim.value;
+        final normalized = (scale - 1.0) / (scaleAnim.status == AnimationStatus.forward 
+            ? 1.6 : 0.8);
+        final opacity = (maxOpacity * (1.0 - normalized.clamp(0.0, 1.0)));
+        return Transform.scale(
+          scale: scale,
+          child: Opacity(
+            opacity: opacity.clamp(0.0, 1.0),
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white,
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Particle model ────────────────────────────────────────────
+class _Particle {
+  final double x, y, size, speed, opacity, delay;
+  _Particle({
+    required this.x,
+    required this.y,
+    required this.size,
+    required this.speed,
+    required this.opacity,
+    required this.delay,
+  });
+}
+
+// ── Particle painter ──────────────────────────────────────────
+class _ParticlePainter extends CustomPainter {
+  final List<_Particle> particles;
+  final double progress;
+
+  _ParticlePainter({required this.particles, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final p in particles) {
+      final prog = ((progress + p.delay) % 1.0);
+      final y = size.height * (1.0 - prog * p.speed * 3).clamp(0.0, 1.0);
+      final x = size.width * p.x + math.sin(prog * math.pi * 4 + p.delay * 10) * 20;
+      final fade = (math.sin(prog * math.pi) * p.opacity).clamp(0.0, 1.0);
+
+      final paint = Paint()
+        ..color = Colors.white.withValues(alpha: fade)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, p.size * 0.5);
+
+      canvas.drawCircle(Offset(x, y), p.size, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ParticlePainter oldDelegate) => true;
 }

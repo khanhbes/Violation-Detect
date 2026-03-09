@@ -185,13 +185,14 @@ def line_inside_mask(mask):
 @dataclass
 class TrackState:
     """Trạng thái tracking của mỗi xe"""
-    last_region: Optional[int] = None
+    last_region: Optional[int] = None     # -1: approaching, 0: near/touching, +1: fully crossed
     first_seen: bool = False
     last_event_frame: int = -1000
     label: str = "Safe"
     color: Tuple[int, int, int] = field(default_factory=lambda: (0, 255, 0))
     positions: List[Tuple[float, float]] = field(default_factory=list)
     direction: str = "UNKNOWN"
+    warned: bool = False                  # Đã hiển thị WARNING chạm vạch chưa
 
 
 @dataclass
@@ -455,40 +456,105 @@ def detect_traffic_lights(cls_ids: np.ndarray) -> TrafficLightState:
     return state
 
 
-def detect_vehicle_direction(positions: List[Tuple[float, float]], min_frames: int = 10) -> str:
+# Direction detection constants (tuned like wrong_lane_violation.py)
+STRAIGHT_ANGLE_DEG = 26.0   # <= this angle from ref = STRAIGHT
+TURN_ANGLE_DEG = 34.0       # >= this angle from ref = LEFT/RIGHT
+MIN_STEP_MAG = 2.0          # Minimum pixel movement per step
+MIN_MOVE_MAG_SUM = 60.0     # Minimum total movement magnitude
+MIN_FORWARD_STEPS = 6       # Minimum forward-motion steps
+
+# Stopline crossing buffer (pixels)
+STOPLINE_TOUCH_DIST = 15.0  # Khoảng cách chạm vạch (WARNING zone)
+
+
+def detect_vehicle_direction(
+    positions: List[Tuple[float, float]],
+    ref_vector: Optional[Tuple[float, float]] = None,
+    min_frames: int = 10
+) -> str:
     """
-    Phát hiện hướng đi của xe dựa trên trajectory
+    Phát hiện hướng đi của xe bằng vector/angle (cải tiến từ wrong_lane_violation.py).
+    
+    Sử dụng stopline normal làm reference vector (hướng đi thẳng chuẩn).
+    So sánh góc giữa motion vector và ref vector:
+      - angle <= STRAIGHT_ANGLE_DEG → STRAIGHT
+      - angle >= TURN_ANGLE_DEG → LEFT/RIGHT (dựa vào cross product)
+      - vùng mơ hồ giữa → bias STRAIGHT (giảm false positive)
+    
+    Args:
+        positions: Danh sách (x, y) liên tục
+        ref_vector: (vx, vy) hướng đi thẳng chuẩn (từ stopline normal), None = dùng (0, -1)
+        min_frames: Số frame tối thiểu để phân tích
     
     Returns:
-        'STRAIGHT': Đi thẳng (dx nhỏ, dy lớn)
-        'LEFT': Rẽ trái (dx < 0 đáng kể)
-        'RIGHT': Rẽ phải (dx > 0 đáng kể)
-        'UNKNOWN': Chưa đủ dữ liệu
+        'STRAIGHT', 'LEFT', 'RIGHT', hoặc 'UNKNOWN'
     """
     if len(positions) < min_frames:
         return "UNKNOWN"
     
-    # Lấy vị trí đầu và cuối
-    start_x, start_y = positions[0]
-    end_x, end_y = positions[-1]
+    # Reference vector (mặc định đi lên = (0, -1))
+    if ref_vector is None:
+        v0x, v0y = 0.0, -1.0
+    else:
+        v0x, v0y = float(ref_vector[0]), float(ref_vector[1])
+    v0n = np.hypot(v0x, v0y) + 1e-9
+    v0x /= v0n
+    v0y /= v0n
     
-    dx = end_x - start_x
-    dy = end_y - start_y
+    # Tính các step di chuyển (lọc bước quá nhỏ)
+    steps = []
+    for (x0, y0), (x1, y1) in zip(positions[:-1], positions[1:]):
+        dx = float(x1 - x0)
+        dy = float(y1 - y0)
+        if np.hypot(dx, dy) < MIN_STEP_MAG:
+            continue
+        steps.append((dx, dy))
     
-    # Tính tỷ lệ dx/dy để xác định hướng
-    # Thường xe đi từ dưới lên (dy < 0)
-    if abs(dy) < 20:  # Di chuyển dọc quá ít
+    if len(steps) < MIN_FORWARD_STEPS:
         return "UNKNOWN"
     
-    ratio = dx / (abs(dy) + 1e-6)
+    # Tính hướng sơ bộ bằng median (ổn định hơn mean)
+    dx0 = float(np.median([s[0] for s in steps]))
+    dy0 = float(np.median([s[1] for s in steps]))
+    if dx0 * dx0 + dy0 * dy0 < 1e-6:
+        return "UNKNOWN"
     
-    # Ngưỡng để xác định rẽ (có thể cần điều chỉnh)
-    if ratio < -0.3:
-        return "LEFT"
-    elif ratio > 0.3:
-        return "RIGHT"
-    else:
+    # Flip ref vector để cùng chiều motion
+    if (dx0 * v0x + dy0 * v0y) < 0:
+        v0x, v0y = -v0x, -v0y
+    
+    # Lọc forward steps (dot > 0 vs ref)
+    fsteps = []
+    mag_sum = 0.0
+    for dx, dy in steps:
+        if (dx * v0x + dy * v0y) <= 0.0:
+            continue  # Bước ngược, bỏ qua
+        fsteps.append((dx, dy))
+        mag_sum += float(np.hypot(dx, dy))
+    
+    if len(fsteps) < MIN_FORWARD_STEPS or mag_sum < MIN_MOVE_MAG_SUM:
+        return "UNKNOWN"
+    
+    # Tính motion vector cuối cùng (median of forward steps)
+    dx_med = float(np.median([s[0] for s in fsteps]))
+    dy_med = float(np.median([s[1] for s in fsteps]))
+    vn = np.hypot(dx_med, dy_med) + 1e-9
+    vx = dx_med / vn
+    vy = dy_med / vn
+    
+    # Tính angle giữa motion và ref
+    dot = float(vx * v0x + vy * v0y)
+    dot = max(-1.0, min(1.0, dot))
+    cross = float(v0x * vy - v0y * vx)  # > 0 → RIGHT, < 0 → LEFT
+    angle = float(np.degrees(np.arctan2(abs(cross), dot)))
+    
+    # Quyết định hướng
+    if angle <= STRAIGHT_ANGLE_DEG:
         return "STRAIGHT"
+    elif angle >= TURN_ANGLE_DEG:
+        return "RIGHT" if cross > 0 else "LEFT"
+    else:
+        return "STRAIGHT"  # Vùng mơ hồ → bias STRAIGHT (giảm false positive)
 
 
 # =============================================================================
@@ -501,27 +567,40 @@ def check_violation(
     frame_idx: int,
     px: float,
     py: float,
+    ref_vector: Optional[Tuple[float, float]] = None,
     debounce_frames: int = 8
 ) -> Tuple[str, Tuple[int, int, int]]:
     """
-    Kiểm tra vi phạm dựa trên chuyển vùng và trạng thái đèn chi tiết
+    Kiểm tra vi phạm với 3 vùng:
+      - Vùng -1 (approaching): signed_distance < -STOPLINE_TOUCH_DIST → xe đang tới
+      - Vùng  0 (touching):    |signed_distance| <= STOPLINE_TOUCH_DIST → xe chạm vạch
+      - Vùng +1 (crossed):     signed_distance > +STOPLINE_TOUCH_DIST → xe vượt qua hoàn toàn
+    
+    Logic:
+      - Approaching → Touching khi đèn đỏ/vàng: WARNING (chạm vạch)
+      - Approaching → Crossed khi đèn đỏ: VIOLATION (vượt hoàn toàn)
+      - Touching → Crossed khi đèn đỏ: VIOLATION (đã warning rồi, giờ vượt hẳn)
     
     Args:
-        track_state: Trạng thái tracking của xe
+        track_state: Trạng thái tracking
         signed_distance: Khoảng cách có dấu đến stopline
-        light_state: Trạng thái đèn chi tiết (TrafficLightState)
+        light_state: Trạng thái đèn chi tiết
         frame_idx: Frame hiện tại
-        px, py: Vị trí hiện tại của xe
-        debounce_frames: Số frame tối thiểu giữa các event
-        
-    Returns:
-        (label, color) để hiển thị
+        px, py: Vị trí hiện tại
+        ref_vector: Hướng đi thẳng chuẩn (stopline normal)
+        debounce_frames: Debounce frames
     """
-    current_region = -1 if signed_distance < 0 else +1
+    # Xác định vùng 3 mức
+    if signed_distance < -STOPLINE_TOUCH_DIST:
+        current_region = -1    # Approaching
+    elif signed_distance > STOPLINE_TOUCH_DIST:
+        current_region = +1    # Fully crossed
+    else:
+        current_region = 0     # Touching / near stopline
     
-    # Cập nhật vị trí để theo dõi hướng đi
+    # Cập nhật trajectory
     track_state.positions.append((px, py))
-    if len(track_state.positions) > 30:  # Giữ tối đa 30 vị trí
+    if len(track_state.positions) > config.MAX_TRACK_HISTORY:
         track_state.positions.pop(0)
     
     # Lần đầu thấy xe
@@ -532,56 +611,84 @@ def check_violation(
     
     prev_region = track_state.last_region
     
-    # Chỉ trigger khi: Âm → Dương (xe vượt vạch)
-    if prev_region == -1 and current_region == +1:
-        # Debounce để tránh trigger liên tục
-        if (frame_idx - track_state.last_event_frame) >= debounce_frames:
-            
-            # Rule 4: Đèn vàng bất kỳ -> WARNING
-            if light_state.has_any_yellow():
-                track_state.label = "WARNING"
-                track_state.color = config.COLOR_WARNING
-                track_state.last_event_frame = frame_idx
-                track_state.last_region = current_region
-                return track_state.label, track_state.color
-            
-            # Phát hiện hướng đi của xe
-            direction = detect_vehicle_direction(track_state.positions)
-            track_state.direction = direction
-            
-            # Lấy các hướng được phép
-            allowed = light_state.get_allowed_directions()
-            
-            # Kiểm tra vi phạm dựa trên hướng đi
-            is_violation = False
-            
-            if direction == "STRAIGHT" and not allowed['STRAIGHT']:
-                is_violation = True
-            elif direction == "LEFT" and not allowed['LEFT']:
-                is_violation = True
-            elif direction == "RIGHT" and not allowed['RIGHT']:
-                is_violation = True
-            elif direction == "UNKNOWN":
-                # Không xác định được hướng → kiểm tra đèn đỏ tròn
-                if light_state.circle_red:
-                    # Đèn đỏ tròn + không có mũi tên xanh nào → vi phạm chắc chắn
-                    if not light_state.right_green and not light_state.left_green and not light_state.straight_green:
-                        is_violation = True
-                    # Đèn đỏ tròn + có mũi tên xanh → không chắc, cho qua (benefit of doubt)
-                    else:
-                        is_violation = False
-            
-            if is_violation:
-                track_state.label = "VIOLATION"
-                track_state.color = config.COLOR_VIOLATION
-            else:
-                track_state.label = "Safe"
-                track_state.color = config.COLOR_SAFE
-            
+    # Debounce
+    if (frame_idx - track_state.last_event_frame) < debounce_frames:
+        track_state.last_region = current_region
+        return track_state.label, track_state.color
+    
+    # === APPROACHING → TOUCHING (chạm vạch) ===
+    if prev_region == -1 and current_region == 0:
+        if light_state.has_any_red() or light_state.has_any_yellow():
+            track_state.label = "WARNING"
+            track_state.color = config.COLOR_WARNING
+            track_state.warned = True
             track_state.last_event_frame = frame_idx
+    
+    # === APPROACHING → FULLY CROSSED (vượt thẳng, bỏ qua touch zone) ===
+    elif prev_region == -1 and current_region == +1:
+        _check_crossing(track_state, light_state, frame_idx, ref_vector)
+    
+    # === TOUCHING → FULLY CROSSED (đã chạm, giờ vượt hẳn) ===
+    elif prev_region == 0 and current_region == +1:
+        _check_crossing(track_state, light_state, frame_idx, ref_vector)
+    
+    # === TOUCHING lâu khi đèn xanh → reset warning ===
+    elif current_region == 0 and not light_state.has_any_red() and not light_state.has_any_yellow():
+        if track_state.label == "WARNING":
+            track_state.label = "Safe"
+            track_state.color = config.COLOR_SAFE
+            track_state.warned = False
     
     track_state.last_region = current_region
     return track_state.label, track_state.color
+
+
+def _check_crossing(
+    track_state: TrackState,
+    light_state: TrafficLightState,
+    frame_idx: int,
+    ref_vector: Optional[Tuple[float, float]] = None
+):
+    """Kiểm tra vi phạm khi xe vượt qua hoàn toàn vạch dừng"""
+    track_state.last_event_frame = frame_idx
+    
+    # Đèn vàng → WARNING (nếu chưa vi phạm)
+    if light_state.has_any_yellow() and track_state.label != "VIOLATION":
+        track_state.label = "WARNING"
+        track_state.color = config.COLOR_WARNING
+        return
+    
+    # Phát hiện hướng đi (dùng ref_vector từ stopline normal)
+    direction = detect_vehicle_direction(track_state.positions, ref_vector=ref_vector)
+    track_state.direction = direction
+    
+    # Lấy hướng được phép
+    allowed = light_state.get_allowed_directions()
+    
+    # Xét vi phạm
+    is_violation = False
+    
+    if direction == "STRAIGHT" and not allowed['STRAIGHT']:
+        is_violation = True
+    elif direction == "LEFT" and not allowed['LEFT']:
+        is_violation = True
+    elif direction == "RIGHT" and not allowed['RIGHT']:
+        is_violation = True
+    elif direction == "UNKNOWN":
+        # Không xác định hướng → kiểm tra đèn đỏ tròn
+        if light_state.circle_red:
+            # Đèn đỏ tròn + không có mũi tên xanh nào → vi phạm chắc chắn
+            if not light_state.right_green and not light_state.left_green and not light_state.straight_green:
+                is_violation = True
+            # Có mũi tên xanh → benefit of doubt
+    
+    if is_violation:
+        track_state.label = "VIOLATION"
+        track_state.color = config.COLOR_VIOLATION
+    else:
+        track_state.label = "Safe"
+        track_state.color = config.COLOR_SAFE
+        track_state.warned = False
 
 
 def dedup_boxes(xyxy: np.ndarray, cls_ids: np.ndarray, confs: np.ndarray, track_ids: np.ndarray):
@@ -851,8 +958,13 @@ def run(
                 a, b, c = calibrator.line_abc
                 signed = get_signed_distance(px, py, a, b, c) * calibrator.sign_flip
                 
+                # Stopline normal = hướng đi thẳng chuẩn (vuông góc với vạch, hướng xe đang tới)
+                # Normal vector = (a, b) * sign_flip (hướng từ vạch về phía camera)
+                ref_vec = (a * calibrator.sign_flip, b * calibrator.sign_flip)
+                
                 label, color = check_violation(
-                    tracks[tid], signed, light_state, frame_idx, px, py
+                    tracks[tid], signed, light_state, frame_idx, px, py,
+                    ref_vector=ref_vec
                 )
                 
                 # Cập nhật counter
