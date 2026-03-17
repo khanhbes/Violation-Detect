@@ -1,17 +1,53 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
-import 'package:traffic_violation_app/data/mock_data.dart';
+import 'package:traffic_violation_app/models/vehicle.dart';
+import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 
-class VehiclesScreen extends StatelessWidget {
+class VehiclesScreen extends StatefulWidget {
   const VehiclesScreen({super.key});
 
-  static final AppSettings _s = AppSettings();
+  @override
+  State<VehiclesScreen> createState() => _VehiclesScreenState();
+}
+
+class _VehiclesScreenState extends State<VehiclesScreen> {
+  final AppSettings _s = AppSettings();
+  List<Vehicle> _vehicles = [];
+  bool _isLoading = true;
+  StreamSubscription? _vehicleSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVehicles();
+  }
+
+  void _loadVehicles() {
+    final uid = _s.uid;
+    if (uid != null) {
+      _vehicleSub = FirestoreService().vehiclesStream(uid).listen((vehicles) {
+        if (mounted) {
+          setState(() {
+            _vehicles = vehicles;
+            _isLoading = false;
+          });
+        }
+      });
+    } else {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _vehicleSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final vehicles = MockData.vehicles;
-
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
       body: Column(
@@ -63,58 +99,60 @@ class VehiclesScreen extends StatelessWidget {
 
           // ── Vehicle List ────────────────────────────────
           Expanded(
-            child: vehicles.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryColor.withOpacity(0.08),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.directions_car_outlined, size: 36, color: AppTheme.primaryColor),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
+                : _vehicles.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withOpacity(0.08),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.directions_car_outlined, size: 36, color: AppTheme.primaryColor),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _s.tr('Chưa có phương tiện nào', 'No vehicles yet'),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _s.tr('Thêm phương tiện để tra cứu vi phạm', 'Add vehicles to look up violations'),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            ElevatedButton.icon(
+                              onPressed: () {},
+                              icon: const Icon(Icons.add_rounded, size: 18),
+                              label: Text(_s.tr('Thêm phương tiện', 'Add vehicle')),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _s.tr('Chưa có phương tiện nào', 'No vehicles yet'),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _s.tr('Thêm phương tiện để tra cứu vi phạm', 'Add vehicles to look up violations'),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        ElevatedButton.icon(
-                          onPressed: () {},
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: Text(_s.tr('Thêm phương tiện', 'Add vehicle')),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: vehicles.length,
-                    itemBuilder: (context, index) => _buildVehicleCard(vehicles[index], index),
-                  ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _vehicles.length,
+                        itemBuilder: (context, index) => _buildVehicleCard(_vehicles[index], index),
+                      ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildVehicleCard(vehicle, int index) {
+  Widget _buildVehicleCard(Vehicle vehicle, int index) {
     final isMotorcycle = vehicle.vehicleType.contains('máy');
 
     return TweenAnimationBuilder<double>(

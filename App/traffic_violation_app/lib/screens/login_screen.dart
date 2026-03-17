@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/push_notification_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,8 +18,11 @@ class _LoginScreenState extends State<LoginScreen>
   final _passwordController = TextEditingController();
   final _auth = AuthService();
   final _settings = AppSettings();
+  final _cccdFocus = FocusNode();
+  final _passwordFocus = FocusNode();
   bool _isPasswordVisible = false;
   bool _isLoading = false;
+  bool _isKeyboardVisible = false;
   String? _errorMessage;
 
   late AnimationController _animController;
@@ -39,6 +43,8 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _settings.addListener(_onSettingsChanged);
+    _cccdFocus.addListener(_onFocusChange);
+    _passwordFocus.addListener(_onFocusChange);
 
     _animController = AnimationController(
       vsync: this,
@@ -88,12 +94,23 @@ class _LoginScreenState extends State<LoginScreen>
     _pulseController.dispose();
     _cccdController.dispose();
     _passwordController.dispose();
+    _cccdFocus.removeListener(_onFocusChange);
+    _passwordFocus.removeListener(_onFocusChange);
+    _cccdFocus.dispose();
+    _passwordFocus.dispose();
     _settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
   void _onSettingsChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onFocusChange() {
+    final visible = _cccdFocus.hasFocus || _passwordFocus.hasFocus;
+    if (_isKeyboardVisible != visible) {
+      setState(() => _isKeyboardVisible = visible);
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -107,7 +124,13 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       final cccd = _cccdController.text.trim();
       final email = '$cccd@vnetraffic.vn';
-      await _auth.signIn(email, _passwordController.text);
+      final credential = await _auth.signIn(email, _passwordController.text);
+
+      // Load user profile & settings from Firestore
+      if (credential.user != null) {
+        await _settings.loadFromFirestore(credential.user!.uid);
+        await PushNotificationService().resyncToken();
+      }
 
       if (mounted) {
         setState(() => _isLoading = false);
@@ -196,30 +219,18 @@ class _LoginScreenState extends State<LoginScreen>
               FadeTransition(
                 opacity: _fadeAnim,
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 24, bottom: 18),
+                  padding: const EdgeInsets.only(top: 12, bottom: 10),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Pulsing shield logo
+                      // App icon logo from image
                       ScaleTransition(
                         scale: _pulseAnim,
                         child: Container(
-                          width: 100,
-                          height: 100,
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.white.withValues(alpha: 0.25),
-                                Colors.white.withValues(alpha: 0.10),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.3),
-                              width: 2,
-                            ),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.15),
@@ -228,31 +239,24 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                             ],
                           ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Icon(
+                          child: ClipOval(
+                            child: Image.asset(
+                              'assets/images/app_icon_login.png',
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(
                                 Icons.shield_rounded,
                                 size: 52,
                                 color: Colors.white.withValues(alpha: 0.9),
                               ),
-                              const Positioned(
-                                bottom: 22,
-                                child: Icon(
-                                  Icons.local_police_rounded,
-                                  size: 20,
-                                  color: Colors.amber,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       const Text(
                         'VNeTraffic',
                         style: TextStyle(
-                          fontSize: 26,
+                          fontSize: 24,
                           fontWeight: FontWeight.w800,
                           color: Colors.white,
                           letterSpacing: 1.0,
@@ -283,7 +287,7 @@ class _LoginScreenState extends State<LoginScreen>
                         ],
                       ),
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
+                        padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
                         child: Form(
                           key: _formKey,
                           child: Column(
@@ -300,7 +304,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
 
                               // ── Error Message ────────────────
                               if (_errorMessage != null) ...[
@@ -326,6 +330,7 @@ class _LoginScreenState extends State<LoginScreen>
                                       const SizedBox(height: 8),
                                       TextFormField(
                                         controller: _cccdController,
+                                        focusNode: _cccdFocus,
                                         keyboardType: TextInputType.number,
                                         maxLength: 12,
                                         style: const TextStyle(fontSize: 15, letterSpacing: 1),
@@ -382,7 +387,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 14),
 
                               // ── Password Field (animated) ──
                               FadeTransition(
@@ -402,6 +407,7 @@ class _LoginScreenState extends State<LoginScreen>
                                       const SizedBox(height: 8),
                                       TextFormField(
                                         controller: _passwordController,
+                                        focusNode: _passwordFocus,
                                         obscureText: !_isPasswordVisible,
                                         style: const TextStyle(fontSize: 15),
                                         decoration: InputDecoration(
@@ -454,21 +460,6 @@ class _LoginScreenState extends State<LoginScreen>
                                           if (value == null || value.isEmpty) {
                                             return _settings.tr('Vui lòng nhập mật khẩu', 'Please enter password');
                                           }
-                                          if (value.length < 8) {
-                                            return _settings.tr('Mật khẩu phải có ít nhất 8 ký tự', 'Password must be at least 8 characters');
-                                          }
-                                          if (!RegExp(r'[A-Z]').hasMatch(value)) {
-                                            return _settings.tr('Phải có ít nhất 1 chữ hoa', 'Must contain at least 1 uppercase letter');
-                                          }
-                                          if (!RegExp(r'[a-z]').hasMatch(value)) {
-                                            return _settings.tr('Phải có ít nhất 1 chữ thường', 'Must contain at least 1 lowercase letter');
-                                          }
-                                          if (!RegExp(r'[0-9]').hasMatch(value)) {
-                                            return _settings.tr('Phải có ít nhất 1 chữ số', 'Must contain at least 1 digit');
-                                          }
-                                          if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) {
-                                            return _settings.tr('Phải có ít nhất 1 ký tự đặc biệt', 'Must contain at least 1 special character');
-                                          }
                                           return null;
                                         },
                                       ),
@@ -478,48 +469,30 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               const SizedBox(height: 8),
 
-                              // ── Switch/Forgot Row ──
+                              // ── Forgot Password Row ──
                               FadeTransition(
                                 opacity: _field2Anim,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pushNamed(context, '/register'),
-                                      style: TextButton.styleFrom(
-                                        padding: EdgeInsets.zero,
-                                        minimumSize: const Size(0, 36),
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      child: Text(
-                                        _settings.tr('Đổi tài khoản', 'Switch account'),
-                                        style: const TextStyle(
-                                          color: AppTheme.primaryColor,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                        ),
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: _handleForgotPassword,
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(0, 36),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: Text(
+                                      _settings.tr('Quên mật khẩu ?', 'Forgot password?'),
+                                      style: const TextStyle(
+                                        color: AppTheme.primaryColor,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
                                       ),
                                     ),
-                                    TextButton(
-                                      onPressed: _handleForgotPassword,
-                                      style: TextButton.styleFrom(
-                                        padding: EdgeInsets.zero,
-                                        minimumSize: const Size(0, 36),
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      child: Text(
-                                        _settings.tr('Quên mật khẩu ?', 'Forgot password?'),
-                                        style: const TextStyle(
-                                          color: AppTheme.primaryColor,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 14),
 
                               // ── Login Button Row (animated) ──
                               FadeTransition(
@@ -608,7 +581,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
 
                               // ── "Or sign in with" Divider ──
                               FadeTransition(
@@ -630,7 +603,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 14),
 
                               // ── eID Button ──
                               FadeTransition(
@@ -686,7 +659,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 12),
 
                               // ── Version ──
                               Center(
@@ -698,7 +671,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
 
                               // ── Register link ──
                               Row(
@@ -733,28 +706,29 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
               ),
 
-              // ── Bottom Bar ────────────────────────────────
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.only(bottom: 12, top: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildBottomAction(
-                      Icons.menu_book_rounded,
-                      _settings.tr('Hướng dẫn\nsử dụng', 'User\nGuide'),
-                      AppTheme.primaryColor,
-                      () {},
-                    ),
-                    _buildBottomAction(
-                      Icons.help_outline_rounded,
-                      _settings.tr('Câu hỏi\nthường gặp', 'Frequently\nAsked'),
-                      AppTheme.secondaryColor,
-                      () {},
-                    ),
-                  ],
+              // ── Bottom Bar (hidden when keyboard is visible) ──
+              if (!_isKeyboardVisible)
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.only(bottom: 12, top: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildBottomAction(
+                        Icons.menu_book_rounded,
+                        _settings.tr('Hướng dẫn\nsử dụng', 'User\nGuide'),
+                        AppTheme.primaryColor,
+                        () {},
+                      ),
+                      _buildBottomAction(
+                        Icons.help_outline_rounded,
+                        _settings.tr('Câu hỏi\nthường gặp', 'Frequently\nAsked'),
+                        AppTheme.secondaryColor,
+                        () {},
+                      ),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),

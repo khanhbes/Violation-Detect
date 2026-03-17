@@ -941,3 +941,193 @@ async function requestNotificationPermission(messaging) {
         console.error('[FCM] Permission/token error:', e);
     }
 }
+
+// =====================================================================
+// DATA MANAGEMENT (Admin Dashboard)
+// =====================================================================
+const refreshManageBtn = document.getElementById('refreshManageBtn');
+const adminDataTableBody = document.getElementById('adminDataTableBody');
+const manageSearchInput = document.getElementById('manageSearchInput');
+
+// Stat elements
+const statTotalUsers = document.getElementById('statTotalUsers');
+const statTotalVehicles = document.getElementById('statTotalVehicles');
+const statTotalViolations = document.getElementById('statTotalViolations');
+const statPendingFines = document.getElementById('statPendingFines');
+const statTotalComplaints = document.getElementById('statTotalComplaints');
+const manageRowCount = document.getElementById('manageRowCount');
+
+// Cache data for search
+let _adminCachedData = null;
+
+function updateManageStats(data) {
+    const users = data.users || [];
+    const vehicles = data.vehicles || [];
+    const violations = data.violations || [];
+    const complaints = data.complaints || [];
+
+    let totalPending = 0;
+    violations.forEach(v => {
+        if (v.status === 'pending') totalPending += (v.fineAmount || 0);
+    });
+
+    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+
+    if (statTotalUsers) statTotalUsers.textContent = users.length;
+    if (statTotalVehicles) statTotalVehicles.textContent = vehicles.length;
+    if (statTotalViolations) statTotalViolations.textContent = violations.length;
+    if (statPendingFines) statPendingFines.textContent = formatter.format(totalPending);
+    if (statTotalComplaints) statTotalComplaints.textContent = complaints.length;
+}
+
+function renderAdminTable(data, searchQuery = '') {
+    if (!adminDataTableBody) return;
+
+    const users = data.users || [];
+    const vehicles = data.vehicles || [];
+    const violations = data.violations || [];
+    const complaints = data.complaints || [];
+    const notifications = data.notifications || [];
+
+    const query = searchQuery.toLowerCase().trim();
+    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+
+    let html = '';
+    let rowIndex = 0;
+
+    users.forEach(u => {
+        const uid = u.id;
+        const uVehicles = vehicles.filter(v => v.ownerId === uid);
+        const targetPlates = uVehicles.map(v => v.licensePlate);
+        const uViolations = violations.filter(v => v.userId === uid || (v.licensePlate && targetPlates.includes(v.licensePlate)));
+        const uComplaints = complaints.filter(c => c.userId === uid);
+        const uNotifications = notifications.filter(n => n.userId === uid);
+
+        // Search filter
+        if (query) {
+            const searchable = [
+                u.email, u.fullName, u.idCard, u.phone, uid,
+                ...targetPlates,
+                ...uVehicles.map(v => `${v.brand || ''} ${v.model || ''}`),
+            ].join(' ').toLowerCase();
+            if (!searchable.includes(query)) return;
+        }
+
+        rowIndex++;
+
+        let pendingCount = 0;
+        let paidCount = 0;
+        let totalPendingFine = 0;
+
+        uViolations.forEach(v => {
+            if (v.status === 'pending') {
+                pendingCount++;
+                totalPendingFine += (v.fineAmount || 0);
+            } else if (v.status === 'paid') {
+                paidCount++;
+            }
+        });
+
+        html += `
+            <tr>
+                <td>${rowIndex}</td>
+                <td>
+                    <div style="font-weight: 600; color: var(--text-primary);">${u.email || '-'}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; word-break: break-all;">${uid}</div>
+                </td>
+                <td>
+                    <div style="font-weight: 600;">${u.fullName || '<span style="color: var(--text-muted); font-style: italic;">Chưa cập nhật</span>'}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">🪪 ${u.idCard || '-'}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">📱 ${u.phone || '-'}</div>
+                </td>
+                <td>
+                    Hạng: <span class="data-tag tag-info">${u.licenseClass || '-'}</span><br>
+                    Số: <span style="font-weight: 500;">${u.licenseNumber || '-'}</span><br>
+                    <span style="font-weight: 700; color: ${(u.points ?? 12) < 12 ? 'var(--warning)' : 'var(--success)'};">Điểm: ${u.points ?? 12}/12</span>
+                </td>
+                <td>
+                    ${uVehicles.length > 0
+                        ? uVehicles.map(v => `<div style="margin-bottom: 6px;"><span class="data-tag tag-info">${v.licensePlate || ''}</span><div style="font-size: 0.72rem; color: var(--text-muted);">${v.brand || ''} ${v.model || ''} — ${v.type || ''}</div></div>`).join('')
+                        : '<span style="color: var(--text-muted); font-style: italic;">Chưa có</span>'}
+                </td>
+                <td>
+                    <span class="data-tag tag-danger">Chưa nộp: ${pendingCount}</span>
+                    <span class="data-tag tag-success">Đã nộp: ${paidCount}</span>
+                    ${totalPendingFine > 0 ? `<div style="font-weight: 700; color: var(--danger); margin-top: 6px;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color: var(--success); margin-top: 4px; font-weight: 600; font-size: 0.8rem;">✓ Không nợ</div>'}
+                </td>
+                <td>
+                    ${uComplaints.length > 0 ? `<span class="data-tag tag-warning">📝 ${uComplaints.length} kh.nại</span>` : '<span class="data-tag tag-secondary">0 kh.nại</span>'}
+                    <span class="data-tag tag-secondary">🔔 ${uNotifications.length}</span>
+                </td>
+            </tr>
+        `;
+    });
+
+    if (rowIndex === 0) {
+        html = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 50px 40px;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+            ${query ? 'Không tìm thấy kết quả phù hợp.' : 'Hệ thống chưa có dữ liệu người dùng.'}
+        </td></tr>`;
+    }
+
+    adminDataTableBody.innerHTML = html;
+    if (manageRowCount) manageRowCount.textContent = `${rowIndex} người dùng`;
+}
+
+async function loadAdminData() {
+    if (!adminDataTableBody) return;
+
+    adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 60px 40px;">
+        <div class="manage-loading" style="font-size: 2.5rem; margin-bottom: 12px;">⏳</div>
+        <div style="font-weight: 500;">Đang tải dữ liệu từ Firebase...</div>
+    </td></tr>`;
+
+    try {
+        const resp = await fetch('/api/admin/data');
+        const json = await resp.json();
+
+        if (json.status !== 'ok') {
+            showToast('Lỗi tải dữ liệu: ' + json.message, 'error');
+            adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 50px;">
+                <div style="font-size: 2rem; margin-bottom: 8px;">⚠️</div>${json.message}
+            </td></tr>`;
+            return;
+        }
+
+        _adminCachedData = json.data;
+        updateManageStats(_adminCachedData);
+        renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+        showToast('Đã làm mới dữ liệu hệ thống!', 'success');
+
+    } catch (e) {
+        console.error(e);
+        adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 50px;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">❌</div>Lỗi kết nối máy chủ.
+        </td></tr>`;
+    }
+}
+
+// Refresh button
+if (refreshManageBtn) {
+    refreshManageBtn.addEventListener('click', loadAdminData);
+}
+
+// Search input
+if (manageSearchInput) {
+    let searchTimeout;
+    manageSearchInput.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            if (_adminCachedData) {
+                renderAdminTable(_adminCachedData, manageSearchInput.value);
+            }
+        }, 250);
+    });
+}
+
+// Auto-load when switching to the tab
+document.querySelectorAll('.nav-link[data-tab="manage"]').forEach(link => {
+    link.addEventListener('click', () => {
+        loadAdminData();
+    });
+});

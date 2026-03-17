@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/screens/payment_screen.dart';
 
 class ViolationDetailScreen extends StatefulWidget {
   const ViolationDetailScreen({super.key});
@@ -358,14 +359,18 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                               boxShadow: AppTheme.redShadow,
                             ),
                             child: ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.pushNamed(context, '/payment', arguments: violation);
-                              },
-                              icon: const Icon(Icons.payment_rounded),
-                              label: Text(
-                                _settings.tr('Nộp phạt ngay', 'Pay fine now'),
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                              ),
+                                onPressed: () {
+                                  Navigator.pushNamed(context, '/payment', arguments: violation).then((_) {
+                                    if (mounted) setState(() {});
+                                  });
+                                },
+                                icon: const Icon(Icons.payment_rounded),
+                                label: Text(
+                                  PaymentScreen.isProcessing(violation.id) 
+                                      ? _settings.tr('Tiếp tục nộp phạt', 'Continue payment')
+                                      : _settings.tr('Nộp phạt ngay', 'Pay fine now'),
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.transparent,
                                 foregroundColor: Colors.white,
@@ -448,23 +453,30 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
   }
 
   Widget _buildStatusBadge(Violation v) {
+    final bool isProcessing = PaymentScreen.isProcessing(v.id);
+    final Color bgColor = v.isPaid ? AppTheme.successColor : (isProcessing ? AppTheme.infoColor : AppTheme.dangerColor);
+    final IconData iconData = v.isPaid ? Icons.check_circle_rounded : (isProcessing ? Icons.hourglass_top_rounded : Icons.warning_rounded);
+    final String actText = v.isPaid 
+        ? _settings.tr('Đã nộp phạt', 'Paid') 
+        : (isProcessing ? _settings.tr('Đang nộp', 'Processing') : _settings.tr('Chưa nộp phạt', 'Unpaid'));
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: v.isPending ? AppTheme.primaryColor : AppTheme.successColor,
+        color: bgColor,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            v.isPending ? Icons.warning_rounded : Icons.check_circle_rounded,
+            iconData,
             color: Colors.white,
             size: 14,
           ),
           const SizedBox(width: 4),
           Text(
-            v.isPending ? _settings.tr('Chưa nộp phạt', 'Unpaid') : _settings.tr('Đã nộp phạt', 'Paid'),
+            actText,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12,

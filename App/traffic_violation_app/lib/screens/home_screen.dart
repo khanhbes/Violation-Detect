@@ -1,13 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:traffic_violation_app/data/mock_data.dart';
+// mock_data import removed — all user data now comes from Firestore via AppSettings
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:traffic_violation_app/screens/violations_screen.dart';
 import 'package:traffic_violation_app/screens/profile_screen.dart';
 import 'dart:async';
@@ -58,9 +59,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _initServices() async {
     await _notif.initialize();
 
+    NotificationService.onNotificationTap = (payload) {
+      if (payload != null && mounted) {
+        Navigator.pushNamed(context, '/violation_detail', arguments: payload);
+      }
+    };
+
     _newViolationSub = _api.newViolationStream.listen((violation) {
       _notif.showViolationNotification(violation);
       _settings.addNotification();
+      _showNewViolationDialog(violation);
     });
 
     _api.connectWebSocket();
@@ -69,7 +77,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) setState(() {});
     });
 
-    _firestoreSub = FirestoreService().violationsStream().listen((violations) {
+    final uid = _settings.uid;
+    _firestoreSub = FirestoreService().violationsStream(userId: uid).listen((violations) {
       if (mounted) {
         setState(() {
           _violations = violations;
@@ -82,6 +91,114 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     _fadeController.forward();
     _slideController.forward();
+
+    // ── OTA Update Check (after 2s delay to let UI settle) ──
+    Future.delayed(const Duration(seconds: 2), () => _checkForAppUpdate());
+  }
+
+  /// Check Firestore for a newer app version and show update dialog if available.
+  Future<void> _checkForAppUpdate() async {
+    try {
+      final updateInfo = await UpdateService().checkForUpdate();
+      if (updateInfo != null && mounted) {
+        await UpdateService.showUpdateDialog(context, updateInfo: updateInfo);
+      }
+    } catch (e) {
+      debugPrint('📱 Update check skipped: $e');
+    }
+  }
+
+  void _showNewViolationDialog(Violation violation) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          contentPadding: const EdgeInsets.all(24),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.dangerColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.warning_amber_rounded, color: AppTheme.dangerColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _settings.tr('Phát hiện vi phạm!', 'New Violation!'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700, 
+                    fontSize: 18,
+                    color: isDark ? Colors.white : AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                violation.violationType,
+                style: TextStyle(
+                  fontSize: 15, 
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${_settings.tr('Mức phạt', 'Fine')}: ${formatter.format(violation.fineAmount)}',
+                style: const TextStyle(color: AppTheme.dangerColor, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              if (violation.imageUrl.isNotEmpty && violation.imageUrl.startsWith('http'))
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    violation.imageUrl,
+                    height: 140,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(
+                _settings.tr('Đóng', 'Close'), 
+                style: TextStyle(color: isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary)
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Also switch to 'Violations' tab just in case
+                setState(() => _selectedIndex = 1);
+                Navigator.pushNamed(context, '/violation_detail', arguments: violation.id);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Text(_settings.tr('Nộp phạt ngay', 'Pay Fine'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -425,7 +542,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  WALLET FULL PAGE (tab index 2)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildWalletFullPage() {
-    final user = MockData.currentUser;
     int licensePoints = 12;
     for (final v in _violations) {
       licensePoints -= _getPointsDeducted(v.violationType);
@@ -483,8 +599,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 _buildSectionLabel(_settings.tr('Căn cước công dân', 'Citizen ID Card'), Icons.credit_card_rounded, const Color(0xFF1A237E)),
                 const SizedBox(height: 10),
                 GestureDetector(
-                  onTap: () => _showCccdDetail(user),
-                  child: _buildCccdCard(user),
+                  onTap: () => _showCccdDetail(null),
+                  child: _buildCccdCard(null),
                 ),
                 const SizedBox(height: 20),
                 _buildSectionLabel(_settings.tr('Giấy phép lái xe', 'Driver License'), Icons.badge_rounded, AppTheme.primaryColor),
@@ -563,9 +679,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  HEADER (Red gradient with user info)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildHeader() {
-    final user = MockData.currentUser;
     final avatarUrl = _settings.userAvatar;
-    final displayName = _settings.profileInitialized ? _settings.userName : user.fullName;
+    final displayName = _settings.userName;
+    final idCard = _settings.userIdCard;
 
     return SliverToBoxAdapter(
       child: Container(
@@ -665,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       Icon(Icons.verified_user_outlined, color: Colors.white.withOpacity(0.9), size: 20),
                       const SizedBox(width: 10),
                       Text(
-                        '${_settings.tr('Xác thực', 'Verified')}: ${user.idCard}',
+                        '${_settings.tr('Xác thực', 'Verified')}: $idCard',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.9),
                           fontSize: 13,
@@ -858,8 +974,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  DOCUMENT WALLET (Ví giấy tờ — CCCD + GPLX + Điểm)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildDocumentWallet() {
-    final user = MockData.currentUser;
-
     int licensePoints = 12;
     for (final v in _violations) {
       licensePoints -= _getPointsDeducted(v.violationType);
@@ -897,8 +1011,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               onPageChanged: (i) => setState(() => _walletPage = i),
               children: [
                 GestureDetector(
-                  onTap: () => _showCccdDetail(user),
-                  child: _buildCccdCard(user),
+                  onTap: () => _showCccdDetail(null),
+                  child: _buildCccdCard(null),
                 ),
                 GestureDetector(
                   onTap: () => _showLicenseDetail(
@@ -1027,7 +1141,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  user.idCard,
+                  _settings.userIdCard.isNotEmpty ? _settings.userIdCard : '---',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
@@ -1051,7 +1165,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            user.fullName.toUpperCase(),
+                            _settings.userName.toUpperCase(),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
@@ -1299,7 +1413,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textPrimary = isDark ? const Color(0xFFE0E0E0) : AppTheme.textPrimary;
     final textSecondary = isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
-    final displayName = _settings.profileInitialized ? _settings.userName : user.fullName;
+    final displayName = _settings.userName;
 
     showModalBottomSheet(
       context: context,
@@ -1346,7 +1460,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      user.idCard,
+                      _settings.userIdCard.isNotEmpty ? _settings.userIdCard : '---',
                       style: const TextStyle(color: Colors.amber, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 4),
                     ),
                   ],
@@ -1404,8 +1518,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textPrimary = isDark ? const Color(0xFFE0E0E0) : AppTheme.textPrimary;
     final textSecondary = isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
-    final user = MockData.currentUser;
-    final displayName = _settings.profileInitialized ? _settings.userName : user.fullName;
+    final displayName = _settings.userName;
 
     const pointColor = Colors.amber;
     final pointPercent = points / 12.0;

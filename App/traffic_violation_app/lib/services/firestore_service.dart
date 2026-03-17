@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:traffic_violation_app/models/notification.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/models/user.dart' as app;
 import 'package:traffic_violation_app/models/vehicle.dart';
@@ -23,47 +24,46 @@ class FirestoreService {
   CollectionReference<Map<String, dynamic>> get _violationsRef =>
       _db.collection('violations');
 
-  /// Real-time stream of all violations.
-  /// Tries orderBy('createdAt') first, falls back to no ordering.
-  Stream<List<Violation>> violationsStream({String? licensePlate}) {
+  /// Real-time stream of violations.
+  /// Can filter by licensePlate or userId.
+  Stream<List<Violation>> violationsStream(
+      {String? licensePlate, String? userId}) {
     Query<Map<String, dynamic>> query = _violationsRef;
 
-    // Try ordering by createdAt (server timestamp), fallback to timestamp
-    try {
-      query = query.orderBy('createdAt', descending: true);
-    } catch (e) {
-      debugPrint('⚠️ orderBy createdAt failed, using default order: $e');
-    }
-
-    if (licensePlate != null) {
+    if (userId != null && userId.isNotEmpty) {
+      query = query.where('userId', isEqualTo: userId);
+    } else if (licensePlate != null && licensePlate.isNotEmpty) {
       query = query.where('licensePlate', isEqualTo: licensePlate);
     }
 
     return query.snapshots().map((snapshot) {
       debugPrint('📱 Firestore snapshot: ${snapshot.docs.length} violations');
-      return snapshot.docs.map((doc) {
+      final violations = snapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
         return Violation.fromJson(data);
       }).toList();
-    }).handleError((error) {
-      debugPrint('❌ Firestore stream error: $error');
-      debugPrint('📱 Retrying without orderBy...');
-      // On error, return a fallback stream without ordering
-      return _violationsRefFallbackStream(licensePlate: licensePlate);
+
+      // Sort client-side by timestamp descending to avoid composite index requirements
+      violations.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return violations;
     });
   }
 
-  /// Fallback stream without orderBy (in case index doesn't exist)
-  Stream<List<Violation>> _violationsRefFallbackStream({String? licensePlate}) {
-    Query<Map<String, dynamic>> query = _violationsRef;
+  /// One-shot fetch of all violations.
+  Future<List<Violation>> getViolations(
+      {String? licensePlate, String? userId}) async {
+    try {
+      Query<Map<String, dynamic>> query = _violationsRef;
 
-    if (licensePlate != null) {
-      query = query.where('licensePlate', isEqualTo: licensePlate);
-    }
+      if (userId != null && userId.isNotEmpty) {
+        query = query.where('userId', isEqualTo: userId);
+      } else if (licensePlate != null && licensePlate.isNotEmpty) {
+        query = query.where('licensePlate', isEqualTo: licensePlate);
+      }
 
-    return query.snapshots().map((snapshot) {
-      debugPrint('📱 Firestore fallback: ${snapshot.docs.length} violations');
+      final snapshot = await query.get();
+      debugPrint('📱 Firestore fetch: ${snapshot.docs.length} violations');
       final violations = snapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
@@ -73,52 +73,9 @@ class FirestoreService {
       // Sort client-side by timestamp descending
       violations.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       return violations;
-    });
-  }
-
-  /// One-shot fetch of all violations.
-  Future<List<Violation>> getViolations({String? licensePlate}) async {
-    try {
-      // Try with orderBy first
-      Query<Map<String, dynamic>> query = _violationsRef;
-
-      try {
-        query = query.orderBy('createdAt', descending: true);
-      } catch (_) {
-        // If orderBy fails at build time, skip it
-      }
-
-      if (licensePlate != null) {
-        query = query.where('licensePlate', isEqualTo: licensePlate);
-      }
-
-      final snapshot = await query.get();
-      debugPrint('📱 Firestore fetch: ${snapshot.docs.length} violations');
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return Violation.fromJson(data);
-      }).toList();
     } catch (e) {
-      debugPrint('❌ Error fetching violations (trying fallback): $e');
-      // Fallback: fetch without ordering
-      try {
-        Query<Map<String, dynamic>> query = _violationsRef;
-        if (licensePlate != null) {
-          query = query.where('licensePlate', isEqualTo: licensePlate);
-        }
-        final snapshot = await query.get();
-        final violations = snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['id'] = doc.id;
-          return Violation.fromJson(data);
-        }).toList();
-        violations.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-        return violations;
-      } catch (e2) {
-        debugPrint('❌ Fallback also failed: $e2');
-        return [];
-      }
+      debugPrint('❌ Error fetching violations: $e');
+      return [];
     }
   }
 
@@ -162,9 +119,14 @@ class FirestoreService {
     }
   }
 
-  /// Update user profile fields.
+  /// Update user profile fields (creates if not exists).
   Future<void> updateUserProfile(String uid, Map<String, dynamic> data) async {
-    await _usersRef.doc(uid).update(data);
+    try {
+      await _usersRef.doc(uid).set(data, SetOptions(merge: true));
+      debugPrint('✅ User profile updated in Firestore');
+    } catch (e) {
+      debugPrint('❌ Error updating user profile: $e');
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -191,9 +153,8 @@ class FirestoreService {
   /// One-shot fetch of vehicles for a user.
   Future<List<Vehicle>> getVehicles(String ownerId) async {
     try {
-      final snapshot = await _vehiclesRef
-          .where('ownerId', isEqualTo: ownerId)
-          .get();
+      final snapshot =
+          await _vehiclesRef.where('ownerId', isEqualTo: ownerId).get();
       return snapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
@@ -210,5 +171,217 @@ class FirestoreService {
     final doc = await _vehiclesRef.add(vehicle.toJson());
     return doc.id;
   }
-}
 
+  /// Update a vehicle.
+  Future<void> updateVehicle(String id, Map<String, dynamic> data) async {
+    try {
+      await _vehiclesRef.doc(id).update(data);
+    } catch (e) {
+      debugPrint('❌ Error updating vehicle $id: $e');
+    }
+  }
+
+  /// Delete a vehicle.
+  Future<void> deleteVehicle(String id) async {
+    try {
+      await _vehiclesRef.doc(id).delete();
+    } catch (e) {
+      debugPrint('❌ Error deleting vehicle $id: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // USER SETTINGS (stored as subcollection or merged into user doc)
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Save user settings (theme, language, notifications) to Firestore.
+  Future<void> saveUserSettings(
+      String uid, Map<String, dynamic> settings) async {
+    try {
+      await _usersRef.doc(uid).set(
+        {'settings': settings},
+        SetOptions(merge: true),
+      );
+      debugPrint('✅ User settings saved to Firestore');
+    } catch (e) {
+      debugPrint('❌ Error saving user settings: $e');
+    }
+  }
+
+  /// Load user settings from Firestore.
+  Future<Map<String, dynamic>?> getUserSettings(String uid) async {
+    try {
+      final doc = await _usersRef.doc(uid).get();
+      if (!doc.exists) return null;
+      return doc.data()?['settings'] as Map<String, dynamic>?;
+    } catch (e) {
+      debugPrint('❌ Error fetching user settings: $e');
+      return null;
+    }
+  }
+
+  /// Create or update user profile (called after login if profile doesn't exist).
+  Future<void> createOrUpdateUserProfile(
+      String uid, Map<String, dynamic> data) async {
+    try {
+      await _usersRef.doc(uid).set(data, SetOptions(merge: true));
+      debugPrint('✅ User profile created/updated in Firestore');
+    } catch (e) {
+      debugPrint('❌ Error creating user profile: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // NOTIFICATIONS
+  // ═══════════════════════════════════════════════════════════════
+
+  CollectionReference<Map<String, dynamic>> get _notificationsRef =>
+      _db.collection('notifications');
+
+  /// Stream of notifications for a specific user, ordered by newest first.
+  Stream<List<AppNotification>> notificationsStream(String userId) {
+    return _notificationsRef
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return AppNotification.fromJson(data);
+      }).toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
+    });
+  }
+
+  /// Add a new notification.
+  Future<void> addNotification(AppNotification notification) async {
+    try {
+      await _notificationsRef.add(notification.toJson());
+    } catch (e) {
+      debugPrint('❌ Error adding notification: $e');
+    }
+  }
+
+  /// Mark a notification as read.
+  Future<void> markNotificationRead(String id) async {
+    try {
+      await _notificationsRef.doc(id).update({'isRead': true});
+    } catch (e) {
+      debugPrint('❌ Error marking notification as read: $e');
+    }
+  }
+
+  /// Mark all notifications as read for a user.
+  Future<void> markAllNotificationsRead(String userId) async {
+    try {
+      final snapshot = await _notificationsRef
+          .where('userId', isEqualTo: userId)
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      final batch = _db.batch();
+      for (final doc in snapshot.docs) {
+        batch.update(doc.reference, {'isRead': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('❌ Error marking all notifications read: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // APP UPDATE (OTA)
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Get latest app update info from Firestore.
+  /// Document path: app_config/latest_version
+  /// Fields: version, buildNumber, downloadUrl, changelog, forceUpdate
+  Future<Map<String, dynamic>?> getAppUpdateInfo() async {
+    try {
+      final doc =
+          await _db.collection('app_config').doc('latest_version').get();
+      if (!doc.exists) return null;
+      return doc.data();
+    } catch (e) {
+      debugPrint('❌ Error fetching app update info: $e');
+      return null;
+    }
+  }
+
+  /// Set app update info in Firestore (called from admin/server).
+  /// This is a convenience method — normally you'd set this from the backend.
+  Future<void> setAppUpdateInfo({
+    required String version,
+    required int buildNumber,
+    required String downloadUrl,
+    String changelog = '',
+    bool forceUpdate = false,
+  }) async {
+    try {
+      await _db.collection('app_config').doc('latest_version').set({
+        'version': version,
+        'buildNumber': buildNumber,
+        'downloadUrl': downloadUrl,
+        'changelog': changelog,
+        'forceUpdate': forceUpdate,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ App update info saved to Firestore');
+    } catch (e) {
+      debugPrint('❌ Error saving app update info: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // COMPLAINTS
+  // ═══════════════════════════════════════════════════════════════
+
+  CollectionReference<Map<String, dynamic>> get _complaintsRef =>
+      _db.collection('complaints');
+
+  /// Submit a new complaint.
+  Future<void> submitComplaint({
+    required String userId,
+    required String violationId,
+    required String reason,
+    required String description,
+  }) async {
+    try {
+      await _complaintsRef.add({
+        'userId': userId,
+        'violationId': violationId,
+        'reason': reason,
+        'description': description,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Complaint submitted successfully');
+    } catch (e) {
+      debugPrint('❌ Error submitting complaint: $e');
+      throw e;
+    }
+  }
+
+  /// Stream of complaints for a specific user.
+  Stream<List<Map<String, dynamic>>> complaintsStream(String userId) {
+    return _complaintsRef
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+      // Sort by createdAt descending if exists
+      list.sort((a, b) {
+        final tA = a['createdAt'] as Timestamp?;
+        final tB = b['createdAt'] as Timestamp?;
+        if (tA == null || tB == null) return 0;
+        return tB.compareTo(tA);
+      });
+      return list;
+    });
+  }
+}

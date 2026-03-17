@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/api_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -75,7 +77,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _initAnimations() {
     // Logo entrance: scale + fade + slight rotation
     _mainController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 800),
       vsync: this,
     );
     _logoScale = Tween<double>(begin: 0.3, end: 1.0).animate(
@@ -93,7 +95,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Text stagger: title then subtitle
     _textController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
     _titleSlide = Tween<double>(begin: 40, end: 0).animate(
@@ -156,7 +158,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Progress bar (fills in 3s)
     _progressController = AnimationController(
-      duration: const Duration(milliseconds: 3000),
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
     _progressAnim = CurvedAnimation(
@@ -170,17 +172,17 @@ class _SplashScreenState extends State<SplashScreen>
     _mainController.forward();
 
     // Step 2: Text appears after logo
-    Future.delayed(const Duration(milliseconds: 500), () {
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) _textController.forward();
     });
 
     // Step 3: Progress bar starts
-    Future.delayed(const Duration(milliseconds: 800), () {
+    Future.delayed(const Duration(milliseconds: 400), () {
       if (mounted) _progressController.forward();
     });
 
     // Loading text cycling
-    _loadingTimer = Timer.periodic(const Duration(milliseconds: 900), (timer) {
+    _loadingTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
       if (mounted) {
         setState(() {
           _loadingStep = (_loadingStep + 1) % 4;
@@ -188,11 +190,31 @@ class _SplashScreenState extends State<SplashScreen>
       }
     });
 
-    // Navigate after splash
-    Timer(const Duration(milliseconds: 3500), () {
-      if (mounted) {
-        final route = AuthService().isLoggedIn ? '/home' : '/login';
-        Navigator.pushReplacementNamed(context, route);
+    // Navigate after splash — load profile from Firestore if already logged in
+    Timer(const Duration(milliseconds: 1800), () async {
+      if (!mounted) return;
+
+      try {
+        // Auto-discover server IP from Firebase config
+        final ds = await FirebaseFirestore.instance.collection('server').doc('config').get();
+        if (ds.exists && ds.data() != null) {
+          final ip = ds.data()!['ip'] as String?;
+          if (ip != null && ip.isNotEmpty) {
+            ApiService().setServerAddress(ip);
+            debugPrint('✅ Auto-discovered Server IP from Firebase: $ip');
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to auto-discover Server IP: $e');
+      }
+
+      final auth = AuthService();
+      if (auth.isLoggedIn) {
+        // Load user profile & settings from Firestore before going to home
+        await _settings.loadFromFirestore(auth.currentUser!.uid);
+        if (mounted) Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        if (mounted) Navigator.pushReplacementNamed(context, '/login');
       }
     });
   }

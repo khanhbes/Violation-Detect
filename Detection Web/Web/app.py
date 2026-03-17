@@ -23,11 +23,13 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import sys
 import time
+import socket
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form
+from pydantic import BaseModel
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -57,13 +59,37 @@ for vtype in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane', 'sign
 # =============================================================================
 
 app = FastAPI(
-    title="Traffic Violation Detection",
-    description="Real-time traffic violation detection with WebSocket streaming",
-    version="4.0.0"
+    title="Traffic Violation API",
+    description="Backend for traffic violation detection.",
+    version="4.0"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        def get_local_ip():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(('8.8.8.8', 80))
+                ip = s.getsockname()[0]
+            except Exception:
+                ip = '127.0.0.1'
+            finally:
+                s.close()
+            return ip
 
-# Enable CORS for mobile app
+        local_ip = get_local_ip()
+        
+        # Write to Firestore if fcm_service works
+        if fcm_service and fcm_service._db:
+            from firebase_admin import firestore as fb_firestore
+            fcm_service._db.collection('server').document('config').set({
+                'ip': local_ip,
+                'updated_at': fb_firestore.SERVER_TIMESTAMP
+            })
+            print(f"✅ Bật Firebase Auto-Discovery: Cập nhật IP {local_ip} lên Firestore [server/config]")
+    except Exception as e:
+        print(f"⚠️ Failed to write Local IP to Firestore: {e}")
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
@@ -132,13 +158,13 @@ async def broadcast_to_apps(violation: Dict):
     print(f"📱 Broadcast violation to {len(app_clients)} app client(s)")
 
 VIOLATION_INFO = {
-    'helmet':     {'name': 'Không đội mũ bảo hiểm',   'fine': 200000,  'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
-    'no_helmet':  {'name': 'Không đội mũ bảo hiểm',   'fine': 200000,  'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
-    'redlight':   {'name': 'Vượt đèn đỏ',             'fine': 800000,  'code': 'DD01',  'law': 'Điều 6, NĐ 100/2019/NĐ-CP'},
-    'sidewalk':   {'name': 'Chạy lên vỉa hè',         'fine': 300000,  'code': 'VH01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
-    'wrong_way':  {'name': 'Chạy ngược chiều',         'fine': 1000000, 'code': 'NC01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
-    'wrong_lane': {'name': 'Đi sai làn đường',         'fine': 1000000, 'code': 'LD01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
-    'sign':       {'name': 'Vi phạm biển báo',         'fine': 500000,  'code': 'BB01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'helmet':     {'name': 'Không đội mũ bảo hiểm',   'fine': 10000,   'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
+    'no_helmet':  {'name': 'Không đội mũ bảo hiểm',   'fine': 10000,   'code': 'MBH01', 'law': 'Điều 7, NĐ 100/2019/NĐ-CP'},
+    'redlight':   {'name': 'Vượt đèn đỏ',             'fine': 30000,   'code': 'DD01',  'law': 'Điều 6, NĐ 100/2019/NĐ-CP'},
+    'sidewalk':   {'name': 'Chạy lên vỉa hè',         'fine': 15000,   'code': 'VH01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'wrong_way':  {'name': 'Chạy ngược chiều',         'fine': 30000,   'code': 'NC01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'wrong_lane': {'name': 'Đi sai làn đường',         'fine': 20000,   'code': 'LD01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
+    'sign':       {'name': 'Vi phạm biển báo',         'fine': 25000,   'code': 'BB01',  'law': 'Điều 4, NĐ 100/2019/NĐ-CP'},
 }
 
 def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str = None):
@@ -192,7 +218,36 @@ def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str =
             from firebase_admin import firestore as fb_firestore
             db = fcm_service._db
             if db:
-                doc_ref = db.collection('violations').document()
+                # Get the most recently active user to link violation (for testing purposes)
+                # In production, you'd match by license plate instead
+                target_user_id = None
+                try:
+                    # Fallback 1: Try to get the user who most recently registered an FCM token
+                    token_docs = db.collection('user_device_tokens')\
+                        .order_by('last_updated', direction=fb_firestore.Query.DESCENDING)\
+                        .limit(10).stream()
+                    for doc in token_docs:
+                        uid = doc.to_dict().get('user_id')
+                        if uid and uid != 'default_user':
+                            target_user_id = uid
+                            break
+                except Exception as ue:
+                    print(f"⚠️ Could not fetch active user token: {ue}")
+
+                if not target_user_id or target_user_id == 'default_user':
+                    # Fallback 2: Pick the most recently registered user
+                    try:
+                        user_docs = db.collection('users').stream()
+                        all_users = [doc for doc in user_docs]
+                        if all_users:
+                            # Typically the newest user is appended at the end, or we can sort by createdAt
+                            all_users.sort(key=lambda d: d.to_dict().get('createdAt').timestamp() if hasattr(d.to_dict().get('createdAt'), 'timestamp') else 0)
+                            target_user_id = all_users[-1].id
+                    except Exception as ue:
+                        print(f"⚠️ Could not fetch users: {ue}")
+
+                raw_doc_ref = db.collection('violations').document()
+                doc_ref = db.collection('violations').document(raw_doc_ref.id.upper())
                 doc_data = {
                     'type': v_type,
                     'violationType': info['name'],
@@ -208,9 +263,29 @@ def store_violation(v_type: str, track_id: int, label: str, snapshot_path: str =
                     'status': 'pending',
                     'licensePlate': 'Đang xác minh',
                 }
+                # Link violation to user
+                if target_user_id:
+                    doc_data['userId'] = target_user_id
+
                 doc_ref.set(doc_data)
                 firestore_doc_id = doc_ref.id
                 print(f"🔥 Firestore: violation saved (ID: {firestore_doc_id})")
+
+                # ── Create notification document for user ──────────────
+                if target_user_id:
+                    try:
+                        db.collection('notifications').add({
+                            'userId': target_user_id,
+                            'title': f'🚨 {info["name"]}',
+                            'body': f'Mức phạt: {info["fine"]:,}₫ - {label}',
+                            'type': 'violation',
+                            'violationId': firestore_doc_id,
+                            'isRead': False,
+                            'createdAt': fb_firestore.SERVER_TIMESTAMP,
+                        })
+                        print(f"🔔 Notification created for user {target_user_id}")
+                    except Exception as ne:
+                        print(f"⚠️ Notification write failed: {ne}")
             else:
                 print(f"⚠️ Firestore DB is None — cannot save violation")
         except Exception as e:
@@ -496,6 +571,385 @@ async def get_app_stats():
         'byType': by_type,
     })
 
+
+# =============================================================================
+# APP OTA UPDATE API
+# =============================================================================
+
+# Directory to store APK releases
+APK_RELEASE_DIR = Path(__file__).parent / "apk_releases"
+APK_RELEASE_DIR.mkdir(exist_ok=True)
+
+# In-memory latest version info (also persisted to JSON file)
+VERSION_FILE = APK_RELEASE_DIR / "latest_version.json"
+
+def _load_version_info() -> dict:
+    """Load latest version info from JSON file."""
+    try:
+        if VERSION_FILE.exists():
+            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        'version': '1.0.0',
+        'buildNumber': 1,
+        'downloadUrl': '',
+        'changelog': '',
+        'forceUpdate': False,
+    }
+
+def _save_version_info(info: dict):
+    """Save latest version info to JSON file."""
+    try:
+        with open(VERSION_FILE, 'w', encoding='utf-8') as f:
+            json.dump(info, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ Failed to save version info: {e}")
+
+# Load on startup
+_latest_version_info = _load_version_info()
+
+
+@app.get("/api/app/latest-version")
+async def get_latest_version():
+    """
+    Simple endpoint — returns latest version info as JSON.
+    Flutter app calls this directly via HTTP to check for updates.
+    No Firestore needed!
+    
+    Response example:
+    {
+        "version": "1.0.2",
+        "buildNumber": 3,
+        "downloadUrl": "/api/app/download-apk/app-release-v1.0.2.apk",
+        "changelog": "- Sửa lỗi đăng nhập\n- Cải thiện hiệu suất",
+        "forceUpdate": false
+    }
+    """
+    return JSONResponse(_latest_version_info)
+
+
+@app.get("/api/app/check-update")
+async def check_app_update():
+    """
+    Check for the latest app version.
+    Reads from Firestore `app_config/latest_version` document.
+    Mobile app calls this on startup to compare versions.
+    """
+    try:
+        if fcm_service and fcm_service.is_available:
+            db = fcm_service._db
+            if db:
+                doc = db.collection('app_config').document('latest_version').get()
+                if doc.exists:
+                    data = doc.to_dict()
+                    return JSONResponse({
+                        'status': 'ok',
+                        'version': data.get('version', '1.0.0'),
+                        'buildNumber': data.get('buildNumber', 1),
+                        'downloadUrl': data.get('downloadUrl', ''),
+                        'changelog': data.get('changelog', ''),
+                        'forceUpdate': data.get('forceUpdate', False),
+                    })
+
+        return JSONResponse({
+            'status': 'ok',
+            'version': '1.0.0',
+            'buildNumber': 1,
+            'downloadUrl': '',
+            'changelog': '',
+            'forceUpdate': False,
+        })
+    except Exception as e:
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+
+class UpdateInfoRequest(BaseModel):
+    version: str
+    build_number: int = 1
+    changelog: str = ""
+    force_update: bool = False
+
+
+@app.post("/api/app/upload-apk")
+async def upload_apk(
+    file: UploadFile = File(...),
+    version: str = Form("1.0.0"),
+    build_number: int = Form(1),
+    changelog: str = Form(""),
+    force_update: bool = Form(False),
+):
+    """
+    Upload a new APK release and update Firestore with version info.
+    
+    Usage:
+        curl -X POST http://localhost:8000/api/app/upload-apk \
+            -F "file=@app-release.apk" \
+            -F "version=1.0.2" \
+            -F "build_number=3" \
+            -F "changelog=Bug fixes and improvements" \
+            -F "force_update=false"
+    """
+    try:
+        # Save APK locally
+        apk_filename = f"app-release-v{version}.apk"
+        apk_path = APK_RELEASE_DIR / apk_filename
+        
+        with open(apk_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        
+        file_size = apk_path.stat().st_size
+        print(f"📱 APK saved: {apk_filename} ({file_size // 1024} KB)")
+        
+        # Upload APK to Firebase Storage
+        download_url = f"/api/app/download-apk/{apk_filename}"  # fallback local URL
+        
+        if fcm_service and fcm_service.is_available:
+            try:
+                from firebase_admin import storage as fb_storage
+                bucket = fb_storage.bucket()
+                blob_path = f'app_releases/{apk_filename}'
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(apk_path), content_type='application/vnd.android.package-archive')
+                blob.make_public()
+                download_url = blob.public_url
+                print(f"☁️ APK uploaded to Firebase Storage: {blob_path}")
+            except Exception as e:
+                print(f"⚠️ Firebase Storage upload failed, using local URL: {e}")
+        
+        # Update Firestore with latest version info
+        if fcm_service and fcm_service.is_available:
+            try:
+                from firebase_admin import firestore as fb_firestore
+                db = fcm_service._db
+                if db:
+                    db.collection('app_config').document('latest_version').set({
+                        'version': version,
+                        'buildNumber': build_number,
+                        'downloadUrl': download_url,
+                        'changelog': changelog,
+                        'forceUpdate': force_update,
+                        'updatedAt': fb_firestore.SERVER_TIMESTAMP,
+                        'apkFileName': apk_filename,
+                        'apkFileSize': file_size,
+                    })
+                    print(f"🔥 Firestore updated: latest_version = {version}")
+            except Exception as e:
+                print(f"⚠️ Firestore update failed: {e}")
+        
+        # ── Update in-memory version info + persist to JSON ──────
+        global _latest_version_info
+        _latest_version_info = {
+            'version': version,
+            'buildNumber': build_number,
+            'downloadUrl': download_url,
+            'changelog': changelog,
+            'forceUpdate': force_update,
+        }
+        _save_version_info(_latest_version_info)
+        print(f"📱 Version info updated: v{version} (build {build_number})")
+
+        return JSONResponse({
+            'status': 'ok',
+            'version': version,
+            'buildNumber': build_number,
+            'downloadUrl': download_url,
+            'apkFileName': apk_filename,
+            'fileSize': file_size,
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+
+@app.get("/api/app/download-apk/{filename}")
+async def download_apk(filename: str):
+    """
+    Download an APK release file.
+    This is a fallback when Firebase Storage URL is not available.
+    """
+    apk_path = APK_RELEASE_DIR / filename
+    if not apk_path.exists():
+        return JSONResponse({'error': 'APK not found'}, status_code=404)
+    
+    import os
+    return FileResponse(
+        path=str(apk_path),
+        filename=filename,
+        media_type='application/vnd.android.package-archive',
+        stat_result=os.stat(apk_path),
+    )
+
+
+@app.post("/api/app/set-update-info")
+async def set_update_info(req: UpdateInfoRequest):
+    """
+    Manually set update info in Firestore without uploading an APK.
+    Useful when APK is already hosted on Firebase Storage.
+    """
+    try:
+        if fcm_service and fcm_service.is_available:
+            from firebase_admin import firestore as fb_firestore
+            db = fcm_service._db
+            if db:
+                db.collection('app_config').document('latest_version').set({
+                    'version': req.version,
+                    'buildNumber': req.build_number,
+                    'changelog': req.changelog,
+                    'forceUpdate': req.force_update,
+                    'updatedAt': fb_firestore.SERVER_TIMESTAMP,
+                })
+                return JSONResponse({
+                    'status': 'ok',
+                    'message': f'Update info set: v{req.version}',
+                })
+        
+        return JSONResponse({
+            'status': 'error',
+            'message': 'Firestore not available',
+        }, status_code=503)
+    except Exception as e:
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+@app.get("/api/admin/data")
+async def get_admin_data():
+    """
+    Lấy toàn bộ thông tin từ Firestore: users, vehicles, violations, notifications
+    Phục vụ cho chức năng Quản lý dữ liệu trên Web.
+    """
+    try:
+        if not (fcm_service and fcm_service.is_available):
+            # Fallback for local testing when Firebase credentials are not found
+            return JSONResponse({
+                'status': 'ok',
+                'data': {
+                    'users': [],
+                    'vehicles': [],
+                    'violations': violation_store,
+                    'notifications': [],
+                    'complaints': []
+                }
+            })
+            
+        from firebase_admin import firestore as fb_firestore
+        db = fcm_service._db
+        
+        # Helper function to get collection data
+        def get_collection(col_name):
+            docs = db.collection(col_name).stream()
+            res = []
+            for doc in docs:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                # Convert timestamps
+                for k, v in data.items():
+                    if hasattr(v, 'timestamp'):
+                        data[k] = v.timestamp()
+                res.append(data)
+            return res
+
+        users = get_collection('users')
+        vehicles = get_collection('vehicles')
+        violations = get_collection('violations')
+        notifications = get_collection('notifications')
+        complaints = get_collection('complaints')
+        
+        # Merge settings recursively if needed, but simple dict is returned for now
+        
+        return JSONResponse({
+            'status': 'ok',
+            'data': {
+                'users': users,
+                'vehicles': vehicles,
+                'violations': violations,
+                'notifications': notifications,
+                'complaints': complaints
+            }
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+
+@app.post("/api/webhook/sepay")
+async def sepay_webhook(req: Request):
+    """
+    Webhook Endpoint for Open Banking (SePay / PayOS / Casso).
+    Nhận thông báo biến động số dư khi người dùng chuyển tiền nộp phạt.
+    Nó trích xuất ID Vi phạm từ nội dung chuyển khoản và tự động cập nhật Database.
+    """
+    try:
+        # Prevent failure if Firebase isn't correctly initiated on local PC
+        db = None
+        if hasattr(fcm_service, '_db'):
+            db = fcm_service._db
+
+        if not db:
+            return JSONResponse({'success': False, 'message': 'Firestore không khả dụng'}, status_code=503)
+        
+        data = await req.json()
+        
+        # Lấy field "code" từ SePay hoặc content
+        code = data.get("code", "")
+        
+        # PayOS fallback
+        if not code and "data" in data and isinstance(data["data"], dict):
+            code = data["data"].get("description", "")
+            
+        if not code and "content" in data:
+            code = data.get("content", "")
+
+        if not code:
+            return JSONResponse({'success': False, 'message': 'Nội dung CK / Code trống'})
+        
+        # Fix: Extract violation ID by removing exactly "NP"
+        # Bỏ đúng 2 ký tự "NP" ở đầu
+        # Nếu dùng webhook SePay, nó trả về param "code": "NPPIG..."
+        code_upper = code.upper()
+        if code_upper.startswith("NP"):
+            violation_id = code_upper[2:]
+        else:
+            violation_id = code_upper
+            
+        # Optional: Clean up trailing string like name if `code` was actually the whole content
+        # Firestore IDs are precisely 20 alphanumeric chars
+        import re
+        id_match = re.search(r'([A-Z0-9]{20})', violation_id)
+        if id_match:
+            violation_id = id_match.group(1)
+
+        # Update local memory array too
+        def update_local_store(v_id):
+            for v in violation_store:
+                if v.get('id') == v_id:
+                    v['status'] = 'paid'
+                    
+        # Do ngân hàng (và SePay) viết hoa toàn bộ nội dung chuyển khoản, 
+        # Firestore document ID lại case-sensitive (VD: PigZJyn...) nên ta không thể dùng .document().get()
+        # Lấy toàn bộ document và so sánh case-insensitive
+        found_doc_id = None
+        all_docs = db.collection('violations').stream()
+        for d in all_docs:
+            if d.id.upper() == violation_id:
+                found_doc_id = d.id
+                break
+        
+        if found_doc_id:
+            doc_ref = db.collection('violations').document(found_doc_id)
+            doc_ref.update({'status': 'paid'})
+            update_local_store(found_doc_id)
+            print(f"[Webhook] Đã tự động cập nhật vi phạm {found_doc_id} thành 'paid'")
+            return JSONResponse({'success': True, 'message': f'Cập nhật thành công VP {found_doc_id}'})
+        else:
+            return JSONResponse({'success': False, 'message': f'Không tìm thấy ID vi phạm {violation_id} trên Cloud'})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({'success': False, 'message': str(e)}, status_code=500)
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
 
 # =============================================================================
 # IMAGE DETECTION API
@@ -1052,7 +1506,46 @@ async def websocket_app(websocket: WebSocket):
 # MAIN
 # =============================================================================
 
+def start_ngrok():
+    import subprocess
+    import time
+    print("🌍 Đang khởi động Ngrok...")
+    try:
+        # Check if ngrok is available
+        subprocess.Popen(['ngrok', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        
+        # Start ngrok in the background
+        subprocess.Popen(['ngrok', 'http', '8000'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Wait a bit for ngrok to start
+        time.sleep(3)
+        
+        try:
+            import requests
+            response = requests.get('http://127.0.0.1:4040/api/tunnels')
+            if response.status_code == 200:
+                data = response.json()
+                tunnels = data.get('tunnels', [])
+                if tunnels:
+                    public_url = tunnels[0]['public_url']
+                    print("\n" + "=" * 60)
+                    print(f"🚀 NGROK PUBLIC URL: {public_url}")
+                    print(f"🔗 Webhook SePay URL: {public_url}/api/webhook/sepay")
+                    print("=" * 60 + "\n")
+                else:
+                    print("⚠️ Ngrok đang chạy nhưng chưa lấy được tunnel.")
+        except Exception as e:
+            print(f"⚠️ Đã chạy Ngrok nhưng không lấy được URL qua API http://localhost:4040: {e}")
+            
+    except FileNotFoundError:
+        print("\n⚠️ Không tìm thấy lệnh 'ngrok'. Hãy đảm bảo bạn đã cài đặt Ngrok và thêm vào PATH của Windows.")
+    except Exception as e:
+        print(f"\n⚠️ Lỗi khởi chạy Ngrok: {e}")
+
+
 if __name__ == "__main__":
+    import threading
+    
     print("=" * 60)
     print("🚦 TRAFFIC VIOLATION DETECTION WEB SERVER v4.0")
     print("   Now using real detection logic from functions/")
@@ -1065,5 +1558,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print("🌐 Open: http://localhost:8000")
     print("=" * 60)
+    
+    # Run ngrok in a separate thread so it doesn't block the server startup
+    threading.Thread(target=start_ngrok, daemon=True).start()
     
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

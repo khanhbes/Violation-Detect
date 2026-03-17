@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
@@ -5,9 +6,24 @@ import 'package:traffic_violation_app/models/violation.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
+
+  static final Map<String, DateTime> paymentStarts = {};
+
+  static bool isProcessing(String violationId) {
+    if (!paymentStarts.containsKey(violationId)) return false;
+    final start = paymentStarts[violationId]!;
+    final elapsed = DateTime.now().difference(start).inSeconds;
+    if (elapsed >= 300) {
+      paymentStarts.remove(violationId);
+      return false;
+    }
+    return true;
+  }
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
@@ -15,21 +31,79 @@ class PaymentScreen extends StatefulWidget {
 
 class _PaymentScreenState extends State<PaymentScreen>
     with SingleTickerProviderStateMixin {
-  int _selectedMethod = 0;
   bool _isProcessing = false;
   bool _paymentDone = false;
   final AppSettings _s = AppSettings();
+
+  // ── Timer State ──
+  Timer? _timer;
+  int _remainingSeconds = 300;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Violation && !_paymentDone) {
+      _initTimer(args.id);
+    }
+  }
+
+  void _initTimer(String violationId) {
+    if (_timer != null) return; // already initialized
+
+    if (!PaymentScreen.paymentStarts.containsKey(violationId)) {
+      PaymentScreen.paymentStarts[violationId] = DateTime.now();
+    }
+    
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      final start = PaymentScreen.paymentStarts[violationId]!;
+      final elapsed = DateTime.now().difference(start).inSeconds;
+      final remaining = 300 - elapsed;
+      
+      if (remaining <= 0) {
+        timer.cancel();
+        PaymentScreen.paymentStarts.remove(violationId);
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_s.tr('Phiên thanh toán đã hết hạn (5 phút)', 'Payment session expired')),
+              backgroundColor: AppTheme.dangerColor,
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _remainingSeconds = remaining;
+        });
+      }
+    });
+
+    setState(() {
+      final start = PaymentScreen.paymentStarts[violationId]!;
+      _remainingSeconds = 300 - DateTime.now().difference(start).inSeconds;
+    });
+  }
+
+  String get _formattedTime {
+    final m = (_remainingSeconds / 60).floor();
+    final s = _remainingSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
   void initState() {
     super.initState();
     _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
+        vsync: this, duration: const Duration(milliseconds: 700));
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
   }
@@ -37,6 +111,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   @override
   void dispose() {
     _animController.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -61,10 +136,15 @@ class _PaymentScreenState extends State<PaymentScreen>
                   color: AppTheme.textHint.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.error_outline, size: 36, color: AppTheme.textSecondary),
+                child: const Icon(Icons.error_outline,
+                    size: 36, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 16),
-              Text(_s.tr('Không tìm thấy thông tin vi phạm', 'Violation info not found'), style: const TextStyle(color: AppTheme.textSecondary)),
+              Text(
+                _s.tr('Không tìm thấy thông tin vi phạm',
+                    'Violation info not found'),
+                style: const TextStyle(color: AppTheme.textSecondary),
+              ),
             ],
           ),
         ),
@@ -79,7 +159,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
       appBar: AppBar(
-        title: Text(_s.tr('Nộp phạt', 'Payment')),
+        title: Text(_s.tr('Thanh toán Vi phạm', 'Violation Payment')),
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -89,7 +169,7 @@ class _PaymentScreenState extends State<PaymentScreen>
         child: SingleChildScrollView(
           child: Column(
             children: [
-              // ── Fine Summary Card ─────────────────────────
+              // ── Fine Summary ─────────────────────────
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
@@ -100,146 +180,107 @@ class _PaymentScreenState extends State<PaymentScreen>
                     bottomRight: Radius.circular(28),
                   ),
                 ),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(AppTheme.radiusXL),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        _s.tr('Số tiền phạt', 'Fine amount'),
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 14,
-                        ),
+                child: Column(
+                  children: [
+                    Text(
+                      _s.tr('Số tiền phạt', 'Fine amount'),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: 14,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        formatter.format(violation.fineAmount),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                        ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      formatter.format(violation.fineAmount),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
                       ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          violation.violationType,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
 
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Violation Info ─────────────────────────
-                    Text(
-                      _s.tr('Thông tin vi phạm', 'Violation info'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(AppTheme.radiusL),
-                        boxShadow: AppTheme.cardShadow,
-                      ),
-                      child: Column(
-                        children: [
-                          _buildInfoRow(Icons.qr_code_rounded, _s.tr('Mã vi phạm', 'Violation code'), violation.violationCode.isNotEmpty ? violation.violationCode : violation.id),
-                          Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
-                          _buildInfoRow(Icons.directions_car_rounded, _s.tr('Biển số', 'License plate'), violation.licensePlate),
-                          Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: AppTheme.dividerColor),
-                          _buildInfoRow(Icons.location_on_rounded, _s.tr('Địa điểm', 'Location'), violation.location.isNotEmpty ? violation.location : _s.tr('Camera giám sát', 'Surveillance camera')),
-                        ],
-                      ),
-                    ),
+                    // ── Professional QR Code Section ─
+                    _buildProfessionalQR(violation, formatter),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 32),
 
-                    // ── Payment Method ────────────────────────
-                    Text(
-                      _s.tr('Phương thức thanh toán', 'Payment method'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPaymentMethod(0, Icons.qr_code_2_rounded, 'QR Code', _s.tr('Quét mã QR để thanh toán', 'Scan QR to pay'), AppTheme.primaryColor),
-                    const SizedBox(height: 8),
-                    _buildPaymentMethod(1, Icons.account_balance_rounded, _s.tr('Chuyển khoản', 'Bank transfer'), _s.tr('Chuyển khoản ngân hàng', 'Bank transfer payment'), AppTheme.infoColor),
-                    const SizedBox(height: 8),
-                    _buildPaymentMethod(2, Icons.credit_card_rounded, _s.tr('Thẻ ngân hàng', 'Bank card'), 'Visa, Mastercard, JCB', AppTheme.secondaryColor),
+                    // ── Pay Button (Auto Verification) ─
+                    // ── Auto Verification Listener ─
+                    StreamBuilder<DocumentSnapshot>(
+                      stream: FirebaseFirestore.instance.collection('violations').doc(violation.id).snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
+                          final data = snapshot.data!.data() as Map<String, dynamic>?;
+                          if (data != null && data['status'] == 'paid' && !_paymentDone) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) {
+                                setState(() {
+                                  _paymentDone = true;
+                                });
+                              }
+                            });
+                          }
+                        }
 
-                    const SizedBox(height: 24),
-
-                    // ── QR Code Section ───────────────────────
-                    if (_selectedMethod == 0) _buildQRSection(violation, formatter),
-
-                    // ── Bank Transfer Section ─────────────────
-                    if (_selectedMethod == 1) _buildBankSection(violation, formatter),
-
-                    const SizedBox(height: 24),
-
-                    // ── Pay Button ────────────────────────────
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: AppTheme.primaryGradient,
-                          borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                          boxShadow: AppTheme.redShadow,
-                        ),
-                        child: ElevatedButton.icon(
-                          onPressed: _isProcessing ? null : () => _processPayment(),
-                          icon: _isProcessing
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.payment_rounded),
-                          label: Text(
-                            _isProcessing ? _s.tr('Đang xử lý...', 'Processing...') : _s.tr('Xác nhận thanh toán', 'Confirm payment'),
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.infoColor.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.infoColor.withOpacity(0.3)),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            foregroundColor: Colors.white,
-                            shadowColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                            ),
+                          child: Column(
+                            children: [
+                              const SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.infoColor),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _s.tr('Hệ thống đang kiểm tra giao dịch...', 'Waiting for money transfer...'),
+                                style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.infoColor, fontSize: 16),
+                              ),
+                              const SizedBox(height: 6),
+                                Text(
+                                  _s.tr('Trang này sẽ tự động chuyển hướng khi hệ thống ghi nhận bạn đã thanh toán thành công (thường mất 10-30 giây).', 'This page will auto redirect upon successful transfer.'),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary.withOpacity(0.8),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.dangerColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '⏳ Hủy giao dịch trong: $_formattedTime',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.dangerColor,
+                                    ),
+                                  ),
+                                ),
+                              ],
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
+                    const SizedBox(height: 16),
 
                     const SizedBox(height: 32),
                   ],
@@ -252,213 +293,210 @@ class _PaymentScreenState extends State<PaymentScreen>
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppTheme.textSecondary),
-          const SizedBox(width: 10),
-          Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
-          const Spacer(),
-          Flexible(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppTheme.textPrimary),
-              textAlign: TextAlign.right,
-              overflow: TextOverflow.ellipsis,
-            ),
+  String _removeDiacritics(String str) {
+    const withDia = 'áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ';
+    const withoutDia = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyydAAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYD';
+    for (int i = 0; i < withDia.length; i++) {
+      str = str.replaceAll(withDia[i], withoutDia[i]);
+    }
+    return str;
+  }
+
+  Widget _buildProfessionalQR(Violation v, NumberFormat fmt) {
+    // Determine a safe string for the name
+    final String rawName = _s.userName.trim().isNotEmpty ? _s.userName : 'VNETRAFFIC_USER';
+    final String cleanName = _removeDiacritics(rawName);
+    final safeNameRegex = cleanName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    final String contentMsg = 'NP${v.id}$safeNameRegex'.toUpperCase();
+
+    // VietQR dynamic endpoint that automatically sets bank details + amount + message
+    final String encodedMsg = Uri.encodeComponent(contentMsg);
+    final String accountNameEncoded = Uri.encodeComponent('PHAN NAM KHANH');
+    // Using VietQR compact API
+    final String qrImageUrl =
+        'https://img.vietqr.io/image/MB-0852232174-compact2.png?amount=${v.fineAmount}&addInfo=$encodedMsg&accountName=$accountNameEncoded';
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildPaymentMethod(int index, IconData icon, String title, String subtitle, Color color) {
-    final isSelected = _selectedMethod == index;
-
-    return GestureDetector(
-      onTap: () => setState(() => _selectedMethod = index),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusL),
-          border: Border.all(
-            color: isSelected ? color : AppTheme.dividerColor,
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected ? [BoxShadow(color: color.withOpacity(0.12), blurRadius: 10, offset: const Offset(0, 4))] : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withOpacity(isSelected ? 0.12 : 0.06),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: isSelected ? color : AppTheme.textPrimary,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              isSelected ? Icons.check_circle_rounded : Icons.radio_button_off_rounded,
-              color: isSelected ? color : AppTheme.textHint,
-              size: 22,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQRSection(Violation v, NumberFormat fmt) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusXL),
-        boxShadow: AppTheme.cardShadow,
-      ),
       child: Column(
         children: [
-          Text(
-            _s.tr('Quét mã QR để thanh toán', 'Scan QR code to pay'),
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 16),
+          // White professional top for QR
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(AppTheme.radiusL),
-              border: Border.all(color: AppTheme.dividerColor),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
-            child: QrImageView(
-              data: 'VIOLATION|${v.id}|${v.fineAmount}|${v.licensePlate}',
-              version: QrVersions.auto,
-              size: 180,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.square,
-                color: AppTheme.primaryDark,
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.square,
-                color: AppTheme.textPrimary,
-              ),
+            child: Column(
+              children: [
+                Text(
+                  _s.tr('Quét mã qua Ứng dụng Ngân hàng',
+                      'Scan via Banking App'),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _s.tr('Số tiền & Nội dung sẽ được nhập tự động',
+                      'Amount & Content will be auto-filled'),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.successColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    qrImageUrl,
+                    width: 260,
+                    height: 260,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (ctx, child, progress) {
+                      if (progress == null) return child;
+                      return const SizedBox(
+                        width: 260,
+                        height: 260,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                              color: AppTheme.primaryColor),
+                        ),
+                      );
+                    },
+                    errorBuilder: (ctx, err, stack) {
+                      // Fallback QR if network fails to fetch from vietqr.io
+                      return QrImageView(
+                        data:
+                            'VIETQR|MB|0852232174|${v.fineAmount}|$contentMsg',
+                        version: QrVersions.auto,
+                        size: 260,
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            fmt.format(v.fineAmount),
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.primaryColor,
+
+          // Separator line
+          Container(height: 1, color: AppTheme.dividerColor),
+
+          // Info below QR code
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFAFAFA),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${_s.tr('Mã', 'Code')}: ${v.id}',
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildDataRow(
+                    _s.tr('Tên tài khoản', 'Account Name'), 'PHAN NAM KHANH',
+                    isBold: true),
+                _buildDataRow(
+                    _s.tr('Số tài khoản', 'Account Number'), '0852232174',
+                    copy: true),
+                _buildDataRow(_s.tr('Ngân hàng', 'Bank'), 'MB Bank'),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Divider(height: 1, color: AppTheme.dividerColor),
+                ),
+                _buildDataRow(_s.tr('Số tiền nộp', 'Transfer Amount'),
+                    fmt.format(v.fineAmount),
+                    isBold: true, valueColor: AppTheme.dangerColor),
+                _buildDataRow(
+                    _s.tr('Nội dung CK', 'Transfer Content'), contentMsg,
+                    copy: true),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBankSection(Violation v, NumberFormat fmt) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusXL),
-        boxShadow: AppTheme.cardShadow,
-      ),
-      child: Column(
+  Widget _buildDataRow(String label, String value,
+      {bool copy = false, bool isBold = false, Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _s.tr('Thông tin chuyển khoản', 'Bank transfer info'),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
-          ),
-          const SizedBox(height: 14),
-          _buildBankRow(_s.tr('Ngân hàng', 'Bank'), 'Vietcombank'),
-          _buildBankRow(_s.tr('Số TK', 'Account'), '1234 5678 9012'),
-          _buildBankRow(_s.tr('Chủ TK', 'Owner'), _s.tr('KHO BẠC NHÀ NƯỚC', 'STATE TREASURY')),
-          _buildBankRow(_s.tr('Nội dung', 'Content'), 'NP ${v.id}'),
-          _buildBankRow(_s.tr('Số tiền', 'Amount'), fmt.format(v.fineAmount)),
-          const SizedBox(height: 10),
           SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: 'NP ${v.id}'));
+            width: 95,
+            child: Text(
+              label,
+              style:
+                  const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+                color: valueColor ?? AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          if (copy)
+            GestureDetector(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: value));
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(_s.tr('Đã sao chép nội dung chuyển khoản', 'Transfer content copied')),
+                    content: Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            color: Colors.white, size: 18),
+                        const SizedBox(width: 8),
+                        Text('${_s.tr("Đã sao chép", "Copied")} $label'),
+                      ],
+                    ),
+                    backgroundColor: AppTheme.successColor,
                     behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                 );
               },
-              icon: const Icon(Icons.copy_rounded, size: 16),
-              label: Text(_s.tr('Sao chép nội dung CK', 'Copy transfer content')),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('COPY',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryColor)),
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildBankRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
-          Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-        ],
-      ),
-    );
-  }
 
-  void _processPayment() async {
-    setState(() => _isProcessing = true);
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      setState(() {
-        _isProcessing = false;
-        _paymentDone = true;
-      });
-    }
-  }
 
   Widget _buildSuccessPage(Violation v, NumberFormat fmt) {
     return Scaffold(
@@ -512,7 +550,8 @@ class _PaymentScreenState extends State<PaymentScreen>
                 const SizedBox(height: 6),
                 Text(
                   v.violationType,
-                  style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                  style: const TextStyle(
+                      fontSize: 14, color: AppTheme.textSecondary),
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
@@ -520,17 +559,18 @@ class _PaymentScreenState extends State<PaymentScreen>
                   height: 50,
                   child: ElevatedButton(
                     onPressed: () {
-                      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+                      Navigator.pushNamedAndRemoveUntil(
+                          context, '/home', (route) => false);
                     },
-                    child: Text(_s.tr('Về trang chủ', 'Go to home')),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(
-                    _s.tr('Xem lại vi phạm', 'View violation'),
-                    style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(_s.tr('Về trang chủ', 'Go to home'),
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],

@@ -4,6 +4,7 @@ import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/screens/payment_screen.dart'; // Added this import
 import 'dart:async';
 
 class ViolationsScreen extends StatefulWidget {
@@ -28,20 +29,30 @@ class _ViolationsScreenState extends State<ViolationsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _settings.addListener(_onSettingsChanged);
     _loadData();
   }
 
   void _loadData() {
-    _sub = _firestore.violationsStream().listen((list) {
-      if (mounted) setState(() { _violations = list; _isLoading = false; });
+    final uid = _settings.uid;
+    _sub = _firestore.violationsStream(userId: uid).listen((list) {
+      if (mounted)
+        setState(() {
+          _violations = list;
+          _isLoading = false;
+        });
     });
   }
 
   Future<void> _refresh() async {
     setState(() => _isLoading = true);
-    final violations = await _firestore.getViolations();
+    final uid = _settings.uid;
+    final violations = await _firestore.getViolations(userId: uid);
     if (mounted) {
-      setState(() { _violations = violations; _isLoading = false; });
+      setState(() {
+        _violations = violations;
+        _isLoading = false;
+      });
     }
   }
 
@@ -49,14 +60,22 @@ class _ViolationsScreenState extends State<ViolationsScreen>
   void dispose() {
     _tabController.dispose();
     _sub?.cancel();
+    _settings.removeListener(_onSettingsChanged);
     super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    if (mounted) setState(() {});
   }
 
   List<Violation> _filtered(int tab) {
     switch (tab) {
-      case 1: return _violations.where((v) => v.isPending).toList();
-      case 2: return _violations.where((v) => v.isPaid).toList();
-      default: return _violations;
+      case 1:
+        return _violations.where((v) => v.isPending).toList();
+      case 2:
+        return _violations.where((v) => v.isPaid).toList();
+      default:
+        return _violations;
     }
   }
 
@@ -101,13 +120,15 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                                 color: Colors.white.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                              child: const Icon(Icons.arrow_back_rounded,
+                                  color: Colors.white, size: 20),
                             ),
                           ),
                         if (!widget.embedded) const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            _settings.tr('Vi phạm giao thông', 'Traffic Violations'),
+                            _settings.tr(
+                                'Vi phạm giao thông', 'Traffic Violations'),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 22,
@@ -117,7 +138,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                         ),
                         if (pending > 0)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: AppTheme.accentColor,
                               borderRadius: BorderRadius.circular(20),
@@ -152,7 +174,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                         Expanded(
                           flex: 2,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(12),
@@ -207,7 +230,9 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                 unselectedLabelColor: AppTheme.textSecondary,
                 dividerColor: Colors.transparent,
                 tabs: [
-                  Tab(text: '${_settings.tr('Tất cả', 'All')} (${_violations.length})'),
+                  Tab(
+                      text:
+                          '${_settings.tr('Tất cả', 'All')} (${_violations.length})'),
                   Tab(text: '${_settings.tr('Chưa nộp', 'Unpaid')} ($pending)'),
                   Tab(text: '${_settings.tr('Đã nộp', 'Paid')} ($paid)'),
                 ],
@@ -284,11 +309,14 @@ class _ViolationsScreenState extends State<ViolationsScreen>
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: (tab == 2 ? AppTheme.infoColor : AppTheme.successColor).withOpacity(0.1),
+                color: (tab == 2 ? AppTheme.infoColor : AppTheme.successColor)
+                    .withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                tab == 2 ? Icons.hourglass_empty : Icons.check_circle_outline_rounded,
+                tab == 2
+                    ? Icons.hourglass_empty
+                    : Icons.check_circle_outline_rounded,
                 size: 32,
                 color: tab == 2 ? AppTheme.infoColor : AppTheme.successColor,
               ),
@@ -296,10 +324,13 @@ class _ViolationsScreenState extends State<ViolationsScreen>
             const SizedBox(height: 14),
             Text(
               tab == 1
-                  ? _settings.tr('Không có vi phạm chưa nộp', 'No unpaid violations')
+                  ? _settings.tr(
+                      'Không có vi phạm chưa nộp', 'No unpaid violations')
                   : tab == 2
-                      ? _settings.tr('Không có vi phạm đã nộp', 'No paid violations')
-                      : _settings.tr('Không có vi phạm nào', 'No violations found'),
+                      ? _settings.tr(
+                          'Không có vi phạm đã nộp', 'No paid violations')
+                      : _settings.tr(
+                          'Không có vi phạm nào', 'No violations found'),
               style: const TextStyle(
                 fontSize: 15,
                 color: AppTheme.textSecondary,
@@ -315,9 +346,15 @@ class _ViolationsScreenState extends State<ViolationsScreen>
       onRefresh: _refresh,
       color: AppTheme.primaryColor,
       child: ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: widget.embedded ? 100 : 16,
+        ),
         itemCount: list.length,
-        itemBuilder: (context, index) => _buildViolationCard(list[index], index),
+        itemBuilder: (context, index) =>
+            _buildViolationCard(list[index], index),
       ),
     );
   }
@@ -337,7 +374,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
             width: 100,
             decoration: BoxDecoration(
               color: Colors.grey.withOpacity(0.08),
-              borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+              borderRadius:
+                  const BorderRadius.horizontal(left: Radius.circular(16)),
             ),
           ),
           Expanded(
@@ -404,7 +442,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radiusL),
-          onTap: () => Navigator.pushNamed(context, '/violation-detail', arguments: v),
+          onTap: () =>
+              Navigator.pushNamed(context, '/violation-detail', arguments: v),
           child: SizedBox(
             height: 100,
             child: Row(
@@ -413,7 +452,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                 Hero(
                   tag: 'violation_image_${v.id}',
                   child: ClipRRect(
-                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+                    borderRadius: const BorderRadius.horizontal(
+                        left: Radius.circular(16)),
                     child: SizedBox(
                       width: 100,
                       height: 100,
@@ -422,7 +462,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           color: Colors.grey[100],
-                          child: Icon(Icons.image_not_supported_rounded, color: Colors.grey[400]),
+                          child: Icon(Icons.image_not_supported_rounded,
+                              color: Colors.grey[400]),
                         ),
                       ),
                     ),
@@ -431,7 +472,8 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                 // Info
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -450,29 +492,41 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: v.isPending
-                                    ? Colors.orange.withOpacity(0.1)
-                                    : AppTheme.successColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                v.isPending ? _settings.tr('Chưa nộp', 'Unpaid') : _settings.tr('Đã nộp', 'Paid'),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: v.isPending ? Colors.orange[800] : AppTheme.successColor,
-                                ),
-                              ),
+                            Builder(
+                              builder: (context) {
+                                final bool isProcessing = PaymentScreen.isProcessing(v.id);
+                                final Color bColor = v.isPaid
+                                    ? AppTheme.successColor
+                                    : (isProcessing ? AppTheme.infoColor : Colors.orange);
+                                final String textV = v.isPaid
+                                    ? _settings.tr('Đã nộp', 'Paid')
+                                    : (isProcessing ? _settings.tr('Đang nộp', 'Processing') : _settings.tr('Chưa nộp', 'Unpaid'));
+
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: bColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    textV,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: v.isPending && !isProcessing ? Colors.orange[800] : bColor,
+                                    ),
+                                  ),
+                                );
+                              }
                             ),
                           ],
                         ),
                         const SizedBox(height: 6),
                         Row(
                           children: [
-                            const Icon(Icons.access_time_rounded, size: 12, color: AppTheme.textSecondary),
+                            const Icon(Icons.access_time_rounded,
+                                size: 12, color: AppTheme.textSecondary),
                             const SizedBox(width: 4),
                             Text(
                               df.format(v.timestamp),

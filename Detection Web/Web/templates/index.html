@@ -25,6 +25,7 @@
                 <a href="#" class="nav-link" data-tab="video">Video</a>
                 <a href="#" class="nav-link" data-tab="realtime">Real-Time</a>
                 <a href="#" class="nav-link" data-tab="lookup">Look Up</a>
+                <a href="#" class="nav-link" data-tab="manage">Data Management</a>
             </div>
             <div class="server-ip-badge" id="serverIpBadge" title="Nhập IP này vào app Flutter để kết nối">
                 <span class="server-ip-icon">📡</span>
@@ -491,6 +492,97 @@
                         <p class="no-items" data-i18n="lookup_empty">Nhập thông tin và nhấn Tra cứu để tìm kiếm vi phạm.
                         </p>
                     </div>
+                </div>
+        </section>
+
+        <!-- ==================== MANAGE TAB ==================== -->
+        <section id="tab-manage" class="tab-panel">
+            <header class="tab-header" style="margin-bottom: 0;">
+                <h1><span class="icon">📊</span> <span data-i18n="manage_title">Quản lý Dữ liệu</span></h1>
+                <p class="subtitle" data-i18n="manage_subtitle">Tiếp nhận thông tin người dùng, phương tiện, vi phạm, khiếu nại từ App</p>
+            </header>
+
+            <!-- Summary Stat Cards -->
+            <div class="manage-stats" id="manageStats">
+                <div class="manage-stat-card stat-users">
+                    <div class="manage-stat-icon">👥</div>
+                    <div class="manage-stat-info">
+                        <span class="manage-stat-value" id="statTotalUsers">0</span>
+                        <span class="manage-stat-label">Người dùng</span>
+                    </div>
+                </div>
+                <div class="manage-stat-card stat-vehicles">
+                    <div class="manage-stat-icon">🚗</div>
+                    <div class="manage-stat-info">
+                        <span class="manage-stat-value" id="statTotalVehicles">0</span>
+                        <span class="manage-stat-label">Phương tiện</span>
+                    </div>
+                </div>
+                <div class="manage-stat-card stat-violations">
+                    <div class="manage-stat-icon">🚨</div>
+                    <div class="manage-stat-info">
+                        <span class="manage-stat-value" id="statTotalViolations">0</span>
+                        <span class="manage-stat-label">Vi phạm</span>
+                    </div>
+                </div>
+                <div class="manage-stat-card stat-pending">
+                    <div class="manage-stat-icon">💰</div>
+                    <div class="manage-stat-info">
+                        <span class="manage-stat-value" id="statPendingFines">0 ₫</span>
+                        <span class="manage-stat-label">Tổng nợ phạt</span>
+                    </div>
+                </div>
+                <div class="manage-stat-card stat-complaints">
+                    <div class="manage-stat-icon">📝</div>
+                    <div class="manage-stat-info">
+                        <span class="manage-stat-value" id="statTotalComplaints">0</span>
+                        <span class="manage-stat-label">Khiếu nại</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Card -->
+            <div class="card manage-table-card">
+                <!-- Toolbar -->
+                <div class="manage-toolbar">
+                    <div class="manage-toolbar-left">
+                        <span class="manage-toolbar-title">👥 Tổng quan người dùng</span>
+                    </div>
+                    <div class="manage-toolbar-right">
+                        <div class="manage-search-box">
+                            <span class="manage-search-icon">🔍</span>
+                            <input type="text" id="manageSearchInput" class="manage-search-input" placeholder="Tìm kiếm theo tên, email, biển số...">
+                        </div>
+                        <button class="btn btn-primary manage-refresh-btn" id="refreshManageBtn">🔄 Làm mới</button>
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="manage-table-wrapper">
+                    <table class="data-table" id="adminDataTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Tài khoản</th>
+                                <th>Thông tin cá nhân</th>
+                                <th>Bằng lái & Điểm</th>
+                                <th>Phương tiện</th>
+                                <th>Vi phạm & Thanh toán</th>
+                                <th>Khiếu nại / TB</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminDataTableBody">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 60px 40px; font-weight: 500;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 12px;">📡</div>
+                                    Nhấn <strong>Làm mới</strong> hoặc chuyển sang tab này để tải dữ liệu từ Firebase.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Footer -->
+                <div class="manage-table-footer" id="manageTableFooter">
+                    <span id="manageRowCount">0 người dùng</span>
                 </div>
             </div>
         </section>

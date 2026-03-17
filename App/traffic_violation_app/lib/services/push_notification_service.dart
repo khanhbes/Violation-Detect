@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:traffic_violation_app/services/api_service.dart';
+import 'package:traffic_violation_app/services/app_settings.dart';
 
 /// Top-level background message handler (MUST be top-level function).
 /// Called when app is in background or terminated and a data message arrives.
@@ -158,7 +159,8 @@ class PushNotificationService {
       if (token != null) {
         _currentToken = token;
         debugPrint('📱 FCM Token: ${token.substring(0, 20)}...');
-        await _syncTokenWithBackend(token);
+        // Don't await — sync in background so it doesn't block initialization
+        _syncTokenWithBackend(token);
       } else {
         debugPrint('⚠️ FCM token is null');
       }
@@ -183,14 +185,14 @@ class PushNotificationService {
         Uri.parse('${ApiService.baseUrl}/api/fcm/register'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'user_id': 'default_user', // Replace with real user auth
+          'user_id': AppSettings().uid ?? 'default_user',
           'fcm_token': token,
           'platform': platform,
           'device_info': platform == 'web'
               ? 'Web Browser'
               : '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
         }),
-      );
+      ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         debugPrint('✅ FCM token synced with backend');
@@ -342,7 +344,7 @@ class PushNotificationService {
         Uri.parse('${ApiService.baseUrl}/api/fcm/unregister'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'fcm_token': _currentToken}),
-      );
+      ).timeout(const Duration(seconds: 5));
       debugPrint('✅ FCM token cleared from backend');
     } catch (e) {
       debugPrint('⚠️ FCM token clear error: $e');

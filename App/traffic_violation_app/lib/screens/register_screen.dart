@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/push_notification_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -92,12 +93,18 @@ class _RegisterScreenState extends State<RegisterScreen>
         final cccd = _cccdController.text.trim();
         final email = '$cccd@vnetraffic.vn';
 
-        await _auth.register(
+        final credential = await _auth.register(
           email: email,
           password: _passwordController.text,
           fullName: _fullNameController.text.trim(),
           phone: _phoneController.text.trim(),
         );
+
+        // Load the newly created profile from Firestore
+        if (credential.user != null) {
+          await _settings.loadFromFirestore(credential.user!.uid);
+          await PushNotificationService().resyncToken();
+        }
 
         if (mounted) {
           setState(() => _isLoading = false);

@@ -20,6 +20,24 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    // Handle createdAt from Firestore (Timestamp), String, or null
+    DateTime createdAt;
+    final raw = json['createdAt'];
+    if (raw == null) {
+      createdAt = DateTime.now();
+    } else if (raw is DateTime) {
+      createdAt = raw;
+    } else if (raw is String) {
+      createdAt = DateTime.tryParse(raw) ?? DateTime.now();
+    } else {
+      // Firestore Timestamp object — has .toDate() method
+      try {
+        createdAt = raw.toDate();
+      } catch (_) {
+        createdAt = DateTime.now();
+      }
+    }
+
     return User(
       id: json['id'] ?? '',
       fullName: json['fullName'] ?? '',
@@ -28,9 +46,7 @@ class User {
       avatar: json['avatar'] as String?,
       idCard: json['idCard'] ?? '',
       address: json['address'] ?? '',
-      createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'])
-          : DateTime.now(),
+      createdAt: createdAt,
     );
   }
 

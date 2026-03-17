@@ -1,34 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-
-class _NotifItem {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String titleEn;
-  final String subtitle;
-  final String subtitleEn;
-  final String detail;
-  final String detailEn;
-  final String time;
-  final String timeEn;
-  bool isRead;
-
-  _NotifItem({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.titleEn,
-    required this.subtitle,
-    required this.subtitleEn,
-    required this.detail,
-    required this.detailEn,
-    required this.time,
-    required this.timeEn,
-    this.isRead = false,
-  });
-}
+import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/models/notification.dart';
+import 'package:intl/intl.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -39,65 +15,79 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final AppSettings _settings = AppSettings();
+  List<AppNotification> _notifications = [];
+  bool _isLoading = true;
+  StreamSubscription? _notifSub;
 
-  final List<_NotifItem> _notifications = [
-    _NotifItem(
-      icon: Icons.warning_amber,
-      color: Colors.red,
-      title: 'Vi phạm mới: Không đội mũ bảo hiểm',
-      titleEn: 'New violation: No helmet',
-      subtitle: 'Vừa phát hiện vi phạm bởi camera giám sát',
-      subtitleEn: 'Violation detected by surveillance camera',
-      detail:
-          'Camera tại ngã tư Trần Hưng Đạo - Nguyễn Huệ đã ghi nhận phương tiện biển số 79A-123.45 vi phạm lỗi "Không đội mũ bảo hiểm". Thời gian: 14:35 ngày 22/02/2026. Mức phạt dự kiến: 400.000₫ - 600.000₫.',
-      detailEn:
-          'Camera at Tran Hung Dao - Nguyen Hue intersection detected vehicle plate 79A-123.45 violating "No helmet". Time: 14:35 on 22/02/2026. Estimated fine: 400,000₫ - 600,000₫.',
-      time: '2 phút trước',
-      timeEn: '2 minutes ago',
-    ),
-    _NotifItem(
-      icon: Icons.check_circle,
-      color: Colors.green,
-      title: 'Nộp phạt thành công',
-      titleEn: 'Fine paid successfully',
-      subtitle: 'Vi phạm VH01 đã được xử lý',
-      subtitleEn: 'Violation VH01 has been processed',
-      detail:
-          'Vi phạm mã VH01 - "Vượt đèn đỏ" đã được thanh toán thành công qua cổng VNPay. Số tiền: 800.000₫. Mã giao dịch: TXN20260222001. Biên lai điện tử đã được gửi về email của bạn.',
-      detailEn:
-          'Violation code VH01 - "Running red light" has been paid via VNPay. Amount: 800,000₫. Transaction ID: TXN20260222001. E-receipt has been sent to your email.',
-      time: '1 giờ trước',
-      timeEn: '1 hour ago',
-    ),
-    _NotifItem(
-      icon: Icons.info_outline,
-      color: Colors.blue,
-      title: 'Nhắc nhở nộp phạt',
-      titleEn: 'Fine payment reminder',
-      subtitle: 'Bạn có 3 vi phạm chưa nộp phạt',
-      subtitleEn: 'You have 3 unpaid violations',
-      detail:
-          'Bạn hiện có 3 vi phạm giao thông chưa nộp phạt với tổng số tiền 2.400.000₫. Vui lòng thanh toán trước ngày 15/03/2026 để tránh bị xử phạt bổ sung. Bạn có thể nộp phạt trực tuyến qua ứng dụng.',
-      detailEn:
-          'You currently have 3 traffic violations unpaid totaling 2,400,000₫. Please pay before 15/03/2026 to avoid additional penalties. You can pay online through the app.',
-      time: '1 ngày trước',
-      timeEn: '1 day ago',
-    ),
-    _NotifItem(
-      icon: Icons.campaign_outlined,
-      color: Colors.orange,
-      title: 'Quy định mới',
-      titleEn: 'New regulations',
-      subtitle: 'Cập nhật mức phạt giao thông 2025',
-      subtitleEn: 'Updated traffic fine rates 2025',
-      detail:
-          'Nghị định 168/2024/NĐ-CP có hiệu lực từ 01/01/2025 quy định mức phạt mới cho các lỗi vi phạm giao thông đường bộ. Một số thay đổi nổi bật: Lỗi vượt đèn đỏ tăng lên 18-20 triệu (ô tô), 4-6 triệu (xe máy). Không đội mũ bảo hiểm: 400.000-600.000₫.',
-      detailEn:
-          'Decree 168/2024 effective from 01/01/2025 establishes new fine rates for traffic violations. Key changes: Running red light increased to 18-20 million (cars), 4-6 million (motorcycles). No helmet: 400,000-600,000₫.',
-      time: '3 ngày trước',
-      timeEn: '3 days ago',
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
+
+  void _loadNotifications() {
+    final uid = _settings.uid;
+    if (uid != null) {
+      _notifSub = FirestoreService().notificationsStream(uid).listen((notifs) {
+        if (mounted) {
+          setState(() {
+            _notifications = notifs;
+            _isLoading = false;
+          });
+          // Update unread count in settings globally
+          final unreadCount = _notifications.where((n) => !n.isRead).length;
+          _settings.setNotificationCount(unreadCount);
+        }
+      });
+    } else {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _notifSub?.cancel();
+    super.dispose();
+  }
+
+  Color _getIconColor(String type) {
+    switch (type) {
+      case 'warning':
+        return Colors.orange;
+      case 'danger':
+        return Colors.red;
+      case 'success':
+        return Colors.green;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  IconData _getIconData(String type) {
+    switch (type) {
+      case 'warning':
+        return Icons.warning_amber_rounded;
+      case 'danger':
+        return Icons.error_outline_rounded;
+      case 'success':
+        return Icons.check_circle_outline_rounded;
+      default:
+        return Icons.info_outline_rounded;
+    }
+  }
+
+  String _formatTime(DateTime ts) {
+    final difference = DateTime.now().difference(ts);
+    if (difference.inMinutes < 60) {
+      final mins = difference.inMinutes;
+      return _settings.tr('${mins > 0 ? mins : 1} phút trước', '${mins > 0 ? mins : 1} minutes ago');
+    } else if (difference.inHours < 24) {
+      return _settings.tr('${difference.inHours} giờ trước', '${difference.inHours} hours ago');
+    } else if (difference.inDays < 7) {
+      return _settings.tr('${difference.inDays} ngày trước', '${difference.inDays} days ago');
+    }
+    return DateFormat('dd/MM/yyyy HH:mm').format(ts);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,15 +110,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if (_notifications.isNotEmpty)
             TextButton.icon(
               onPressed: _clearAll,
-              icon: Icon(Icons.delete_sweep_rounded, color: AppTheme.dangerColor, size: 20),
+              icon: Icon(Icons.checklist_rounded, color: AppTheme.primaryColor, size: 20),
               label: Text(
-                s.tr('Xóa tất cả', 'Clear all'),
-                style: const TextStyle(color: AppTheme.dangerColor, fontSize: 13, fontWeight: FontWeight.w600),
+                s.tr('Đã đọc tất cả', 'Mark all read'),
+                style: const TextStyle(color: AppTheme.primaryColor, fontSize: 13, fontWeight: FontWeight.w600),
               ),
             ),
         ],
       ),
-      body: _notifications.isEmpty
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : _notifications.isEmpty
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -158,215 +150,113 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildNotifCard(_NotifItem item, int index, bool isDark, Color cardBg,
+  Widget _buildNotifCard(AppNotification item, int index, bool isDark, Color cardBg,
       Color textPrimary, Color textSecondary) {
     final s = _settings;
     final title = s.isVietnamese ? item.title : item.titleEn;
     final subtitle = s.isVietnamese ? item.subtitle : item.subtitleEn;
-    final time = s.isVietnamese ? item.time : item.timeEn;
+    final timeStr = _formatTime(item.timestamp);
+    final color = _getIconColor(item.type);
+    final icon = _getIconData(item.type);
 
-    return Dismissible(
-      key: ValueKey('notif_$index'),
-      direction: DismissDirection.endToStart,
-      background: Container(
+    return GestureDetector(
+      onTap: () {
+        if (!item.isRead) {
+          FirestoreService().markNotificationRead(item.id);
+        }
+        _showNotifDetail(item, isDark, textPrimary, textSecondary, color, icon, timeStr);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: AppTheme.dangerColor,
+          color: item.isRead
+              ? (isDark ? const Color(0xFF1E1E1E) : Colors.white)
+              : color.withOpacity(isDark ? 0.08 : 0.04),
           borderRadius: BorderRadius.circular(16),
-        ),
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.delete_rounded, color: Colors.white, size: 24),
-            const SizedBox(height: 4),
-            Text(s.tr('Xóa', 'Delete'),
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-          ],
-        ),
-      ),
-      onDismissed: (_) {
-        setState(() => _notifications.removeAt(index));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(s.tr('Đã xóa thông báo', 'Notification deleted')),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            action: SnackBarAction(
-              label: s.tr('Hoàn tác', 'Undo'),
-              textColor: AppTheme.accentColor,
-              onPressed: () {
-                setState(() => _notifications.insert(index, item));
-              },
-            ),
-          ),
-        );
-      },
-      child: GestureDetector(
-        onTap: () {
-          setState(() => item.isRead = true);
-          _showNotifDetail(item, isDark, textPrimary, textSecondary);
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
+          border: Border.all(
             color: item.isRead
-                ? (isDark ? const Color(0xFF1E1E1E) : Colors.white)
-                : item.color.withOpacity(isDark ? 0.08 : 0.04),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: item.isRead
-                  ? (isDark ? const Color(0xFF333333) : AppTheme.dividerColor)
-                  : item.color.withOpacity(0.15),
-            ),
-            boxShadow: item.isRead
-                ? []
-                : [
-                    BoxShadow(
-                      color: item.color.withOpacity(0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                ? (isDark ? const Color(0xFF333333) : AppTheme.dividerColor)
+                : color.withOpacity(0.15),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Icon
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: item.color.withOpacity(isDark ? 0.2 : 0.1),
-                    borderRadius: BorderRadius.circular(12),
+          boxShadow: item.isRead
+              ? []
+              : [
+                  BoxShadow(
+                    color: color.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
-                  child: Icon(item.icon, color: item.color, size: 22),
+                ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Icon
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(isDark ? 0.2 : 0.1),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              title,
-                              style: TextStyle(
-                                fontWeight: item.isRead ? FontWeight.w500 : FontWeight.w700,
-                                fontSize: 14,
-                                color: textPrimary,
-                              ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontWeight: item.isRead ? FontWeight.w500 : FontWeight.w700,
+                              fontSize: 14,
+                              color: textPrimary,
                             ),
                           ),
-                          if (!item.isRead)
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: item.color,
-                                shape: BoxShape.circle,
-                              ),
+                        ),
+                        if (!item.isRead)
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(subtitle, style: TextStyle(fontSize: 12, color: textSecondary)),
-                      const SizedBox(height: 6),
-                      Text(time, style: TextStyle(fontSize: 11, color: textSecondary.withOpacity(0.7))),
-                    ],
-                  ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: textSecondary)),
+                    const SizedBox(height: 6),
+                    Text(timeStr, style: TextStyle(fontSize: 11, color: textSecondary.withOpacity(0.7))),
+                  ],
                 ),
-                // Delete button
-                GestureDetector(
-                  onTap: () => _deleteSingle(index, item),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Icon(Icons.close_rounded, size: 18, color: textSecondary.withOpacity(0.5)),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ),
-      ),
-    );
-  }
-
-  void _deleteSingle(int index, _NotifItem item) {
-    final s = _settings;
-    setState(() => _notifications.removeAt(index));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(s.tr('Đã xóa thông báo', 'Notification deleted')),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        action: SnackBarAction(
-          label: s.tr('Hoàn tác', 'Undo'),
-          textColor: AppTheme.accentColor,
-          onPressed: () {
-            setState(() => _notifications.insert(index, item));
-          },
         ),
       ),
     );
   }
 
   void _clearAll() {
-    final s = _settings;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.dangerColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.delete_sweep_rounded, color: AppTheme.dangerColor, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Text(s.tr('Xóa tất cả', 'Clear all'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-          ],
-        ),
-        content: Text(s.tr(
-          'Bạn có chắc muốn xóa tất cả ${_notifications.length} thông báo?',
-          'Are you sure you want to delete all ${_notifications.length} notifications?',
-        )),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(s.tr('Hủy', 'Cancel'), style: const TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              setState(() => _notifications.clear());
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.dangerColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: Text(s.tr('Xóa tất cả', 'Clear all')),
-          ),
-        ],
-      ),
-    );
+    final uid = _settings.uid;
+    if (uid != null) {
+      FirestoreService().markAllNotificationsRead(uid);
+    }
   }
 
-  void _showNotifDetail(_NotifItem item, bool isDark, Color textPrimary, Color textSecondary) {
+  void _showNotifDetail(AppNotification item, bool isDark, Color textPrimary, Color textSecondary, Color color, IconData icon, String timeStr) {
     final s = _settings;
     final title = s.isVietnamese ? item.title : item.titleEn;
     final detail = s.isVietnamese ? item.detail : item.detailEn;
-    final time = s.isVietnamese ? item.time : item.timeEn;
 
     showModalBottomSheet(
       context: context,
@@ -403,10 +293,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
-                          color: item.color.withOpacity(isDark ? 0.2 : 0.1),
+                          color: color.withOpacity(isDark ? 0.2 : 0.1),
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: Icon(item.icon, color: item.color, size: 26),
+                        child: Icon(icon, color: color, size: 26),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -424,7 +314,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               children: [
                                 Icon(Icons.access_time_rounded, size: 13, color: textSecondary),
                                 const SizedBox(width: 4),
-                                Text(time, style: TextStyle(fontSize: 12, color: textSecondary)),
+                                Text(timeStr, style: TextStyle(fontSize: 12, color: textSecondary)),
                               ],
                             ),
                           ],
@@ -442,7 +332,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: item.color,
+                      color: color,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -455,24 +345,65 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Close button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: item.color,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        elevation: 0,
-                      ),
-                      child: Text(
-                        s.tr('Đã hiểu', 'Got it'),
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ),
+                  // Action buttons
+                  item.violationId != null && item.violationId!.isNotEmpty
+                      ? Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 48,
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: textSecondary,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  ),
+                                  child: Text(s.tr('Đóng', 'Close'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 2,
+                              child: SizedBox(
+                                height: 48,
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.pop(ctx); 
+                                    Navigator.pushNamed(context, '/violation_detail', arguments: item.violationId);
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: color,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    elevation: 0,
+                                  ),
+                                  child: Text(
+                                    s.tr('Xem / Nộp phạt', 'View / Pay'),
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              elevation: 0,
+                            ),
+                            child: Text(
+                              s.tr('Đã hiểu', 'Got it'),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
                   SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
                 ],
               ),

@@ -56,12 +56,14 @@ class AuthService {
       await credential.user?.updateDisplayName(fullName);
 
       // Create user profile in Firestore
+      // Extract CCCD from email (format: cccd@vnetraffic.vn)
+      final idCard = email.trim().split('@').first;
       await _firestore.collection('users').doc(credential.user!.uid).set({
         'fullName': fullName,
         'email': email.trim(),
         'phone': phone ?? '',
         'avatar': null,
-        'idCard': '',
+        'idCard': idCard,
         'address': '',
         'createdAt': FieldValue.serverTimestamp(),
       });

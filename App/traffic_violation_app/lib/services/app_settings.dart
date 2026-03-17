@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/models/user.dart' as app;
 
 /// Global app settings singleton — manages theme, locale, notifications, user profile.
+/// Now persists all data to Firebase Firestore.
 class AppSettings extends ChangeNotifier {
   // ── Singleton ──────────────────────────────────────────────────
   static final AppSettings _instance = AppSettings._internal();
   factory AppSettings() => _instance;
   AppSettings._internal();
+
+  final FirestoreService _firestore = FirestoreService();
+
+  // ── Auth UID (set after login) ─────────────────────────────────
+  String? _uid;
+  String? get uid => _uid;
 
   // ── Theme ──────────────────────────────────────────────────────
   ThemeMode _themeMode = ThemeMode.light;
@@ -15,11 +25,13 @@ class AppSettings extends ChangeNotifier {
   void setThemeMode(ThemeMode mode) {
     _themeMode = mode;
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   void toggleDarkMode() {
     _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   // ── Locale ─────────────────────────────────────────────────────
@@ -30,6 +42,7 @@ class AppSettings extends ChangeNotifier {
   void setLocale(Locale locale) {
     _locale = locale;
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   void toggleLanguage() {
@@ -37,6 +50,7 @@ class AppSettings extends ChangeNotifier {
         ? const Locale('en', 'US')
         : const Locale('vi', 'VN');
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   // ── Notification Badge Count ───────────────────────────────────
@@ -65,11 +79,13 @@ class AppSettings extends ChangeNotifier {
   void setNotificationsEnabled(bool enabled) {
     _notificationsEnabled = enabled;
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   void toggleNotifications() {
     _notificationsEnabled = !_notificationsEnabled;
     notifyListeners();
+    _saveSettingsToFirestore();
   }
 
   // ── User Profile Editable Fields ───────────────────────────────
@@ -85,11 +101,25 @@ class AppSettings extends ChangeNotifier {
   String get userPhone => _userPhone;
   String get userAddress => _userAddress;
   String get userAvatar => _userAvatar;
-  String get userIdCard => _userIdCard;
+  String get userIdCard {
+    if (_userIdCard.isNotEmpty) return _userIdCard;
+    if (_userEmail.isNotEmpty && _userEmail.contains('@')) {
+      final prefix = _userEmail.split('@').first;
+      if (RegExp(r'^[0-9]+$').hasMatch(prefix)) return prefix;
+    }
+    // Fallback: lay truc tiep tu email dang nhap cua Firebase (la CCCD)
+    final authUser = fb.FirebaseAuth.instance.currentUser;
+    if (authUser != null && authUser.email != null) {
+      final prefix = authUser.email!.split('@').first;
+      if (RegExp(r'^[0-9]+$').hasMatch(prefix)) return prefix;
+    }
+    return '';
+  }
 
   bool _profileInitialized = false;
   bool get profileInitialized => _profileInitialized;
 
+  /// Initialize profile from MockData (legacy fallback, only if not loaded from Firestore)
   void initProfile({
     required String name,
     required String email,
@@ -124,10 +154,144 @@ class AppSettings extends ChangeNotifier {
     if (avatar != null) _userAvatar = avatar;
     if (idCard != null) _userIdCard = idCard;
     notifyListeners();
+    _saveProfileToFirestore();
   }
 
   void updateAvatar(String url) {
     _userAvatar = url;
+    notifyListeners();
+    _saveProfileToFirestore();
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  FIRESTORE PERSISTENCE
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Call this after successful login/register to load all user data from Firestore.
+  Future<void> loadFromFirestore(String uid) async {
+    _uid = uid;
+
+    try {
+      // 1. Load user profile
+      final user = await _firestore.getUserProfile(uid);
+      if (user != null) {
+        _userName = user.fullName;
+        _userEmail = user.email;
+        _userPhone = user.phone;
+        _userAddress = user.address;
+        _userAvatar = user.avatar ?? '';
+        _userIdCard = user.idCard;
+        _profileInitialized = true;
+        debugPrint('✅ Profile loaded from Firestore: $_userName');
+      } else {
+        // Profile not in Firestore — try to get from Firebase Auth
+        debugPrint('⚠️ No profile found in Firestore for $uid, creating from Auth...');
+        try {
+          final auth = _getFirebaseAuthUser();
+          if (auth != null) {
+            _userName = auth['displayName'] ?? '';
+            _userEmail = auth['email'] ?? '';
+            _userIdCard = _userEmail.split('@').first;
+            _profileInitialized = true;
+
+            // Auto-create profile in Firestore so next time it loads properly
+            await _firestore.createOrUpdateUserProfile(uid, {
+              'fullName': _userName,
+              'email': _userEmail,
+              'phone': _userPhone,
+              'address': _userAddress,
+              'avatar': _userAvatar,
+              'idCard': _userIdCard,
+            });
+            debugPrint('✅ Profile auto-created in Firestore from Auth data');
+          }
+        } catch (authErr) {
+          debugPrint('❌ Fallback auth data also failed: $authErr');
+        }
+      }
+
+      // 2. Load user settings
+      final settings = await _firestore.getUserSettings(uid);
+      if (settings != null) {
+        _themeMode = settings['isDarkMode'] == true
+            ? ThemeMode.dark
+            : ThemeMode.light;
+        final lang = settings['language'] as String?;
+        _locale = (lang == 'en')
+            ? const Locale('en', 'US')
+            : const Locale('vi', 'VN');
+        _notificationsEnabled = settings['notificationsEnabled'] ?? true;
+        debugPrint('✅ Settings loaded from Firestore');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading from Firestore: $e');
+    }
+
+    notifyListeners();
+  }
+
+  /// Helper to get Firebase Auth current user info
+  Map<String, String?>? _getFirebaseAuthUser() {
+    try {
+      final user = fb.FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
+      return {
+        'displayName': user.displayName,
+        'email': user.email,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Save user profile fields to Firestore.
+  Future<void> _saveProfileToFirestore() async {
+    if (_uid == null) return;
+
+    try {
+      await _firestore.updateUserProfile(_uid!, {
+        'fullName': _userName,
+        'email': _userEmail,
+        'phone': _userPhone,
+        'address': _userAddress,
+        'avatar': _userAvatar,
+        'idCard': _userIdCard,
+      });
+      debugPrint('✅ Profile saved to Firestore');
+    } catch (e) {
+      debugPrint('❌ Error saving profile: $e');
+    }
+  }
+
+  /// Save settings (theme, language, notifications) to Firestore.
+  Future<void> _saveSettingsToFirestore() async {
+    if (_uid == null) return;
+
+    try {
+      await _firestore.saveUserSettings(_uid!, {
+        'isDarkMode': _themeMode == ThemeMode.dark,
+        'language': _locale.languageCode,
+        'notificationsEnabled': _notificationsEnabled,
+      });
+    } catch (e) {
+      debugPrint('❌ Error saving settings: $e');
+    }
+  }
+
+  /// Reset all data on logout.
+  void resetOnLogout() {
+    _uid = null;
+    _profileInitialized = false;
+    _userName = '';
+    _userEmail = '';
+    _userPhone = '';
+    _userAddress = '';
+    _userAvatar = '';
+    _userIdCard = '';
+    _themeMode = ThemeMode.light;
+    _locale = const Locale('vi', 'VN');
+    _notificationsEnabled = true;
+    _unreadNotifications = 0;
     notifyListeners();
   }
 

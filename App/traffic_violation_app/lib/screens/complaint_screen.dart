@@ -19,18 +19,25 @@ class _ComplaintScreenState extends State<ComplaintScreen>
   final FirestoreService _firestore = FirestoreService();
   final AppSettings _s = AppSettings();
   List<Violation> _violations = [];
+  List<Map<String, dynamic>> _complaints = [];
   bool _isLoading = true;
   StreamSubscription? _sub;
+  StreamSubscription? _complaintsSub;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadViolations();
+    _loadComplaints();
   }
 
   void _loadViolations() {
-    _sub = _firestore.violationsStream().listen((violations) {
+    final uid = _s.uid;
+    if (uid == null) return;
+    
+    _sub?.cancel();
+    _sub = _firestore.violationsStream(userId: uid).listen((violations) {
       if (mounted) {
         setState(() {
           _violations = violations;
@@ -40,10 +47,23 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     });
   }
 
+  void _loadComplaints() {
+    final uid = _s.uid;
+    if (uid == null) return;
+    _complaintsSub = _firestore.complaintsStream(uid).listen((complaints) {
+      if (mounted) {
+        setState(() {
+          _complaints = complaints;
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
     _sub?.cancel();
+    _complaintsSub?.cancel();
     super.dispose();
   }
 
@@ -171,10 +191,89 @@ class _ComplaintScreenState extends State<ComplaintScreen>
   }
 
   Widget _buildComplainedList() {
-    return _buildEmptyState(
-      icon: Icons.fact_check_outlined,
-      title: _s.tr('Chưa có khiếu nại', 'No complaints yet'),
-      subtitle: _s.tr('Các khiếu nại đã gửi sẽ hiển thị ở đây', 'Submitted complaints will appear here'),
+    if (_complaints.isEmpty) {
+      return _buildEmptyState(
+        icon: Icons.fact_check_outlined,
+        title: _s.tr('Chưa có khiếu nại', 'No complaints yet'),
+        subtitle: _s.tr('Các khiếu nại đã gửi sẽ hiển thị ở đây', 'Submitted complaints will appear here'),
+      );
+    }
+
+    final df = DateFormat('HH:mm — dd/MM/yyyy');
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _complaints.length,
+      itemBuilder: (context, index) {
+        final c = _complaints[index];
+        final timestamp = c['createdAt'] != null ? (c['createdAt'] as dynamic).toDate() : DateTime.now();
+        final status = c['status'] ?? 'pending';
+        
+        Color statusColor = AppTheme.warningColor;
+        String statusText = _s.tr('Đang xử lý', 'Pending');
+        IconData statusIcon = Icons.hourglass_top_rounded;
+
+        if (status == 'approved') {
+          statusColor = AppTheme.successColor;
+          statusText = _s.tr('Đã chấp nhận', 'Approved');
+          statusIcon = Icons.check_circle_rounded;
+        } else if (status == 'rejected') {
+          statusColor = AppTheme.dangerColor;
+          statusText = _s.tr('Đã từ chối', 'Rejected');
+          statusIcon = Icons.cancel_rounded;
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppTheme.radiusL),
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    df.format(timestamp),
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 12, color: statusColor),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '${_s.tr('Lý do', 'Reason')}: ${c['reason'] ?? ''}',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppTheme.textPrimary),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                c['description'] ?? '',
+                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -487,24 +586,67 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Row(
-                              children: [
-                                const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                                const SizedBox(width: 8),
-                                Text(_s.tr('Khiếu nại đã được gửi thành công', 'Complaint submitted successfully')),
-                              ],
+                      onPressed: () async {
+                        if (selectedReason == null || controller.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(_s.tr('Vui lòng chọn lý do và nhập mô tả', 'Please select reason and enter description')),
+                              backgroundColor: AppTheme.dangerColor,
                             ),
-                            backgroundColor: AppTheme.successColor,
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                            ),
-                          ),
+                          );
+                          return;
+                        }
+
+                        final uid = _s.uid;
+                        if (uid == null) return;
+
+                        // Show dialog to prevent multiple submits
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => const Center(child: CircularProgressIndicator()),
                         );
+
+                        try {
+                          await _firestore.submitComplaint(
+                            userId: uid,
+                            violationId: v.id,
+                            reason: selectedReason!,
+                            description: controller.text.trim(),
+                          );
+                          
+                          if (context.mounted) {
+                            Navigator.pop(context); // pop loading
+                            Navigator.pop(context); // pop bottomsheet
+                            
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Row(
+                                  children: [
+                                    const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(_s.tr('Khiếu nại đã được gửi thành công', 'Complaint submitted successfully')),
+                                  ],
+                                ),
+                                backgroundColor: AppTheme.successColor,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            Navigator.pop(context); // pop loading
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(_s.tr('Lỗi gửi khiếu nại', 'Error submitting complaint')),
+                                backgroundColor: AppTheme.dangerColor,
+                              ),
+                            );
+                          }
+                        }
                       },
                       icon: const Icon(Icons.send_rounded, size: 18),
                       label: Text(_s.tr('Gửi khiếu nại', 'Submit complaint')),

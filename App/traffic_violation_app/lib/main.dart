@@ -12,6 +12,7 @@ import 'package:traffic_violation_app/screens/traffic_laws_screen.dart';
 import 'package:traffic_violation_app/screens/notifications_screen.dart';
 import 'package:traffic_violation_app/screens/register_screen.dart';
 import 'package:traffic_violation_app/screens/complaint_screen.dart';
+import 'package:traffic_violation_app/screens/support_screen.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
 import 'package:traffic_violation_app/services/push_notification_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
@@ -25,8 +26,10 @@ void main() async {
   // Initialize local notifications (for foreground display)
   await NotificationService().initialize();
 
-  // Initialize FCM push notifications (remote)
-  await PushNotificationService().initialize();
+  // Initialize FCM push notifications (remote) — non-blocking
+  // Do NOT await: if backend is offline, this would block app startup
+  // causing the app to freeze on the splash screen with a timeout error.
+  PushNotificationService().initialize();
 
   runApp(const MyApp());
 }
@@ -80,6 +83,7 @@ class _MyAppState extends State<MyApp> {
         '/notifications': (context) => const NotificationsScreen(),
         '/register': (context) => const RegisterScreen(),
         '/complaint': (context) => const ComplaintScreen(),
+        '/support': (context) => const SupportScreen(),
       },
     );
   }
