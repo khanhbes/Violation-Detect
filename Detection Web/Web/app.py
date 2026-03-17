@@ -872,6 +872,61 @@ async def get_admin_data():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+@app.delete("/api/admin/users/{user_id}")
+async def delete_user(user_id: str):
+    """
+    Xóa toàn bộ dữ liệu của người dùng, bao gồm profile, notifications, complaints, vehicles, và violations
+    """
+    try:
+        if not (fcm_service and fcm_service.is_available):
+            return JSONResponse({'status': 'error', 'message': 'Firebase is not initialized'})
+            
+        from firebase_admin import firestore as fb_firestore
+        from firebase_admin import auth
+        db = fcm_service._db
+        
+        # 1. Xóa trong Authentication (Firebase Auth)
+        try:
+            auth.delete_user(user_id)
+        except Exception as e:
+            print(f"Lỗi khi xóa Firebase Auth user (có thể đã bị xóa trước đó): {e}")
+
+        # 2. Xóa dữ liệu liên quan trong Firestore (Batch)
+        def delete_collection(query):
+            batch = db.batch()
+            count = 0
+            for doc in query.stream():
+                batch.delete(doc.reference)
+                count += 1
+                if count >= 500:
+                    batch.commit()
+                    batch = db.batch()
+                    count = 0
+            if count > 0:
+                batch.commit()
+
+        # Users collection
+        db.collection('users').document(user_id).delete()
+        
+        # Vehicles
+        delete_collection(db.collection('vehicles').where('ownerId', '==', user_id))
+        
+        # Notifications
+        delete_collection(db.collection('notifications').where('userId', '==', user_id))
+        
+        # Complaints
+        delete_collection(db.collection('complaints').where('userId', '==', user_id))
+        
+        # Violations (optional, but requested to clean up)
+        delete_collection(db.collection('violations').where('userId', '==', user_id))
+        
+        return JSONResponse({'status': 'ok', 'message': 'Dữ liệu người dùng đã được xóa'})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
 
 @app.post("/api/webhook/sepay")
 async def sepay_webhook(req: Request):
@@ -914,9 +969,9 @@ async def sepay_webhook(req: Request):
             violation_id = code_upper
             
         # Optional: Clean up trailing string like name if `code` was actually the whole content
-        # Firestore IDs are precisely 20 alphanumeric chars
+        # Firestore IDs are precisely 20 alphanumeric chars, and usually appear right at the start
         import re
-        id_match = re.search(r'([A-Z0-9]{20})', violation_id)
+        id_match = re.search(r'^([A-Z0-9]{20})', violation_id)
         if id_match:
             violation_id = id_match.group(1)
 
@@ -930,8 +985,8 @@ async def sepay_webhook(req: Request):
         # Firestore document ID lại case-sensitive (VD: PigZJyn...) nên ta không thể dùng .document().get()
         # Lấy toàn bộ document và so sánh case-insensitive
         found_doc_id = None
-        all_docs = db.collection('violations').stream()
-        for d in all_docs:
+        all_docs_list = list(db.collection('violations').stream())
+        for d in all_docs_list:
             if d.id.upper() == violation_id:
                 found_doc_id = d.id
                 break
@@ -943,6 +998,9 @@ async def sepay_webhook(req: Request):
             print(f"[Webhook] Đã tự động cập nhật vi phạm {found_doc_id} thành 'paid'")
             return JSONResponse({'success': True, 'message': f'Cập nhật thành công VP {found_doc_id}'})
         else:
+            # Log tất cả ID hiện có để debug
+            all_ids = [d.id for d in all_docs_list]
+            print(f"[Webhook] Tìm: {violation_id}, Có trong DB: {all_ids}")
             return JSONResponse({'success': False, 'message': f'Không tìm thấy ID vi phạm {violation_id} trên Cloud'})
         
     except Exception as e:

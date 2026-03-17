@@ -155,9 +155,16 @@ class UpdateService {
     onDownloadProgressChanged?.call();
 
     try {
-      // Không cần xin quyền Storage (Permission.storage) vì getExternalStorageDirectory() 
-      // là bộ nhớ nội bộ của app, từ Android 10+ không cần xin quyền. 
-      // Hàm xin quyền tự động bị từ chối trên Android 13+ gây lỗi.
+      // 1. Ask for install permission
+      if (Platform.isAndroid) {
+        final installStatus = await Permission.requestInstallPackages.status;
+        if (!installStatus.isGranted) {
+          final result = await Permission.requestInstallPackages.request();
+          if (!result.isGranted) {
+            throw Exception('Vui lòng cấp quyền Cài đặt ứng dụng không rõ nguồn gốc để tiếp tục.');
+          }
+        }
+      }
 
       final uri = Uri.parse(downloadUrl);
 

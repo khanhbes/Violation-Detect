@@ -1056,15 +1056,21 @@ function renderAdminTable(data, searchQuery = '') {
                     ${totalPendingFine > 0 ? `<div style="font-weight: 700; color: var(--danger); margin-top: 6px;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color: var(--success); margin-top: 4px; font-weight: 600; font-size: 0.8rem;">✓ Không nợ</div>'}
                 </td>
                 <td>
-                    ${uComplaints.length > 0 ? `<span class="data-tag tag-warning">📝 ${uComplaints.length} kh.nại</span>` : '<span class="data-tag tag-secondary">0 kh.nại</span>'}
+                    ${uComplaints.length > 0 
+                        ? `<div style="margin-bottom: 6px;"><span class="data-tag tag-warning">📝 ${uComplaints.length} kh.nại</span></div>` + 
+                          uComplaints.map(c => `<div style="font-size: 0.72rem; color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 2px 4px; margin-bottom: 4px; background: rgba(255, 152, 0, 0.1);">Lý do: ${c.reason || 'Khác'} - ${c.status === 'pending' ? 'Đang chờ' : (c.status === 'approved' ? 'Đã duyệt' : 'Đã từ chối')}</div>`).join('')
+                        : '<span class="data-tag tag-secondary" style="margin-bottom: 6px; display: inline-block;">0 kh.nại</span><br>'}
                     <span class="data-tag tag-secondary">🔔 ${uNotifications.length}</span>
+                </td>
+                <td>
+                    <button class="btn btn-danger" style="padding: 4px 8px; font-size: 0.8rem;" onclick="deleteUser('${uid}')">🗑️ Xóa</button>
                 </td>
             </tr>
         `;
     });
 
     if (rowIndex === 0) {
-        html = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 50px 40px;">
+        html = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 50px 40px;">
             <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
             ${query ? 'Không tìm thấy kết quả phù hợp.' : 'Hệ thống chưa có dữ liệu người dùng.'}
         </td></tr>`;
@@ -1077,7 +1083,7 @@ function renderAdminTable(data, searchQuery = '') {
 async function loadAdminData() {
     if (!adminDataTableBody) return;
 
-    adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 60px 40px;">
+    adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 60px 40px;">
         <div class="manage-loading" style="font-size: 2.5rem; margin-bottom: 12px;">⏳</div>
         <div style="font-weight: 500;">Đang tải dữ liệu từ Firebase...</div>
     </td></tr>`;
@@ -1088,7 +1094,7 @@ async function loadAdminData() {
 
         if (json.status !== 'ok') {
             showToast('Lỗi tải dữ liệu: ' + json.message, 'error');
-            adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 50px;">
+            adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 50px;">
                 <div style="font-size: 2rem; margin-bottom: 8px;">⚠️</div>${json.message}
             </td></tr>`;
             return;
@@ -1101,9 +1107,28 @@ async function loadAdminData() {
 
     } catch (e) {
         console.error(e);
-        adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 50px;">
+        adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 50px;">
             <div style="font-size: 2rem; margin-bottom: 8px;">❌</div>Lỗi kết nối máy chủ.
         </td></tr>`;
+    }
+}
+
+async function deleteUser(uid) {
+    if (!confirm('Bạn có chắc chắn muốn xóa tài khoản này và các dữ liệu liên quan? Hành động này không thể hoàn tác!')) {
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE' });
+        const json = await resp.json();
+        if (json.status === 'ok') {
+            showToast('Đã xóa người dùng thành công', 'success');
+            loadAdminData(); // Refresh the table
+        } else {
+            showToast('Lỗi khi xóa người dùng: ' + json.message, 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('Lỗi kết nối máy chủ khi xóa người dùng', 'error');
     }
 }
 

@@ -85,9 +85,7 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                       child: IconButton(
                         icon: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(_s.tr('Thêm phương tiện - Đang phát triển', 'Add vehicle - Coming soon'))),
-                          );
+                          _showAddVehicleDialog();
                         },
                       ),
                     ),
@@ -134,7 +132,9 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                             ),
                             const SizedBox(height: 20),
                             ElevatedButton.icon(
-                              onPressed: () {},
+                              onPressed: () {
+                                _showAddVehicleDialog();
+                              },
                               icon: const Icon(Icons.add_rounded, size: 18),
                               label: Text(_s.tr('Thêm phương tiện', 'Add vehicle')),
                             ),
@@ -334,6 +334,183 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showAddVehicleDialog() {
+    final plateController = TextEditingController();
+    final typeController = TextEditingController(text: 'Xe máy');
+    final brandController = TextEditingController();
+    final modelController = TextEditingController();
+    final colorController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                _s.tr('Thêm phương tiện mới', 'Add new vehicle'),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: plateController,
+                decoration: InputDecoration(
+                  labelText: _s.tr('Biển số xe', 'License Plate'),
+                  hintText: 'VD: 29A-123.45',
+                  border: const OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.characters,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: typeController,
+                decoration: InputDecoration(
+                  labelText: _s.tr('Loại xe (Xe máy/Ô tô)', 'Vehicle Type (Motorcycle/Car)'),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: brandController,
+                decoration: InputDecoration(
+                  labelText: _s.tr('Hãng xe', 'Brand'),
+                  hintText: 'VD: Honda, Toyota',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: modelController,
+                decoration: InputDecoration(
+                  labelText: _s.tr('Dòng xe', 'Model'),
+                  hintText: 'VD: SH 150i, Vios',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: colorController,
+                decoration: InputDecoration(
+                  labelText: _s.tr('Màu sắc', 'Color'),
+                  hintText: 'VD: Trắng, Đen',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    if (plateController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(_s.tr('Vui lòng nhập biển số xe', 'Please enter license plate')),
+                          backgroundColor: AppTheme.dangerColor,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final uid = _s.uid;
+                    if (uid == null) return;
+
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (context) => const Center(child: CircularProgressIndicator()),
+                    );
+
+                    try {
+                      final vehicle = Vehicle(
+                        id: '',
+                        licensePlate: plateController.text.trim().toUpperCase(),
+                        vehicleType: typeController.text.trim(),
+                        brand: brandController.text.trim(),
+                        model: modelController.text.trim(),
+                        color: colorController.text.trim(),
+                        ownerName: _s.userName.isNotEmpty ? _s.userName : 'Người dùng',
+                        ownerId: uid,
+                        registrationDate: DateTime.now(),
+                      );
+
+                      await FirestoreService().addVehicle(vehicle);
+
+                      if (context.mounted) {
+                        Navigator.pop(context); // loading
+                        Navigator.pop(context); // bottom sheet
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                const SizedBox(width: 8),
+                                Text(_s.tr('Đã thêm phương tiện thành công', 'Vehicle added successfully')),
+                              ],
+                            ),
+                            backgroundColor: AppTheme.successColor,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        Navigator.pop(context); // loading
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(_s.tr('Lỗi thêm phương tiện', 'Error adding vehicle')),
+                            backgroundColor: AppTheme.dangerColor,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: Text(_s.tr('Lưu phương tiện', 'Save vehicle')),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
