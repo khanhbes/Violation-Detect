@@ -21,6 +21,20 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    // Suppress obsolete Java source/target warnings from third-party deps
+    tasks.withType<JavaCompile>().configureEach {
+        options.compilerArgs.addAll(listOf(
+            "-Xlint:-options",
+            "-Xlint:-deprecation"
+        ))
+    }
+
+    lint {
+        disable += "Deprecation"
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.khanhbes.traffic_app"

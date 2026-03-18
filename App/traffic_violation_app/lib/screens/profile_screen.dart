@@ -9,6 +9,8 @@ import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:traffic_violation_app/screens/vehicles_screen.dart'
+    as traffic_vehicles;
 
 class ProfileScreen extends StatefulWidget {
   final bool embedded;
@@ -58,7 +60,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bgColor = isDark ? const Color(0xFF121212) : AppTheme.surfaceColor;
     final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textPrimary = isDark ? const Color(0xFFE0E0E0) : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
+    final textSecondary =
+        isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
     final divider = isDark ? const Color(0xFF333333) : AppTheme.dividerColor;
 
     return Scaffold(
@@ -70,7 +73,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Container(
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Color(0xFFD32F2F), Color(0xFFB71C1C), Color(0xFF880E4F)],
+                  colors: [
+                    Color(0xFFD32F2F),
+                    Color(0xFFB71C1C),
+                    Color(0xFF880E4F)
+                  ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -113,7 +120,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: const LinearGradient(
-                                  colors: [Colors.amber, Colors.orangeAccent, Colors.white],
+                                  colors: [
+                                    Colors.amber,
+                                    Colors.orangeAccent,
+                                    Colors.white
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
@@ -133,7 +144,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: const Color(0xFFB71C1C),
-                                border: Border.all(color: Colors.white.withOpacity(0.1), width: 2),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.1),
+                                    width: 2),
                                 image: _avatarImage(),
                               ),
                               child: _avatarFallback(),
@@ -147,10 +160,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 height: 32,
                                 decoration: BoxDecoration(
                                   gradient: const LinearGradient(
-                                    colors: [Color(0xFFF57C00), Color(0xFFE65100)],
+                                    colors: [
+                                      Color(0xFFF57C00),
+                                      Color(0xFFE65100)
+                                    ],
                                   ),
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2.5),
+                                  border: Border.all(
+                                      color: Colors.white, width: 2.5),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.2),
@@ -159,7 +176,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     ),
                                   ],
                                 ),
-                                child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 15),
+                                child: const Icon(Icons.camera_alt_rounded,
+                                    color: Colors.white, size: 15),
                               ),
                             ),
                           ],
@@ -191,10 +209,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       // Verification chip
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Colors.green.shade600, Colors.green.shade800],
+                            colors: [
+                              Colors.green.shade600,
+                              Colors.green.shade800
+                            ],
                           ),
                           borderRadius: BorderRadius.circular(24),
                           boxShadow: [
@@ -208,7 +230,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.verified_rounded, color: Colors.white, size: 16),
+                            const Icon(Icons.verified_rounded,
+                                color: Colors.white, size: 16),
                             const SizedBox(width: 6),
                             Text(
                               s.tr('Đã xác minh tài khoản', 'Account verified'),
@@ -227,17 +250,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       // Stats row — glassmorphism card
                       Container(
-                        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 14, horizontal: 8),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: Colors.white.withOpacity(0.15)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.15)),
                         ),
                         child: Row(
                           children: [
-                            _buildStatItem('12', s.tr('Điểm', 'Points'), valueColor: Colors.amber),
+                            _buildStatItem(_settings.userPoints.toString(), s.tr('Điểm', 'Points'),
+                                valueColor: Colors.amber),
                             _buildStatDivider(),
-                            _buildStatItem('2', s.tr('Phương tiện', 'Vehicles')),
+                            _buildStatItem(
+                              _vehicles.length.toString(),
+                              s.tr('Phương tiện', 'Vehicles'),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => const traffic_vehicles
+                                          .VehiclesScreen()),
+                                );
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -271,32 +308,120 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     child: Column(
                       children: [
-                        _buildInfoTile(Icons.person_rounded, AppTheme.primaryColor,
-                            s.tr('Họ và tên', 'Full Name'), s.userName, textPrimary, textSecondary, divider,
-                            onTap: () => _editField(s.tr('Họ và tên', 'Full Name'), s.userName, (v) {
-                                  s.updateProfile(name: v);
-                                })),
-                        Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: divider),
-                        _buildInfoTile(Icons.phone_rounded, AppTheme.successColor,
-                            s.tr('Số điện thoại', 'Phone'), s.userPhone, textPrimary, textSecondary, divider,
-                            onTap: () => _editField(s.tr('Số điện thoại', 'Phone'), s.userPhone, (v) {
-                                  s.updateProfile(phone: v);
-                                })),
-                        Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: divider),
-                        _buildInfoTile(Icons.badge_rounded, AppTheme.infoColor,
-                            'CCCD/CMND', s.userIdCard, textPrimary, textSecondary, divider),
-                        Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: divider),
-                        _buildInfoTile(Icons.email_rounded, AppTheme.warningColor,
-                            'Email', s.userEmail, textPrimary, textSecondary, divider,
-                            onTap: () => _editField('Email', s.userEmail, (v) {
-                                  s.updateProfile(email: v);
-                                })),
-                        Container(margin: const EdgeInsets.symmetric(horizontal: 16), height: 1, color: divider),
-                        _buildInfoTile(Icons.location_on_rounded, AppTheme.secondaryColor,
-                            s.tr('Địa chỉ', 'Address'), s.userAddress, textPrimary, textSecondary, divider,
-                            onTap: () => _editField(s.tr('Địa chỉ', 'Address'), s.userAddress, (v) {
-                                  s.updateProfile(address: v);
-                                })),
+                        _buildInfoTile(
+                            Icons.person_rounded,
+                            AppTheme.primaryColor,
+                            s.tr('Họ và tên', 'Full Name'),
+                            s.userName,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(
+                                s.tr('Họ và tên', 'Full Name'),
+                                s.userName,
+                                (v) => _submitProfileUpdate('fullName', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.phone_rounded,
+                            AppTheme.successColor,
+                            s.tr('Số điện thoại', 'Phone'),
+                            s.userPhone,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(
+                                s.tr('Số điện thoại', 'Phone'),
+                                s.userPhone,
+                                (v) => _submitProfileUpdate('phone', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.badge_rounded,
+                            AppTheme.infoColor,
+                            'CCCD/CMND',
+                            s.userIdCard,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField('CCCD/CMND', s.userIdCard,
+                                (v) => _submitProfileUpdate('idCard', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.calendar_month_rounded,
+                            AppTheme.infoColor,
+                            s.tr('Ngày cấp CCCD', 'ID Card Issue Date'),
+                            s.userIdCardIssueDate.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userIdCardIssueDate,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(s.tr('Ngày cấp CCCD', 'ID Card Issue Date'), s.userIdCardIssueDate,
+                                (v) => _submitProfileUpdate('idCardIssueDate', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.cake_rounded,
+                            AppTheme.warningColor,
+                            s.tr('Ngày sinh', 'Date of Birth'),
+                            s.userDateOfBirth.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userDateOfBirth,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(s.tr('Ngày sinh', 'Date of Birth'), s.userDateOfBirth,
+                                (v) => _submitProfileUpdate('dateOfBirth', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.work_rounded,
+                            AppTheme.secondaryColor,
+                            s.tr('Nghề nghiệp', 'Occupation'),
+                            s.userOccupation.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userOccupation,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(s.tr('Nghề nghiệp', 'Occupation'), s.userOccupation,
+                                (v) => _submitProfileUpdate('occupation', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.email_rounded,
+                            AppTheme.warningColor,
+                            'Email',
+                            s.userEmail,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField('Email', s.userEmail,
+                                (v) => _submitProfileUpdate('email', v))),
+                        Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 1,
+                            color: divider),
+                        _buildInfoTile(
+                            Icons.location_on_rounded,
+                            AppTheme.secondaryColor,
+                            s.tr('Địa chỉ', 'Address'),
+                            s.userAddress,
+                            textPrimary,
+                            textSecondary,
+                            divider,
+                            onTap: () => _editField(
+                                s.tr('Địa chỉ', 'Address'),
+                                s.userAddress,
+                                (v) => _submitProfileUpdate('address', v))),
                       ],
                     ),
                   ),
@@ -304,16 +429,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 24),
 
                   // Vehicles
-                  Text(
-                    s.tr('Phương tiện của tôi', 'My Vehicles'),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: textPrimary,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        s.tr('Phương tiện của tôi', 'My Vehicles'),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: textPrimary,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const traffic_vehicles.VehiclesScreen()),
+                          );
+                        },
+                        child: Text(s.tr('Xem tất cả', 'View all')),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  ..._vehicles.map((vehicle) => _buildVehicleCard(context, vehicle)),
+                  const SizedBox(height: 8),
+                  if (_vehicles.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        s.tr('Chưa có phương tiện. Nhấn "Xem tất cả" để thêm.',
+                            'No vehicles yet. Tap "View all" to add.'),
+                        style: TextStyle(
+                            color: textSecondary, fontStyle: FontStyle.italic),
+                      ),
+                    ),
+                  ..._vehicles
+                      .map((vehicle) => _buildVehicleCard(context, vehicle)),
 
                   const SizedBox(height: 24),
 
@@ -327,7 +479,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _buildMenuList(context, cardBg, textPrimary, textSecondary, divider, isDark),
+                  _buildMenuList(context, cardBg, textPrimary, textSecondary,
+                      divider, isDark),
 
                   const SizedBox(height: 24),
 
@@ -337,7 +490,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     height: 50,
                     child: OutlinedButton.icon(
                       onPressed: () => _showLogoutDialog(context),
-                      icon: const Icon(Icons.logout_rounded, color: AppTheme.dangerColor, size: 20),
+                      icon: const Icon(Icons.logout_rounded,
+                          color: AppTheme.dangerColor, size: 20),
                       label: Text(
                         s.tr('Đăng xuất', 'Sign out'),
                         style: const TextStyle(
@@ -367,31 +521,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
   //  STAT HELPERS (Profile header)
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildStatItem(String value, String label, {Color? valueColor}) {
+  Widget _buildStatItem(String value, String label,
+      {Color? valueColor, VoidCallback? onTap}) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -429,14 +589,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         hasValidAvatar = File(url).existsSync();
       }
     }
-    
+
     if (hasValidAvatar) return null;
-    
+
     final name = _settings.userName;
     return Center(
       child: Text(
         name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
-        style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+            color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -446,7 +607,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF1E1E1E) : Colors.white,
+          ? const Color(0xFF1E1E1E)
+          : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -455,7 +617,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 16),
               decoration: BoxDecoration(
                 color: AppTheme.dividerColor,
@@ -469,18 +632,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 16),
             ListTile(
               leading: Container(
-                width: 42, height: 42,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.photo_library_rounded, color: AppTheme.primaryColor),
+                child: const Icon(Icons.photo_library_rounded,
+                    color: AppTheme.primaryColor),
               ),
               title: Text(s.tr('Chọn từ thư viện', 'Choose from gallery')),
               onTap: () async {
                 Navigator.pop(ctx);
                 final picker = ImagePicker();
-                final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512);
+                final file = await picker.pickImage(
+                    source: ImageSource.gallery, maxWidth: 512);
                 if (file != null) {
                   _settings.updateAvatar(file.path);
                 }
@@ -488,18 +654,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             ListTile(
               leading: Container(
-                width: 42, height: 42,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   color: AppTheme.infoColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.camera_alt_rounded, color: AppTheme.infoColor),
+                child: const Icon(Icons.camera_alt_rounded,
+                    color: AppTheme.infoColor),
               ),
               title: Text(s.tr('Chụp ảnh mới', 'Take a photo')),
               onTap: () async {
                 Navigator.pop(ctx);
                 final picker = ImagePicker();
-                final file = await picker.pickImage(source: ImageSource.camera, maxWidth: 512);
+                final file = await picker.pickImage(
+                    source: ImageSource.camera, maxWidth: 512);
                 if (file != null) {
                   _settings.updateAvatar(file.path);
                 }
@@ -508,12 +677,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (_settings.userAvatar.isNotEmpty)
               ListTile(
                 leading: Container(
-                  width: 42, height: 42,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
                     color: AppTheme.dangerColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.delete_outline_rounded, color: AppTheme.dangerColor),
+                  child: const Icon(Icons.delete_outline_rounded,
+                      color: AppTheme.dangerColor),
                 ),
                 title: Text(s.tr('Xóa ảnh đại diện', 'Remove avatar')),
                 onTap: () {
@@ -531,7 +702,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ═══════════════════════════════════════════════════════════════
   //  EDIT FIELD DIALOG
   // ═══════════════════════════════════════════════════════════════
-  void _editField(String label, String currentValue, ValueChanged<String> onSave) {
+
+  Future<void> _submitProfileUpdate(String key, String newValue) async {
+    final uid = _settings.uid;
+    if (uid == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      await FirestoreService().requestProfileUpdate(uid, {
+        key: newValue,
+      });
+      if (mounted) {
+        Navigator.pop(context); // close loading
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_settings.tr('Đã gửi yêu cầu cập nhật. Đang chờ duyệt.',
+              'Update request sent. Waiting for approval.')),
+          backgroundColor: AppTheme.successColor,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // close loading
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              _settings.tr('Lỗi khi gửi yêu cầu', 'Error sending request')),
+          backgroundColor: AppTheme.dangerColor,
+        ));
+      }
+    }
+  }
+
+  void _editField(
+      String label, String currentValue, ValueChanged<String> onSave) {
     final controller = TextEditingController(text: currentValue);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -548,7 +755,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: AppTheme.primaryColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.edit_rounded, color: AppTheme.primaryColor, size: 20),
+              child: const Icon(Icons.edit_rounded,
+                  color: AppTheme.primaryColor, size: 20),
             ),
             const SizedBox(width: 12),
             Text(
@@ -565,14 +773,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
+              borderSide:
+                  const BorderSide(color: AppTheme.primaryColor, width: 2),
             ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(_settings.tr('Hủy', 'Cancel'), style: const TextStyle(color: AppTheme.textSecondary)),
+            child: Text(_settings.tr('Hủy', 'Cancel'),
+                style: const TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -585,7 +795,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryColor,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             child: Text(_settings.tr('Lưu', 'Save')),
           ),
@@ -660,7 +871,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         borderRadius: BorderRadius.circular(AppTheme.radiusL),
         boxShadow: [
           BoxShadow(
-            color: (isMotorcycle ? AppTheme.primaryColor : AppTheme.infoColor).withOpacity(0.3),
+            color: (isMotorcycle ? AppTheme.primaryColor : AppTheme.infoColor)
+                .withOpacity(0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -678,7 +890,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
-                isMotorcycle ? Icons.two_wheeler_rounded : Icons.directions_car_rounded,
+                isMotorcycle
+                    ? Icons.two_wheeler_rounded
+                    : Icons.directions_car_rounded,
                 color: Colors.white,
                 size: 26,
               ),
@@ -689,7 +903,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(8),
@@ -715,7 +930,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: Colors.white.withOpacity(0.6)),
+            Icon(Icons.chevron_right_rounded,
+                color: Colors.white.withOpacity(0.6)),
           ],
         ),
       ),
@@ -737,8 +953,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          _buildMenuItem(Icons.notifications_outlined, AppTheme.warningColor,
-              s.tr('Thông báo', 'Notifications'), textPrimary, textSecondary, () {
+          _buildMenuItem(
+              Icons.notifications_outlined,
+              AppTheme.warningColor,
+              s.tr('Thông báo', 'Notifications'),
+              textPrimary,
+              textSecondary, () {
             s.toggleNotifications();
           },
               trailing: Switch(
@@ -747,8 +967,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 activeColor: AppTheme.primaryColor,
               )),
           _menuDivider(divider),
-          _buildMenuItem(Icons.router_rounded, AppTheme.primaryColor,
-              s.tr('Chỉnh IP máy chủ', 'Server IP Settings'), textPrimary, textSecondary, () {
+          _buildMenuItem(
+              Icons.router_rounded,
+              AppTheme.primaryColor,
+              s.tr('Chỉnh IP máy chủ', 'Server IP Settings'),
+              textPrimary,
+              textSecondary, () {
             _showIpSettingsDialog(context);
           },
               trailing: Flexible(
@@ -766,13 +990,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               )),
           _menuDivider(divider),
           // ── Dark Mode Toggle ──
-          _buildMenuItem(Icons.dark_mode_outlined, Colors.deepPurple,
-              s.tr('Giao diện tối', 'Dark Mode'), textPrimary, textSecondary, () {
+          _buildMenuItem(
+              Icons.dark_mode_outlined,
+              Colors.deepPurple,
+              s.tr('Giao diện tối', 'Dark Mode'),
+              textPrimary,
+              textSecondary, () {
             s.toggleDarkMode();
           },
               trailing: Switch(
                 value: s.isDarkMode,
-                onChanged: (v) => s.setThemeMode(v ? ThemeMode.dark : ThemeMode.light),
+                onChanged: (v) =>
+                    s.setThemeMode(v ? ThemeMode.dark : ThemeMode.light),
                 activeColor: AppTheme.primaryColor,
               )),
           _menuDivider(divider),
@@ -782,7 +1011,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _showLanguageDialog(context);
           },
               trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: AppTheme.infoColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
@@ -797,13 +1027,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               )),
           _menuDivider(divider),
-          _buildMenuItem(Icons.help_outline_rounded, AppTheme.successColor,
-              s.tr('Trợ giúp & Hỗ trợ', 'Help & Support'), textPrimary, textSecondary, () {
+          _buildMenuItem(
+              Icons.help_outline_rounded,
+              AppTheme.successColor,
+              s.tr('Trợ giúp & Hỗ trợ', 'Help & Support'),
+              textPrimary,
+              textSecondary, () {
             Navigator.pushNamed(context, '/support');
           }),
           _menuDivider(divider),
-          _buildMenuItem(Icons.shield_outlined, AppTheme.secondaryColor,
-              s.tr('Chính sách bảo mật', 'Privacy Policy'), textPrimary, textSecondary, () {}),
+          _buildMenuItem(
+              Icons.shield_outlined,
+              AppTheme.secondaryColor,
+              s.tr('Chính sách bảo mật', 'Privacy Policy'),
+              textPrimary,
+              textSecondary,
+              () {}),
           _menuDivider(divider),
           _buildMenuItem(Icons.info_outline_rounded, textSecondary,
               s.tr('Về ứng dụng', 'About'), textPrimary, textSecondary, () {
@@ -843,7 +1082,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-            trailing ?? Icon(Icons.chevron_right_rounded, color: textSecondary, size: 22),
+            trailing ??
+                Icon(Icons.chevron_right_rounded,
+                    color: textSecondary, size: 22),
           ],
         ),
       ),
@@ -865,7 +1106,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final s = _settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final updateService = UpdateService();
-    
+
     // UI Helpers inside dialog
     Widget _buildSectionHeader(IconData icon, String title) {
       return Padding(
@@ -935,13 +1176,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     updateService.init().then((_) {
       if (!context.mounted) return;
-      
+
       showDialog(
         context: context,
         builder: (ctx) => Dialog(
           backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -956,29 +1199,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   children: [
                     Container(
-                      width: 80, height: 80,
+                      width: 80,
+                      height: 80,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 15, offset: const Offset(0, 5)),
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 15,
+                              offset: const Offset(0, 5)),
                         ],
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(20),
-                        child: Image.asset('assets/images/app_icon.png', fit: BoxFit.cover),
+                        child: Image.asset('assets/images/app_icon.png',
+                            fit: BoxFit.cover),
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text('VNeTraffic', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.black)),
+                    const Text('VNeTraffic',
+                        style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black)),
                     const SizedBox(height: 4),
                     Text(
                       '${s.tr("Phiên bản", "Version")} ${updateService.currentVersion} (Build ${updateService.currentBuildNumber})',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey),
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey),
                     ),
                   ],
                 ),
               ),
-              
+
               // Scrollable Content
               Flexible(
                 child: SingleChildScrollView(
@@ -986,21 +1241,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildSectionHeader(Icons.info_outline_rounded, s.tr('Về hệ thống', 'About the System')),
+                      _buildSectionHeader(Icons.info_outline_rounded,
+                          s.tr('Về hệ thống', 'About the System')),
                       Text(
-                        s.tr('VNeTraffic là hệ thống thông minh, tự động phát hiện vi phạm giao thông bằng AI Camera và hỗ trợ công dân tra cứu, nộp phạt, quản lý giấy tờ điện tử.',
-                             'VNeTraffic is a smart system that automatically detects traffic violations using AI Camera and helps citizens look up, pay fines, and manage digital documents.'),
-                        style: TextStyle(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87, height: 1.5),
+                        s.tr(
+                            'VNeTraffic là hệ thống thông minh, tự động phát hiện vi phạm giao thông bằng AI Camera và hỗ trợ công dân tra cứu, nộp phạt, quản lý giấy tờ điện tử.',
+                            'VNeTraffic is a smart system that automatically detects traffic violations using AI Camera and helps citizens look up, pay fines, and manage digital documents.'),
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                            height: 1.5),
                       ),
-
-                      _buildSectionHeader(Icons.star_rounded, s.tr('Điểm nổi bật', 'Key Features')),
-                      _buildBullet(s.tr('Nhận diện vi phạm giao thông bằng AI (YOLO & OpenCV).', 'Traffic violation detection via AI (YOLO & OpenCV).')),
-                      _buildBullet(s.tr('Thông báo đẩy (Push Notifications) thời gian thực theo biển số xe vi phạm.', 'Real-time push notifications based on license plate violations.')),
-                      _buildBullet(s.tr('Quản lý "Ví giấy tờ" và điểm bằng lái của công dân.', 'Digital Document Wallet and driver license points management.')),
-                      _buildBullet(s.tr('Nộp phạt trực tuyến nhanh chóng tiện lợi.', 'Fast and convenient online fine payment.')),
-                      _buildBullet(s.tr('Cập nhật ứng dụng tự động (OTA Update) liền mạch.', 'Seamless Over-The-Air (OTA) application updates.')),
-
-                      _buildSectionHeader(Icons.code_rounded, s.tr('Công nghệ sử dụng', 'Tech Stack')),
+                      _buildSectionHeader(Icons.star_rounded,
+                          s.tr('Điểm nổi bật', 'Key Features')),
+                      _buildBullet(s.tr(
+                          'Nhận diện vi phạm giao thông bằng AI (YOLO & OpenCV).',
+                          'Traffic violation detection via AI (YOLO & OpenCV).')),
+                      _buildBullet(s.tr(
+                          'Thông báo đẩy (Push Notifications) thời gian thực theo biển số xe vi phạm.',
+                          'Real-time push notifications based on license plate violations.')),
+                      _buildBullet(s.tr(
+                          'Quản lý "Ví giấy tờ" và điểm bằng lái của công dân.',
+                          'Digital Document Wallet and driver license points management.')),
+                      _buildBullet(s.tr(
+                          'Nộp phạt trực tuyến nhanh chóng tiện lợi.',
+                          'Fast and convenient online fine payment.')),
+                      _buildBullet(s.tr(
+                          'Cập nhật ứng dụng tự động (OTA Update) liền mạch.',
+                          'Seamless Over-The-Air (OTA) application updates.')),
+                      _buildSectionHeader(Icons.code_rounded,
+                          s.tr('Công nghệ sử dụng', 'Tech Stack')),
                       Wrap(
                         children: [
                           _buildTechChip('Flutter'),
@@ -1013,13 +1283,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           _buildTechChip('PowerShell / Bash'),
                         ],
                       ),
-
-                      _buildSectionHeader(Icons.developer_mode_rounded, s.tr('Đội ngũ phát triển', 'Development Team')),
+                      _buildSectionHeader(Icons.developer_mode_rounded,
+                          s.tr('Đội ngũ phát triển', 'Development Team')),
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.1),
+                          color: isDark
+                              ? Colors.white.withOpacity(0.05)
+                              : Colors.grey.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
@@ -1033,8 +1305,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Khánh Bes', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                                Text(s.tr('Nhà sáng lập & Kỹ sư phát triển', 'Founder & Lead Developer'), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                const Text('Khánh Bes',
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold)),
+                                Text(
+                                    s.tr('Nhà sáng lập & Kỹ sư phát triển',
+                                        'Founder & Lead Developer'),
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.grey)),
                               ],
                             ),
                           ],
@@ -1054,10 +1333,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     backgroundColor: AppTheme.primaryColor,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                     elevation: 0,
                   ),
-                  child: Text(s.tr('Đóng', 'Close'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  child: Text(s.tr('Đóng', 'Close'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 16)),
                 ),
               ),
             ],
@@ -1087,7 +1369,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: AppTheme.infoColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.language_rounded, color: AppTheme.infoColor, size: 22),
+              child: const Icon(Icons.language_rounded,
+                  color: AppTheme.infoColor, size: 22),
             ),
             const SizedBox(width: 12),
             Text(
@@ -1164,13 +1447,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text(subtitle,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary,
+                        color: isDark
+                            ? const Color(0xFF9E9E9E)
+                            : AppTheme.textSecondary,
                       )),
                 ],
               ),
             ),
             if (isSelected)
-              const Icon(Icons.check_circle_rounded, color: AppTheme.primaryColor, size: 22),
+              const Icon(Icons.check_circle_rounded,
+                  color: AppTheme.primaryColor, size: 22),
           ],
         ),
       ),
@@ -1182,7 +1468,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ═══════════════════════════════════════════════════════════════
   void _showIpSettingsDialog(BuildContext context) {
     final ipController = TextEditingController(text: ApiService.serverIp);
-    final portController = TextEditingController(text: ApiService.serverPort.toString());
+    final portController =
+        TextEditingController(text: ApiService.serverPort.toString());
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showDialog(
@@ -1198,7 +1485,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: AppTheme.primaryColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.router_rounded, color: AppTheme.primaryColor, size: 22),
+              child: const Icon(Icons.router_rounded,
+                  color: AppTheme.primaryColor, size: 22),
             ),
             const SizedBox(width: 12),
             Text(
@@ -1217,7 +1505,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               style: TextStyle(
                 fontSize: 13,
-                color: isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary,
+                color:
+                    isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary,
               ),
             ),
             const SizedBox(height: 18),
@@ -1228,10 +1517,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 labelText: _settings.tr('Địa chỉ IP', 'IP Address'),
                 hintText: '192.168.1.93',
                 prefixIcon: const Icon(Icons.computer_rounded, size: 20),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primaryColor, width: 2),
                 ),
               ),
             ),
@@ -1243,10 +1534,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 labelText: _settings.tr('Cổng (Port)', 'Port'),
                 hintText: '8000',
                 prefixIcon: const Icon(Icons.numbers_rounded, size: 20),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primaryColor, width: 2),
                 ),
               ),
             ),
@@ -1261,8 +1554,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Row(
                 children: [
                   Icon(
-                    ApiService().isConnected ? Icons.check_circle : Icons.error_outline,
-                    color: ApiService().isConnected ? AppTheme.successColor : AppTheme.dangerColor,
+                    ApiService().isConnected
+                        ? Icons.check_circle
+                        : Icons.error_outline,
+                    color: ApiService().isConnected
+                        ? AppTheme.successColor
+                        : AppTheme.dangerColor,
                     size: 16,
                   ),
                   const SizedBox(width: 8),
@@ -1272,7 +1569,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         : _settings.tr('Chưa kết nối', 'Not connected'),
                     style: TextStyle(
                       fontSize: 12,
-                      color: ApiService().isConnected ? AppTheme.successColor : AppTheme.dangerColor,
+                      color: ApiService().isConnected
+                          ? AppTheme.successColor
+                          : AppTheme.dangerColor,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1299,14 +1598,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SnackBar(
                     content: Row(
                       children: [
-                        const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                        const Icon(Icons.check_circle,
+                            color: Colors.white, size: 18),
                         const SizedBox(width: 8),
-                        Text('${_settings.tr("Đã cập nhật IP", "IP updated")}: $ip:$port'),
+                        Text(
+                            '${_settings.tr("Đã cập nhật IP", "IP updated")}: $ip:$port'),
                       ],
                     ),
                     backgroundColor: AppTheme.successColor,
                     behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                 );
               }
@@ -1316,7 +1618,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryColor,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ],
@@ -1332,7 +1635,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusXL)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radiusXL)),
         title: Text(
           s.tr('Đăng xuất', 'Sign out'),
           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -1354,13 +1658,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               await AuthService().signOut();
               _settings.resetOnLogout();
               if (mounted) {
-                Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                Navigator.pushNamedAndRemoveUntil(
+                    context, '/login', (route) => false);
               }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.dangerColor,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusM)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusM)),
             ),
             child: Text(s.tr('Đăng xuất', 'Sign out')),
           ),

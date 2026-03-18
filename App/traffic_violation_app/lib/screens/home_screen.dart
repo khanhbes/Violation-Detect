@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 // mock_data import removed — all user data now comes from Firestore via AppSettings
@@ -11,7 +12,9 @@ import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:traffic_violation_app/screens/violations_screen.dart';
 import 'package:traffic_violation_app/screens/profile_screen.dart';
+import 'package:traffic_violation_app/screens/vehicles_screen.dart' as home_vehicles;
 import 'dart:async';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -31,6 +34,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   StreamSubscription? _newViolationSub;
   StreamSubscription? _connectionSub;
   StreamSubscription? _firestoreSub;
+  StreamSubscription? _notifCountSub;  // realtime unread notification count
+  StreamSubscription? _userPointsSub;  // realtime GPLX points from Firestore
 
   late AnimationController _fadeController;
   late AnimationController _slideController;
@@ -86,6 +91,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         });
       }
     });
+
+    // ── Realtime notification badge from Firestore ──
+    if (uid != null) {
+      _notifCountSub = FirestoreService().notificationsStream(uid).listen((notifs) {
+        final unread = notifs.where((n) => !n.isRead).length;
+        _settings.setNotificationCount(unread);
+      });
+
+      // ── Realtime user points (GPLX) from Firestore ──
+      _userPointsSub = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots()
+          .listen((doc) {
+        if (doc.exists && mounted) {
+          final pts = (doc.data()?['points'] as num?)?.toInt();
+          if (pts != null) _settings.setUserPoints(pts);
+        }
+      });
+    }
 
     _api.testConnection();
 
@@ -210,6 +235,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _newViolationSub?.cancel();
     _connectionSub?.cancel();
     _firestoreSub?.cancel();
+    _notifCountSub?.cancel();
+    _userPointsSub?.cancel();
     super.dispose();
   }
 
@@ -441,7 +468,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   }),
                   _buildSheetItem(Icons.directions_car_rounded, _settings.tr('Phương\ntiện', 'My\nVehicles'), const Color(0xFF5C6BC0), () {
                     Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/violations');
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const home_vehicles.VehiclesScreen()),
+                    );
                   }),
                   _buildSheetItem(Icons.support_agent_rounded, _settings.tr('Hỗ trợ\ntrực tuyến', 'Online\nSupport'), AppTheme.successColor, () {
                     Navigator.pop(ctx);
@@ -511,30 +541,42 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  HOME PAGE
   // ═══════════════════════════════════════════════════════════════
   Widget _buildHomePage() {
-    return CustomScrollView(
-      slivers: [
-        _buildHeader(),
-        SliverToBoxAdapter(child: _buildConnectionBanner()),
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: _fadeController,
-            child: _buildDocumentWallet(),
+    return RefreshIndicator(
+      onRefresh: () async {
+        if (_settings.uid != null) {
+          await _settings.loadFromFirestore(_settings.uid!);
+          final _ = await FirestoreService().violationsStream(userId: _settings.uid!).first;
+        }
+        setState(() {});
+      },
+      color: AppTheme.primaryColor,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          _buildHeader(),
+          SliverToBoxAdapter(child: _buildConnectionBanner()),
+          SliverToBoxAdapter(
+            child: FadeTransition(
+              opacity: _fadeController,
+              child: _buildDocumentWallet(),
+            ),
           ),
-        ),
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: _fadeController,
-            child: _buildQuickMenu(),
+          SliverToBoxAdapter(
+            child: FadeTransition(
+              opacity: _fadeController,
+              child: _buildQuickMenu(),
+            ),
           ),
-        ),
-        SliverToBoxAdapter(
-          child: FadeTransition(
-            opacity: _fadeController,
-            child: _buildFineOverview(),
+          SliverToBoxAdapter(
+            child: FadeTransition(
+              opacity: _fadeController,
+              child: _buildFineOverview(),
+            ),
           ),
-        ),
-        const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
-      ],
+          // Bottom padding so content is never hidden behind the navigation bar
+          const SliverToBoxAdapter(child: SizedBox(height: 110)),
+        ],
+      ),
     );
   }
 
@@ -550,8 +592,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
-      body: CustomScrollView(
-        slivers: [
+      body: RefreshIndicator(
+        onRefresh: () async {
+          if (_settings.uid != null) {
+            await _settings.loadFromFirestore(_settings.uid!);
+            final _ = await FirestoreService().violationsStream(userId: _settings.uid!).first;
+          }
+          setState(() {});
+        },
+        color: AppTheme.primaryColor,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
           // Header
           SliverToBoxAdapter(
             child: Container(
@@ -647,6 +699,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -974,11 +1027,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  DOCUMENT WALLET (Ví giấy tờ — CCCD + GPLX + Điểm)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildDocumentWallet() {
-    int licensePoints = 12;
-    for (final v in _violations) {
-      licensePoints -= _getPointsDeducted(v.violationType);
-    }
-    if (licensePoints < 0) licensePoints = 0;
+    int licensePoints = _settings.userPoints;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -1523,13 +1572,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     const pointColor = Colors.amber;
     final pointPercent = points / 12.0;
 
-    // Build list of violations that deducted points
+    // Points now come from Firestore via _settings.userPoints — no local recalculation needed
+    // Show deduction history only if points < 12 as a signal label
     final deductions = <Map<String, dynamic>>[];
-    for (final v in _violations) {
-      final pts = _getPointsDeducted(v.violationType);
-      if (pts > 0) {
-        deductions.add({'type': v.violationType, 'points': pts, 'date': DateFormat('dd/MM/yyyy').format(v.timestamp)});
-      }
+    if (points < 12) {
+      deductions.add({'type': _settings.tr('điểm đã được trừ theo vi phạm', 'points deducted from violations'), 'points': 12 - points, 'date': ''});
     }
 
     showModalBottomSheet(
@@ -1622,7 +1669,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     _buildDetailRow(_settings.tr('Loại xe', 'Vehicle type'), vehicleType, textPrimary, textSecondary),
                     _buildDetailRow(_settings.tr('Ngày cấp', 'Issue date'), issueDate, textPrimary, textSecondary),
                     _buildDetailRow(_settings.tr('Có giá trị đến', 'Valid until'), expiryDate, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Ngày sinh', 'Date of birth'), '01/01/2001', textPrimary, textSecondary),
+                    _buildDetailRow(_settings.tr('Ngày sinh', 'Date of birth'), _settings.userDateOfBirth.isNotEmpty ? _settings.userDateOfBirth : '—', textPrimary, textSecondary),
                     if (deductions.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       Text(

@@ -6,6 +6,10 @@ class User {
   final String? avatar;
   final String idCard;
   final String address;
+  final String? idCardIssueDate;
+  final String? occupation;
+  final String? dateOfBirth;
+  final int points;
   final DateTime createdAt;
 
   User({
@@ -16,6 +20,10 @@ class User {
     this.avatar,
     required this.idCard,
     required this.address,
+    this.idCardIssueDate,
+    this.occupation,
+    this.dateOfBirth,
+    this.points = 12,
     required this.createdAt,
   });
 
@@ -46,6 +54,10 @@ class User {
       avatar: json['avatar'] as String?,
       idCard: json['idCard'] ?? '',
       address: json['address'] ?? '',
+      idCardIssueDate: json['idCardIssueDate'] as String?,
+      occupation: json['occupation'] as String?,
+      dateOfBirth: json['dateOfBirth'] as String?,
+      points: json['points'] as int? ?? 12,
       createdAt: createdAt,
     );
   }
@@ -59,6 +71,10 @@ class User {
       'avatar': avatar,
       'idCard': idCard,
       'address': address,
+      'idCardIssueDate': idCardIssueDate,
+      'occupation': occupation,
+      'dateOfBirth': dateOfBirth,
+      'points': points,
       'createdAt': createdAt.toIso8601String(),
     };
   }

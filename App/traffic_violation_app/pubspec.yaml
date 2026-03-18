@@ -1,7 +1,7 @@
 ﻿name: traffic_violation_app
 description: Traffic Violation Detection & Fine Payment App
 publish_to: 'none'
-version: 1.0.37+35
+version: 1.0.42+40
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

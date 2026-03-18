@@ -1,10 +1,12 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-import 'dart:async';
 
 class ComplaintScreen extends StatefulWidget {
   const ComplaintScreen({super.key});
@@ -79,7 +81,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
       ),
       body: Column(
         children: [
-          // Header Section
+          // Header
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -101,8 +103,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                   child: Row(
                     children: [
                       Container(
-                        width: 44,
-                        height: 44,
+                        width: 44, height: 44,
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(12),
@@ -113,11 +114,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                       Expanded(
                         child: Text(
                           _s.tr('Bạn có quyền khiếu nại trong vòng 30 ngày kể từ ngày xử phạt.', 'You have the right to file a complaint within 30 days of the penalty.'),
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
+                          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, height: 1.4),
                         ),
                       ),
                     ],
@@ -153,14 +150,21 @@ class _ComplaintScreenState extends State<ComplaintScreen>
             ),
           ),
 
-          // Tab Content
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildComplainableList(),
-                _buildComplainedList(),
-              ],
+            child: RefreshIndicator(
+              onRefresh: () async {
+                _loadViolations();
+                _loadComplaints();
+                setState(() {});
+              },
+              color: AppTheme.primaryColor,
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildComplainableList(),
+                  _buildComplainedList(),
+                ],
+              ),
             ),
           ),
         ],
@@ -170,11 +174,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
 
   Widget _buildComplainableList() {
     final pending = _violations.where((v) => v.isPending).toList();
-
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor));
-    }
-
+    if (_isLoading) return const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor));
     if (pending.isEmpty) {
       return _buildEmptyState(
         icon: Icons.verified_rounded,
@@ -182,7 +182,6 @@ class _ComplaintScreenState extends State<ComplaintScreen>
         subtitle: _s.tr('Hiện không có vi phạm nào cần khiếu nại', 'No violations to file complaint'),
       );
     }
-
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: pending.length,
@@ -198,7 +197,6 @@ class _ComplaintScreenState extends State<ComplaintScreen>
         subtitle: _s.tr('Các khiếu nại đã gửi sẽ hiển thị ở đây', 'Submitted complaints will appear here'),
       );
     }
-
     final df = DateFormat('HH:mm — dd/MM/yyyy');
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -207,11 +205,9 @@ class _ComplaintScreenState extends State<ComplaintScreen>
         final c = _complaints[index];
         final timestamp = c['createdAt'] != null ? (c['createdAt'] as dynamic).toDate() : DateTime.now();
         final status = c['status'] ?? 'pending';
-        
         Color statusColor = AppTheme.warningColor;
         String statusText = _s.tr('Đang xử lý', 'Pending');
         IconData statusIcon = Icons.hourglass_top_rounded;
-
         if (status == 'approved') {
           statusColor = AppTheme.successColor;
           statusText = _s.tr('Đã chấp nhận', 'Approved');
@@ -221,7 +217,6 @@ class _ComplaintScreenState extends State<ComplaintScreen>
           statusText = _s.tr('Đã từ chối', 'Rejected');
           statusIcon = Icons.cancel_rounded;
         }
-
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
@@ -236,10 +231,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    df.format(timestamp),
-                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                  ),
+                  Text(df.format(timestamp), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
@@ -251,10 +243,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                       children: [
                         Icon(statusIcon, size: 12, color: statusColor),
                         const SizedBox(width: 4),
-                        Text(
-                          statusText,
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor),
-                        ),
+                        Text(statusText, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
                       ],
                     ),
                   ),
@@ -266,10 +255,39 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppTheme.textPrimary),
               ),
               const SizedBox(height: 6),
-              Text(
-                c['description'] ?? '',
-                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-              ),
+              Text(c['description'] ?? '', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+              // Show rejection reason if rejected
+              if (status == 'rejected' && (c['adminNote'] ?? '').isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.dangerColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.dangerColor.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: AppTheme.dangerColor, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${_s.tr('Lý do từ chối', 'Rejection reason')}: ${c['adminNote']}',
+                          style: const TextStyle(fontSize: 12, color: AppTheme.dangerColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              // Show evidence image if available
+              if ((c['evidenceUrl'] ?? '').isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(c['evidenceUrl'], height: 120, width: double.infinity, fit: BoxFit.cover),
+                ),
+              ],
             ],
           ),
         );
@@ -277,41 +295,20 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     );
   }
 
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
+  Widget _buildEmptyState({required IconData icon, required String title, required String subtitle}) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
+            width: 72, height: 72,
+            decoration: BoxDecoration(color: AppTheme.primaryColor.withOpacity(0.08), shape: BoxShape.circle),
             child: Icon(icon, size: 36, color: AppTheme.primaryColor),
           ),
           const SizedBox(height: 16),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textPrimary,
-            ),
-          ),
+          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
           const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppTheme.textSecondary,
-            ),
-          ),
+          Text(subtitle, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
         ],
       ),
     );
@@ -320,20 +317,14 @@ class _ComplaintScreenState extends State<ComplaintScreen>
   Widget _buildComplaintCard(Violation v, int index) {
     final df = DateFormat('HH:mm — dd/MM/yyyy');
     final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
-
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: Duration(milliseconds: 350 + index * 80),
       curve: Curves.easeOutCubic,
-      builder: (context, anim, child) {
-        return Opacity(
-          opacity: anim,
-          child: Transform.translate(
-            offset: Offset(0, 15 * (1 - anim)),
-            child: child,
-          ),
-        );
-      },
+      builder: (context, anim, child) => Opacity(
+        opacity: anim,
+        child: Transform.translate(offset: Offset(0, 15 * (1 - anim)), child: child),
+      ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
@@ -343,18 +334,13 @@ class _ComplaintScreenState extends State<ComplaintScreen>
         ),
         child: Column(
           children: [
-            // Violation info
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryColor.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    width: 48, height: 48,
+                    decoration: BoxDecoration(color: AppTheme.primaryColor.withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.warning_amber_rounded, color: AppTheme.primaryColor, size: 24),
                   ),
                   const SizedBox(width: 12),
@@ -362,44 +348,21 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          v.violationType,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
+                        Text(v.violationType, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppTheme.textPrimary)),
                         const SizedBox(height: 3),
-                        Text(
-                          df.format(v.timestamp),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
+                        Text(df.format(v.timestamp), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                       ],
                     ),
                   ),
-                  Text(
-                    formatter.format(v.fineAmount),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
+                  Text(formatter.format(v.fineAmount), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primaryColor)),
                 ],
               ),
             ),
-            // Divider
             Container(height: 1, color: AppTheme.dividerColor),
-            // Action row
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
-                  // View detail
                   Expanded(
                     child: GestureDetector(
                       onTap: () => Navigator.pushNamed(context, '/violation-detail', arguments: v),
@@ -408,20 +371,12 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                         children: [
                           const Icon(Icons.visibility_outlined, size: 16, color: AppTheme.infoColor),
                           const SizedBox(width: 6),
-                          Text(
-                            _s.tr('Xem chi tiết', 'View detail'),
-                            style: const TextStyle(
-                              color: AppTheme.infoColor,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          Text(_s.tr('Xem chi tiết', 'View detail'), style: const TextStyle(color: AppTheme.infoColor, fontSize: 13, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
                   ),
                   Container(width: 1, height: 20, color: AppTheme.dividerColor),
-                  // Submit complaint
                   Expanded(
                     child: GestureDetector(
                       onTap: () => _showComplaintDialog(v),
@@ -430,14 +385,7 @@ class _ComplaintScreenState extends State<ComplaintScreen>
                         children: [
                           const Icon(Icons.rate_review_outlined, size: 16, color: AppTheme.primaryColor),
                           const SizedBox(width: 6),
-                          Text(
-                            _s.tr('Gửi khiếu nại', 'Submit complaint'),
-                            style: const TextStyle(
-                              color: AppTheme.primaryColor,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          Text(_s.tr('Gửi khiếu nại', 'Submit complaint'), style: const TextStyle(color: AppTheme.primaryColor, fontSize: 13, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
@@ -454,6 +402,8 @@ class _ComplaintScreenState extends State<ComplaintScreen>
   void _showComplaintDialog(Violation v) {
     final controller = TextEditingController();
     String? selectedReason;
+    File? evidenceImage;
+    bool isUploading = false;
 
     final reasons = [
       _s.tr('Nhầm lẫn biển số xe', 'Wrong license plate'),
@@ -470,197 +420,204 @@ class _ComplaintScreenState extends State<ComplaintScreen>
       backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
+          Future<void> pickImage() async {
+            final picker = ImagePicker();
+            final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+            if (picked != null) {
+              setModalState(() => evidenceImage = File(picked.path));
+            }
+          }
+
           return Container(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
             decoration: const BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Handle bar
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(2),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    _s.tr('Gửi khiếu nại', 'Submit Complaint'),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${_s.tr('Vi phạm', 'Violation')}: ${v.violationType}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
+                    Text(_s.tr('Gửi khiếu nại', 'Submit Complaint'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 6),
+                    Text('${_s.tr('Vi phạm', 'Violation')}: ${v.violationType}', style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                    const SizedBox(height: 20),
 
-                  // Reason selector
-                  Text(
-                    _s.tr('Lý do khiếu nại', 'Complaint reason'),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: reasons.map((reason) {
-                      final isSelected = selectedReason == reason;
-                      return GestureDetector(
-                        onTap: () => setModalState(() => selectedReason = reason),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isSelected ? AppTheme.primaryColor : Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
+                    // Reason selector
+                    Text(_s.tr('Lý do khiếu nại *', 'Complaint reason *'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: reasons.map((reason) {
+                        final isSelected = selectedReason == reason;
+                        return GestureDetector(
+                          onTap: () => setModalState(() => selectedReason = reason),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? AppTheme.primaryColor : Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!),
+                            ),
+                            child: Text(
+                              reason,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: isSelected ? Colors.white : AppTheme.textPrimary),
                             ),
                           ),
-                          child: Text(
-                            reason,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected ? Colors.white : AppTheme.textPrimary,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Description
-                  Text(
-                    _s.tr('Mô tả chi tiết', 'Detailed description'),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: controller,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: _s.tr('Nhập mô tả chi tiết lý do khiếu nại...', 'Enter detailed complaint description...'),
-                      hintStyle: const TextStyle(color: AppTheme.textHint),
-                      filled: true,
-                      fillColor: AppTheme.surfaceColor,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Submit button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        if (selectedReason == null || controller.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(_s.tr('Vui lòng chọn lý do và nhập mô tả', 'Please select reason and enter description')),
-                              backgroundColor: AppTheme.dangerColor,
-                            ),
-                          );
-                          return;
-                        }
-
-                        final uid = _s.uid;
-                        if (uid == null) return;
-
-                        // Show dialog to prevent multiple submits
-                        showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (context) => const Center(child: CircularProgressIndicator()),
                         );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
 
-                        try {
-                          await _firestore.submitComplaint(
-                            userId: uid,
-                            violationId: v.id,
-                            reason: selectedReason!,
-                            description: controller.text.trim(),
-                          );
-                          
-                          if (context.mounted) {
-                            Navigator.pop(context); // pop loading
-                            Navigator.pop(context); // pop bottomsheet
-                            
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                                    const SizedBox(width: 8),
-                                    Text(_s.tr('Khiếu nại đã được gửi thành công', 'Complaint submitted successfully')),
-                                  ],
-                                ),
+                    // Description
+                    Text(_s.tr('Mô tả chi tiết *', 'Detailed description *'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: controller,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        hintText: _s.tr('Nhập mô tả chi tiết lý do khiếu nại...', 'Enter detailed complaint description...'),
+                        hintStyle: const TextStyle(color: AppTheme.textHint),
+                        filled: true,
+                        fillColor: AppTheme.surfaceColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Evidence image picker
+                    Text(_s.tr('Ảnh bằng chứng (tùy chọn)', 'Evidence photo (optional)'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: pickImage,
+                      child: Container(
+                        height: 120,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceColor,
+                          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                          border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid),
+                        ),
+                        child: evidenceImage != null
+                            ? Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                    child: Image.file(evidenceImage!, fit: BoxFit.cover),
+                                  ),
+                                  Positioned(
+                                    top: 6, right: 6,
+                                    child: GestureDetector(
+                                      onTap: () => setModalState(() => evidenceImage = null),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                                        child: const Icon(Icons.close, size: 16, color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.add_photo_alternate_rounded, size: 32, color: Colors.grey[400]),
+                                  const SizedBox(height: 8),
+                                  Text(_s.tr('Nhấn để tải ảnh bằng chứng', 'Tap to add evidence photo'), style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                                ],
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Submit button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton.icon(
+                        onPressed: isUploading ? null : () async {
+                          // Validation
+                          if (selectedReason == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(_s.tr('Vui lòng chọn lý do khiếu nại', 'Please select a complaint reason')),
+                              backgroundColor: AppTheme.dangerColor,
+                            ));
+                            return;
+                          }
+                          if (controller.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(_s.tr('Vui lòng nhập mô tả chi tiết', 'Please enter a detailed description')),
+                              backgroundColor: AppTheme.dangerColor,
+                            ));
+                            return;
+                          }
+
+                          final uid = _s.uid;
+                          if (uid == null) return;
+                          setModalState(() => isUploading = true);
+
+                          try {
+                            await _firestore.submitComplaint(
+                              userId: uid,
+                              violationId: v.id,
+                              reason: selectedReason!,
+                              description: controller.text.trim(),
+                              evidenceFile: evidenceImage,
+                            );
+
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Row(children: [
+                                  const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(_s.tr('Khiếu nại đã được gửi thành công', 'Complaint submitted successfully')),
+                                ]),
                                 backgroundColor: AppTheme.successColor,
                                 behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                ),
-                              ),
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            Navigator.pop(context); // pop loading
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusM)),
+                              ));
+                            }
+                          } catch (e) {
+                            setModalState(() => isUploading = false);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                                 content: Text(_s.tr('Lỗi gửi khiếu nại', 'Error submitting complaint')),
                                 backgroundColor: AppTheme.dangerColor,
-                              ),
-                            );
+                              ));
+                            }
                           }
-                        }
-                      },
-                      icon: const Icon(Icons.send_rounded, size: 18),
-                      label: Text(_s.tr('Gửi khiếu nại', 'Submit complaint')),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                        },
+                        icon: isUploading
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.send_rounded, size: 18),
+                        label: Text(isUploading ? _s.tr('Đang gửi...', 'Sending...') : _s.tr('Gửi khiếu nại', 'Submit complaint')),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusM)),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
             ),
           );
@@ -669,3 +626,5 @@ class _ComplaintScreenState extends State<ComplaintScreen>
     );
   }
 }
+
+

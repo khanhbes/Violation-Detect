@@ -978,6 +978,30 @@ function updateManageStats(data) {
     if (statTotalViolations) statTotalViolations.textContent = violations.length;
     if (statPendingFines) statPendingFines.textContent = formatter.format(totalPending);
     if (statTotalComplaints) statTotalComplaints.textContent = complaints.length;
+
+    // Show pending updates banner
+    const profileUpdates = data.profile_updates || [];
+    const banner = document.getElementById('pendingUpdatesBanner');
+    const countEl = document.getElementById('pendingUpdatesCount');
+    if (banner && countEl) {
+        if (profileUpdates.length > 0) {
+            countEl.textContent = profileUpdates.length;
+            banner.style.display = 'block';
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+}
+
+function scrollToPendingUpdates() {
+    // Scroll to first row that has a pending update button
+    const pendingBtn = adminDataTableBody && adminDataTableBody.querySelector('.pending-update-btn');
+    if (pendingBtn) {
+        pendingBtn.closest('tr').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        pendingBtn.closest('tr').style.outline = '2px solid #f59e0b';
+        pendingBtn.closest('tr').style.outlineOffset = '-2px';
+        setTimeout(() => { pendingBtn.closest('tr').style.outline = ''; }, 2000);
+    }
 }
 
 function renderAdminTable(data, searchQuery = '') {
@@ -988,6 +1012,7 @@ function renderAdminTable(data, searchQuery = '') {
     const violations = data.violations || [];
     const complaints = data.complaints || [];
     const notifications = data.notifications || [];
+    const profileUpdates = data.profile_updates || [];
 
     const query = searchQuery.toLowerCase().trim();
     const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
@@ -1002,6 +1027,7 @@ function renderAdminTable(data, searchQuery = '') {
         const uViolations = violations.filter(v => v.userId === uid || (v.licensePlate && targetPlates.includes(v.licensePlate)));
         const uComplaints = complaints.filter(c => c.userId === uid);
         const uNotifications = notifications.filter(n => n.userId === uid);
+        const isPendingUpdate = profileUpdates.find(r => r.id === uid);
 
         // Search filter
         if (query) {
@@ -1020,7 +1046,7 @@ function renderAdminTable(data, searchQuery = '') {
         let totalPendingFine = 0;
 
         uViolations.forEach(v => {
-            if (v.status === 'pending') {
+            if (v.status === 'pending' || v.status === 'pending_payment') {
                 pendingCount++;
                 totalPendingFine += (v.fineAmount || 0);
             } else if (v.status === 'paid') {
@@ -1028,50 +1054,47 @@ function renderAdminTable(data, searchQuery = '') {
             }
         });
 
+        const nameInitial = (u.fullName || '?').charAt(0).toUpperCase();
+
         html += `
-            <tr>
+            <tr id="row-${uid}">
                 <td>${rowIndex}</td>
                 <td>
-                    <div style="font-weight: 600; color: var(--text-primary);">${u.email || '-'}</div>
-                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; word-break: break-all;">${uid}</div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:34px;height:34px;border-radius:50%;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:0.85rem;flex-shrink:0;">${nameInitial}</div>
+                        <div>
+                            <div style="font-weight:700;color:var(--text-primary);">${u.fullName || '<span style="color:var(--text-muted);font-style:italic;">Chưa cập nhật</span>'}</div>
+                            <div style="font-size:0.72rem;color:var(--text-muted);">${u.email || ''}</div>
+                        </div>
+                    </div>
                 </td>
-                <td>
-                    <div style="font-weight: 600;">${u.fullName || '<span style="color: var(--text-muted); font-style: italic;">Chưa cập nhật</span>'}</div>
-                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">🪪 ${u.idCard || '-'}</div>
-                    <div style="font-size: 0.8rem; color: var(--text-secondary);">📱 ${u.phone || '-'}</div>
-                </td>
-                <td>
-                    Hạng: <span class="data-tag tag-info">${u.licenseClass || '-'}</span><br>
-                    Số: <span style="font-weight: 500;">${u.licenseNumber || '-'}</span><br>
-                    <span style="font-weight: 700; color: ${(u.points ?? 12) < 12 ? 'var(--warning)' : 'var(--success)'};">Điểm: ${u.points ?? 12}/12</span>
-                </td>
-                <td>
-                    ${uVehicles.length > 0
-                        ? uVehicles.map(v => `<div style="margin-bottom: 6px;"><span class="data-tag tag-info">${v.licensePlate || ''}</span><div style="font-size: 0.72rem; color: var(--text-muted);">${v.brand || ''} ${v.model || ''} — ${v.type || ''}</div></div>`).join('')
-                        : '<span style="color: var(--text-muted); font-style: italic;">Chưa có</span>'}
-                </td>
+                <td><div style="color:var(--text-secondary);font-family:monospace;">🪪 ${u.idCard || '—'}</div></td>
+                <td><div style="color:var(--text-secondary);">📱 ${u.phone || '—'}</div></td>
                 <td>
                     <span class="data-tag tag-danger">Chưa nộp: ${pendingCount}</span>
                     <span class="data-tag tag-success">Đã nộp: ${paidCount}</span>
-                    ${totalPendingFine > 0 ? `<div style="font-weight: 700; color: var(--danger); margin-top: 6px;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color: var(--success); margin-top: 4px; font-weight: 600; font-size: 0.8rem;">✓ Không nợ</div>'}
+                    ${totalPendingFine > 0 ? `<div style="font-weight:700;color:var(--danger);margin-top:6px;font-size:0.8rem;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color:var(--success);margin-top:4px;font-weight:600;font-size:0.78rem;">✓ Không nợ</div>'}
                 </td>
                 <td>
-                    ${uComplaints.length > 0 
-                        ? `<div style="margin-bottom: 6px;"><span class="data-tag tag-warning">📝 ${uComplaints.length} kh.nại</span></div>` + 
-                          uComplaints.map(c => `<div style="font-size: 0.72rem; color: var(--warning); border: 1px solid var(--warning); border-radius: 4px; padding: 2px 4px; margin-bottom: 4px; background: rgba(255, 152, 0, 0.1);">Lý do: ${c.reason || 'Khác'} - ${c.status === 'pending' ? 'Đang chờ' : (c.status === 'approved' ? 'Đã duyệt' : 'Đã từ chối')}</div>`).join('')
-                        : '<span class="data-tag tag-secondary" style="margin-bottom: 6px; display: inline-block;">0 kh.nại</span><br>'}
-                    <span class="data-tag tag-secondary">🔔 ${uNotifications.length}</span>
+                    ${uComplaints.length > 0
+                        ? `<span class="data-tag tag-warning">📝 ${uComplaints.length} khiếu nại</span><br>`
+                        : `<span class="data-tag tag-secondary">0 khiếu nại</span><br>`}
+                    <span class="data-tag tag-secondary">🔔 ${uNotifications.length} thông báo</span>
                 </td>
                 <td>
-                    <button class="btn btn-danger" style="padding: 4px 8px; font-size: 0.8rem;" onclick="deleteUser('${uid}')">🗑️ Xóa</button>
+                    <div style="display:flex;flex-direction:column;gap:5px;min-width:110px;">
+                        ${isPendingUpdate ? `<button class="btn btn-warning pending-update-btn" style="padding:5px 10px;font-size:0.78rem;color:#fff;border-radius:7px;" onclick="reviewUserUpdate('${uid}')">🔔 Duyệt sửa đổi</button>` : ''}
+                        <button class="btn btn-primary" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="showUserDetailPage('${uid}')">👁️ Chi tiết</button>
+                        <button class="btn btn-danger" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="confirmDeleteUser('${uid}', '${(u.fullName||'').replace(/'/g,'')}')" >🗑️ Xóa TK</button>
+                    </div>
                 </td>
             </tr>
         `;
     });
 
     if (rowIndex === 0) {
-        html = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 50px 40px;">
-            <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+        html = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:50px 40px;">
+            <div style="font-size:2rem;margin-bottom:8px;">🔍</div>
             ${query ? 'Không tìm thấy kết quả phù hợp.' : 'Hệ thống chưa có dữ liệu người dùng.'}
         </td></tr>`;
     }
@@ -1083,9 +1106,9 @@ function renderAdminTable(data, searchQuery = '') {
 async function loadAdminData() {
     if (!adminDataTableBody) return;
 
-    adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 60px 40px;">
-        <div class="manage-loading" style="font-size: 2.5rem; margin-bottom: 12px;">⏳</div>
-        <div style="font-weight: 500;">Đang tải dữ liệu từ Firebase...</div>
+    adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:60px 40px;">
+        <div class="manage-loading" style="font-size:2.5rem;margin-bottom:12px;">⏳</div>
+        <div style="font-weight:500;">Đang tải dữ liệu từ Firebase...</div>
     </td></tr>`;
 
     try {
@@ -1094,8 +1117,8 @@ async function loadAdminData() {
 
         if (json.status !== 'ok') {
             showToast('Lỗi tải dữ liệu: ' + json.message, 'error');
-            adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 50px;">
-                <div style="font-size: 2rem; margin-bottom: 8px;">⚠️</div>${json.message}
+            adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:50px;">
+                <div style="font-size:2rem;margin-bottom:8px;">⚠️</div>${json.message}
             </td></tr>`;
             return;
         }
@@ -1107,22 +1130,52 @@ async function loadAdminData() {
 
     } catch (e) {
         console.error(e);
-        adminDataTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 50px;">
-            <div style="font-size: 2rem; margin-bottom: 8px;">❌</div>Lỗi kết nối máy chủ.
+        adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:50px;">
+            <div style="font-size:2rem;margin-bottom:8px;">❌</div>Lỗi kết nối máy chủ.
         </td></tr>`;
     }
 }
 
+// ── Delete user with styled confirm ─────────────────────────────────
+function confirmDeleteUser(uid, name) {
+    const existing = document.getElementById('deleteConfirmOverlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'deleteConfirmOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:10002;padding:20px;backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="background:var(--bg-secondary);border:1px solid rgba(239,68,68,0.35);border-radius:20px;max-width:420px;width:100%;padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.7);animation:fadeIn 0.25s ease;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+                <div style="width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">🗑️</div>
+                <div>
+                    <div style="font-size:1.1rem;font-weight:700;color:#fff;">Xóa tài khoản</div>
+                    <div style="font-size:0.82rem;color:var(--text-muted);margin-top:2px;">Hành động này không thể hoàn tác</div>
+                </div>
+            </div>
+            <p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.6;margin-bottom:24px;">
+                Bạn có chắc chắn muốn xóa tài khoản <strong style="color:#fff;">${name || uid}</strong>?<br>
+                <span style="color:#ef4444;">Toàn bộ vi phạm, phương tiện, thông báo và khiếu nại của người dùng này sẽ bị xóa vĩnh viễn.</span>
+            </p>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button onclick="document.getElementById('deleteConfirmOverlay').remove()" style="padding:10px 20px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Hủy</button>
+                <button onclick="deleteUser('${uid}')" id="confirmDeleteBtn" style="padding:10px 20px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-size:0.88rem;font-family:inherit;">🗑️ Xóa tài khoản</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
 async function deleteUser(uid) {
-    if (!confirm('Bạn có chắc chắn muốn xóa tài khoản này và các dữ liệu liên quan? Hành động này không thể hoàn tác!')) {
-        return;
-    }
+    const overlay = document.getElementById('deleteConfirmOverlay');
+    if (overlay) overlay.remove();
     try {
         const resp = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE' });
         const json = await resp.json();
         if (json.status === 'ok') {
-            showToast('Đã xóa người dùng thành công', 'success');
-            loadAdminData(); // Refresh the table
+            showToast('✅ Đã xóa tài khoản người dùng thành công', 'success');
+            loadAdminData();
         } else {
             showToast('Lỗi khi xóa người dùng: ' + json.message, 'error');
         }
@@ -1156,3 +1209,449 @@ document.querySelectorAll('.nav-link[data-tab="manage"]').forEach(link => {
         loadAdminData();
     });
 });
+
+// ── Realtime auto-refresh every 30 seconds ─────────────────────────
+let _adminAutoRefreshTimer = null;
+function startAdminAutoRefresh() {
+    stopAdminAutoRefresh();
+    _adminAutoRefreshTimer = setInterval(async () => {
+        // Silently refresh in background (no loading indicator)
+        try {
+            const resp = await fetch('/api/admin/data');
+            const json = await resp.json();
+            if (json.status === 'ok') {
+                const prevUpdateCount = (_adminCachedData?.profile_updates || []).length;
+                const prevComplaintCount = (_adminCachedData?.complaints || []).length;
+                _adminCachedData = json.data;
+                const newUpdateCount = (json.data.profile_updates || []).length;
+                const newComplaintCount = (json.data.complaints || []).length;
+                // Notify of new changes
+                if (newUpdateCount > prevUpdateCount) showToast('🔔 Có yêu cầu sửa thông tin mới!', 'warning');
+                if (newComplaintCount > prevComplaintCount) showToast('📝 Có khiếu nại mới!', 'info');
+                updateManageStats(_adminCachedData);
+                // If manage tab is active, re-render table silently
+                const managePanel = document.getElementById('tab-manage');
+                if (managePanel?.classList.contains('active')) {
+                    renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+                }
+                // If detail tab is active, re-render detail silently
+                const detailPanel = document.getElementById('tab-user-detail');
+                if (detailPanel?.classList.contains('active')) {
+                    const currentUid = detailPanel.dataset.uid;
+                    if (currentUid) showUserDetails(currentUid);
+                }
+            }
+        } catch (_) {}
+    }, 30000); // every 30 seconds
+}
+function stopAdminAutoRefresh() {
+    if (_adminAutoRefreshTimer) { clearInterval(_adminAutoRefreshTimer); _adminAutoRefreshTimer = null; }
+}
+
+// Start polling when page loads (if admin is logged in)
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.getElementById('adminDashboard')) startAdminAutoRefresh();
+});
+
+// =====================================================================
+// USER DETAIL — FULL-PAGE VIEW
+// =====================================================================
+function showUserDetailPage(uid) {
+    if (!_adminCachedData) return;
+
+    // Store uid for realtime refresh
+    const detailPanelRef = document.getElementById('tab-user-detail');
+    if (detailPanelRef) detailPanelRef.dataset.uid = uid;
+
+    showUserDetails(uid);
+}
+
+function showUserDetails(uid) {
+    if (!_adminCachedData) return;
+
+    const users = _adminCachedData.users || [];
+    const vehicles = _adminCachedData.vehicles || [];
+    const violations = _adminCachedData.violations || [];
+    const complaints = _adminCachedData.complaints || [];
+    const profileUpdates = _adminCachedData.profile_updates || [];
+
+    const u = users.find(x => x.id === uid);
+    if (!u) return;
+
+    const uVehicles = vehicles.filter(v => v.ownerId === uid);
+    const targetPlates = uVehicles.map(v => v.licensePlate);
+    const uViolations = violations.filter(v => v.userId === uid || (v.licensePlate && targetPlates.includes(v.licensePlate)));
+    const uComplaints = complaints.filter(c => c.userId === uid);
+    const isPendingUpdate = profileUpdates.find(r => r.id === uid);
+
+    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+
+    let pendingCount = 0, paidCount = 0, totalPendingFine = 0;
+    uViolations.forEach(v => {
+        if (v.status === 'pending' || v.status === 'pending_payment') { pendingCount++; totalPendingFine += (v.fineAmount || 0); }
+        else if (v.status === 'paid') paidCount++;
+    });
+
+    const points = u.points ?? 12;
+    const nameInitial = (u.fullName || '?').charAt(0).toUpperCase();
+    const pointsPct = Math.max(0, Math.round((points / 12) * 100));
+    const pointsColor = points >= 8 ? '#10b981' : points >= 4 ? '#f59e0b' : '#ef4444';
+
+    // ── HEADER ──
+    const headerEl = document.getElementById('userDetailHeader');
+    if (headerEl) {
+        headerEl.innerHTML = `
+            <div class="user-detail-avatar">${nameInitial}</div>
+            <div class="user-detail-name-block">
+                <div class="user-detail-name">${u.fullName || 'Chưa cập nhật tên'}</div>
+                <div class="user-detail-email">📧 ${u.email || '—'} &nbsp;|&nbsp; 📱 ${u.phone || '—'}</div>
+                <div class="user-detail-badges">
+                    <span class="user-detail-badge verified">✅ Đã xác minh</span>
+                    ${isPendingUpdate ? `<span class="user-detail-badge pending-update">🔔 Đang chờ duyệt sửa đổi</span>` : ''}
+                </div>
+            </div>
+            <div class="user-detail-stats-row">
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val ${pendingCount > 0 ? 'danger' : 'success'}">${pendingCount}</span>
+                    <div class="user-detail-stat-lbl">Chưa nộp</div>
+                </div>
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val success">${paidCount}</span>
+                    <div class="user-detail-stat-lbl">Đã nộp</div>
+                </div>
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val amber">${points}/12</span>
+                    <div class="user-detail-stat-lbl">Điểm bằng lái</div>
+                </div>
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val">${uVehicles.length}</span>
+                    <div class="user-detail-stat-lbl">Phương tiện</div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ── TOP ACTIONS ──
+    const actionsTop = document.getElementById('userDetailActionsTop');
+    if (actionsTop) {
+        actionsTop.innerHTML = `
+            ${isPendingUpdate ? `<button class="btn btn-warning" style="padding:10px 18px;font-size:0.85rem;border-radius:10px;font-weight:700;color:#fff;" onclick="reviewUserUpdate('${uid}')">🔔 Duyệt sửa đổi</button>` : ''}
+            <button class="btn btn-danger" style="padding:10px 18px;font-size:0.85rem;border-radius:10px;font-weight:700;" onclick="confirmDeleteUser('${uid}', '${(u.fullName||'').replace(/'/g,'')}')">🗑️ Xóa tài khoản</button>
+        `;
+    }
+
+    // ── GRID CONTENT ──
+    const gridEl = document.getElementById('userDetailGrid');
+    if (gridEl) {
+        // Personal info
+        const personalHtml = `
+            <div class="user-detail-section">
+                <div class="user-detail-section-title">👤 Thông tin cá nhân</div>
+                ${row('Họ và tên', u.fullName || '—')}
+                ${row('CCCD/CMND', u.idCard || '—')}
+                ${row('Ngày cấp CCCD', u.idCardIssueDate || '—')}
+                ${row('Số điện thoại', u.phone || '—')}
+                ${row('Email', u.email || '—')}
+                ${row('Địa chỉ', u.address || '—')}
+                ${row('Ngày sinh', u.dateOfBirth || '—')}
+                ${row('Giới tính', u.gender || '—')}
+                ${row('Nghề nghiệp', u.occupation || '—')}
+            </div>`;
+
+        // License info
+        const licenseHtml = `
+            <div class="user-detail-section" style="position:relative;">
+                <div class="user-detail-section-title">🪪 Giấy phép lái xe</div>
+                ${row('Số GPLX', u.licenseNumber || '—')}
+                ${row('Hạng bằng xe máy', u.motoLicenseClass || u.licenseClass || '—')}
+                ${row('Hạng bằng ô tô', u.carLicenseClass || '—')}
+                ${row('Ngày cấp', u.licenseIssueDate || '—')}
+                ${row('Ngày hết hạn', u.licenseExpiryDate || '—')}
+                ${row('Nơi cấp', u.licenseIssuedBy || '—')}
+                <div class="user-detail-info-row" style="margin-top:10px;">
+                    <span class="user-detail-info-label">Điểm bằng lái</span>
+                    <span class="user-detail-info-value" style="color:${pointsColor};font-weight:800;display:flex;align-items:center;gap:12px;">
+                        ${points}/12 điểm
+                        ${points < 12 ? `<button onclick="restoreUserPoints('${uid}')" style="padding:6px 12px;border-radius:6px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.75rem;font-family:inherit;">🔄 Phục hồi</button>` : ''}
+                    </span>
+                </div>
+                <div class="points-bar-wrap">
+                    <div class="points-bar-track">
+                        <div class="points-bar-fill" style="width:${pointsPct}%;background:${pointsColor};"></div>
+                    </div>
+                </div>
+            </div>`;
+
+        // Vehicles
+        const vehiclesHtml = `
+            <div class="user-detail-section full-width">
+                <div class="user-detail-section-title">🚗 Phương tiện sở hữu (${uVehicles.length})</div>
+                ${uVehicles.length === 0 ? '<p style="color:var(--text-muted);font-size:0.88rem;">Chưa có phương tiện nào</p>' : `
+                    <div class="vehicle-cards-grid">
+                        ${uVehicles.map(v => {
+                            const isMoto = (v.vehicleType || v.type || '').includes('máy');
+                            return `
+                                <div class="vehicle-card-item">
+                                    <div class="vehicle-card-icon ${isMoto ? 'moto' : 'car'}">${isMoto ? '🏍️' : '🚗'}</div>
+                                    <div style="flex:1;">
+                                        <div class="vehicle-card-plate">${v.licensePlate || '—'}</div>
+                                        <div class="vehicle-card-info">${v.vehicleType || v.type || ''} • ${v.brand || ''} ${v.model || ''} • ${v.color || '—'}</div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div style="font-size:0.75rem;color:var(--text-muted);">Chủ: ${v.ownerName || u.fullName || '—'}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+            </div>`;
+
+        // Violations
+        const violationsHtml = `
+            <div class="user-detail-section full-width">
+                <div class="user-detail-section-title">🚨 Lịch sử vi phạm (${uViolations.length})</div>
+                ${uViolations.length === 0 ? '<p style="color:var(--text-muted);font-size:0.88rem;">Không có vi phạm nào</p>' : `
+                    <div class="violation-history-list">
+                        ${uViolations.map(v => {
+                            const statusClass = v.status === 'paid' ? 'paid' : 'pending';
+                            const fineClass = v.status === 'paid' ? 'paid' : 'unpaid';
+                            const dateStr = v.timestamp ? new Date(v.status === 'pending' ? v.timestamp : (v.createdAt ? v.createdAt * 1000 : Date.now())).toLocaleDateString('vi-VN') : '—';
+                            return `
+                                <div class="violation-history-item">
+                                    <div class="violation-history-status ${statusClass}"></div>
+                                    <div class="violation-history-name">${v.violationType || v.type || '—'}<br><span style="font-size:0.72rem;color:var(--text-muted);">${v.location || '—'}</span></div>
+                                    <div class="violation-history-date">${dateStr}</div>
+                                    <div class="violation-history-fine ${fineClass}">${formatter.format(v.fineAmount || 0)}</div>
+                                    <span class="data-tag ${v.status === 'paid' ? 'tag-success' : 'tag-danger'}" style="margin:0;">${v.status === 'paid' ? 'Đã nộp' : 'Chưa nộp'}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+            </div>`;
+
+        // Complaints
+        const complaintsHtml = uComplaints.length > 0 ? `
+            <div class="user-detail-section full-width">
+                <div class="user-detail-section-title">📝 Khiếu nại (${uComplaints.length})</div>
+                <div class="complaint-list">
+                    ${uComplaints.map(c => `
+                        <div class="complaint-item" style="margin-bottom:14px;padding:14px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
+                                <div>
+                                    <div class="complaint-item-reason" style="font-weight:700;margin-bottom:4px;">📋 ${c.reason || 'Khác'}</div>
+                                    <div class="complaint-item-desc" style="font-size:0.85rem;color:var(--text-secondary);">${c.description || '—'}</div>
+                                    ${c.adminNote ? `<div style="font-size:0.8rem;color:#ef4444;margin-top:6px;">💬 Lý do từ chối: ${c.adminNote}</div>` : ''}
+                                    ${c.evidenceUrl ? `<a href="${c.evidenceUrl}" target="_blank" style="font-size:0.8rem;color:#60a5fa;margin-top:6px;display:inline-block;">🖼️ Xem ảnh bằng chứng</a>` : ''}
+                                </div>
+                                <span class="complaint-item-status data-tag ${c.status === 'approved' ? 'tag-success' : c.status === 'rejected' ? 'tag-danger' : 'tag-warning'}" style="white-space:nowrap;flex-shrink:0;">
+                                    ${c.status === 'approved' ? '✅ Đã duyệt' : c.status === 'rejected' ? '❌ Đã từ chối' : '⏳ Đang xử lý'}
+                                </span>
+                            </div>
+                            ${c.status === 'pending' ? `
+                            <div style="display:flex;gap:8px;margin-top:10px;">
+                                <button onclick="reviewComplaint('${c.id}', 'approve', '')" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.78rem;font-family:inherit;">✅ Chấp nhận</button>
+                                <button onclick="showRejectComplaintModal('${c.id}')" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-size:0.78rem;font-family:inherit;">❌ Từ chối</button>
+                            </div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>` : '';
+
+        gridEl.innerHTML = personalHtml + licenseHtml + vehiclesHtml + violationsHtml + complaintsHtml;
+    }
+
+    // Switch to user detail tab
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    const detailPanel = document.getElementById('tab-user-detail');
+    if (detailPanel) {
+        detailPanel.classList.add('active');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+function closeUserDetailPage() {
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    const manageLink = document.querySelector('.nav-link[data-tab="manage"]');
+    if (manageLink) manageLink.classList.add('active');
+    const managePanel = document.getElementById('tab-manage');
+    if (managePanel) managePanel.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Helper for info rows
+function row(label, value) {
+    return `<div class="user-detail-info-row">
+        <span class="user-detail-info-label">${label}</span>
+        <span class="user-detail-info-value">${value}</span>
+    </div>`;
+}
+
+// ── Review pending update request ───────────────────────────────────
+function reviewUserUpdate(uid) {
+    if (!_adminCachedData || !_adminCachedData.profile_updates) return;
+    const req = _adminCachedData.profile_updates.find(x => x.id === uid);
+    if (!req) return;
+
+    const users = _adminCachedData.users || [];
+    const u = users.find(x => x.id === uid);
+
+    const fieldLabels = {
+        fullName: 'Họ và tên',
+        phone: 'Số điện thoại',
+        idCard: 'CCCD/CMND',
+        address: 'Địa chỉ',
+        email: 'Email',
+        dateOfBirth: 'Ngày sinh',
+        gender: 'Giới tính',
+        idCardIssueDate: 'Ngày cấp CCCD',
+        occupation: 'Nghề nghiệp',
+    };
+
+    const ignoreKeys = ['userId', 'status', 'createdAt', 'id'];
+    let changesHtml = '';
+    for (const [key, value] of Object.entries(req)) {
+        if (ignoreKeys.includes(key)) continue;
+        const label = fieldLabels[key] || key;
+        const currentVal = u ? (u[key] || '—') : '—';
+        changesHtml += `
+            <div class="update-change-row">
+                <div class="update-change-label">${label}</div>
+                <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;font-size:0.82rem;margin-top:4px;">
+                    <div class="update-change-old" style="padding:8px 10px;background:rgba(255,255,255,0.04);border-radius:6px;color:var(--text-muted);text-decoration:line-through;">${currentVal}</div>
+                    <span style="color:var(--accent-primary);font-size:1.1rem;">→</span>
+                    <div class="update-change-value">${value}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    const existing = document.getElementById('reviewUpdateModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'reviewUpdateModal';
+    overlay.className = 'review-update-modal-overlay';
+    overlay.innerHTML = `
+        <div class="review-update-modal-box">
+            <div class="review-update-modal-title">🔔 Yêu cầu thay đổi thông tin</div>
+            <div class="review-update-modal-subtitle">Người dùng <strong>${u ? u.fullName || u.email : uid}</strong> đã yêu cầu thay đổi các thông tin sau:</div>
+            ${changesHtml}
+            <div style="display:flex;gap:10px;margin-top:24px;justify-content:flex-end;">
+                <button onclick="document.getElementById('reviewUpdateModal').remove()" style="padding:10px 20px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Hủy</button>
+                <button onclick="submitReviewUpdate('${uid}','reject')" style="padding:10px 20px;border-radius:10px;border:none;background:rgba(239,68,68,0.2);color:#ef4444;font-weight:700;cursor:pointer;font-size:0.88rem;font-family:inherit;border:1px solid rgba(239,68,68,0.3);">❌ Từ chối</button>
+                <button onclick="submitReviewUpdate('${uid}','approve')" style="padding:10px 20px;border-radius:10px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.88rem;font-family:inherit;">✅ Chấp nhận</button>
+            </div>
+        </div>
+    `;
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+}
+
+async function submitReviewUpdate(uid, action) {
+    const modal = document.getElementById('reviewUpdateModal');
+    const btns = modal ? modal.querySelectorAll('button') : [];
+    btns.forEach(b => { b.disabled = true; });
+
+    try {
+        const res = await fetch(`/api/admin/users/${uid}/approve_update`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+            showToast(action === 'approve' ? '✅ Đã chấp nhận và cập nhật thông tin!' : '❌ Đã từ chối yêu cầu thay đổi', action === 'approve' ? 'success' : 'warning');
+            if (modal) modal.remove();
+            await loadAdminData(); // Wait for data to reload
+            if (document.getElementById('tab-user-detail')?.classList.contains('active')) {
+                showUserDetails(uid); // Refresh detail page in real-time
+            }
+        } else {
+            showToast(data.message || 'Lỗi khi xử lý', 'error');
+            btns.forEach(b => { b.disabled = false; });
+        }
+    } catch(e) {
+        showToast('Lỗi mạng', 'error');
+        btns.forEach(b => { b.disabled = false; });
+    }
+}
+
+// ── Restore Points ───────────────────────────────────
+async function restoreUserPoints(uid) {
+    if (!confirm('Bạn có chắc chắn muốn phục hồi 12 điểm cho người dùng này?')) return;
+    try {
+        const res = await fetch(`/api/admin/users/${uid}/restore_points`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+            showToast(data.message || '✅ Đã phục hồi điểm', 'success');
+            await loadAdminData();
+            if (document.getElementById('tab-user-detail')?.classList.contains('active')) {
+                showUserDetails(uid);
+            }
+        } else {
+            showToast(data.message || 'Lỗi khi phục hồi điểm', 'error');
+        }
+    } catch(e) {
+        showToast('Lỗi mạng', 'error');
+    }
+}
+
+// ── Review Complaint (Approve / Reject) ────────────────────────────
+async function reviewComplaint(complaintId, action, adminNote) {
+    try {
+        const res = await fetch(`/api/admin/complaints/${complaintId}/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, adminNote: adminNote || '' })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+            showToast(action === 'approve' ? '✅ Đã chấp nhận khiếu nại!' : '❌ Đã từ chối khiếu nại', action === 'approve' ? 'success' : 'warning');
+            const existingModal = document.getElementById('rejectComplaintModal');
+            if (existingModal) existingModal.remove();
+            await loadAdminData();
+            const detailPanel = document.getElementById('tab-user-detail');
+            if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid) {
+                showUserDetails(detailPanel.dataset.uid);
+            }
+        } else {
+            showToast(data.message || 'Lỗi khi xử lý khiếu nại', 'error');
+        }
+    } catch(e) {
+        showToast('Lỗi mạng', 'error');
+    }
+}
+
+function showRejectComplaintModal(complaintId) {
+    const existing = document.getElementById('rejectComplaintModal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'rejectComplaintModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:10005;padding:20px;backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="background:var(--bg-secondary);border:1px solid rgba(239,68,68,0.3);border-radius:20px;max-width:440px;width:100%;padding:28px;box-shadow:0 24px 64px rgba(0,0,0,0.7);">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+                <div style="width:44px;height:44px;border-radius:50%;background:rgba(239,68,68,0.15);display:flex;align-items:center;justify-content:center;font-size:1.3rem;">❌</div>
+                <div>
+                    <div style="font-size:1.05rem;font-weight:700;color:#fff;">Từ chối khiếu nại</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);">Vui lòng nhập lý do từ chối</div>
+                </div>
+            </div>
+            <textarea id="rejectNoteInput" placeholder="Nhập lý do từ chối..." rows="4" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-family:inherit;font-size:0.9rem;resize:vertical;box-sizing:border-box;margin-bottom:16px;"></textarea>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button onclick="document.getElementById('rejectComplaintModal').remove()" style="padding:10px 18px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-family:inherit;">Hủy</button>
+                <button onclick="reviewComplaint('${complaintId}', 'reject', document.getElementById('rejectNoteInput').value)" style="padding:10px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">❌ Xác nhận từ chối</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+

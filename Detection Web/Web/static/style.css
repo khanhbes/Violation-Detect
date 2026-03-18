@@ -2435,3 +2435,543 @@ select:focus {
         font-size: 0.78rem;
     }
 }
+
+/* ==========================================================================
+   PENDING UPDATES BANNER
+   ========================================================================== */
+.pending-updates-banner {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.08));
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: var(--border-radius);
+    padding: 14px 20px;
+    margin-bottom: 18px;
+    animation: pendingPulse 2.5s ease-in-out infinite;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+}
+
+@keyframes pendingPulse {
+    0%, 100% { border-color: rgba(245, 158, 11, 0.45); box-shadow: 0 0 20px rgba(245, 158, 11, 0.1); }
+    50%       { border-color: rgba(245, 158, 11, 0.75); box-shadow: 0 0 30px rgba(245, 158, 11, 0.25); }
+}
+
+.pending-updates-inner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pending-updates-icon {
+    font-size: 1.3rem;
+    animation: bellRing 1.5s ease-in-out infinite;
+    display: inline-block;
+}
+
+@keyframes bellRing {
+    0%, 100% { transform: rotate(0deg); }
+    10%       { transform: rotate(-15deg); }
+    20%       { transform: rotate(15deg); }
+    30%       { transform: rotate(-10deg); }
+    40%       { transform: rotate(10deg); }
+    50%       { transform: rotate(0deg); }
+}
+
+.pending-updates-text {
+    font-size: 0.9rem;
+    color: #fbbf24;
+    font-weight: 600;
+    flex: 1;
+}
+
+.pending-updates-text strong {
+    font-size: 1.05rem;
+    color: #f59e0b;
+}
+
+/* ==========================================================================
+   USER DETAIL FULL-PAGE VIEW
+   ========================================================================== */
+.user-detail-fullpage {
+    min-height: calc(100vh - 100px);
+    background: var(--bg-dark);
+}
+
+.user-detail-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 0 60px;
+}
+
+.user-detail-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 20px 0 16px;
+    flex-wrap: wrap;
+}
+
+.user-detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 10px 20px !important;
+    border-radius: 10px !important;
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.user-detail-back:hover {
+    background: rgba(255,255,255,0.1) !important;
+    transform: translateX(-3px);
+}
+
+.user-detail-actions-top {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* ── Profile Header Card ── */
+.user-detail-header-card {
+    background: linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(139,92,246,0.1) 100%);
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 20px;
+    padding: 32px 36px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    flex-wrap: wrap;
+    box-shadow: 0 8px 32px rgba(99,102,241,0.15);
+    position: relative;
+    overflow: hidden;
+}
+
+.user-detail-header-card::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(139,92,246,0.3), transparent 70%);
+    border-radius: 50%;
+}
+
+.user-detail-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 0 30px rgba(99,102,241,0.4);
+    border: 3px solid rgba(255,255,255,0.15);
+}
+
+.user-detail-name-block {
+    flex: 1;
+    min-width: 200px;
+}
+
+.user-detail-name {
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: #fff;
+    margin-bottom: 4px;
+    letter-spacing: 0.3px;
+}
+
+.user-detail-email {
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 10px;
+}
+
+.user-detail-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.user-detail-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.user-detail-badge.verified {
+    background: rgba(16,185,129,0.2);
+    border: 1px solid rgba(16,185,129,0.4);
+    color: #10b981;
+}
+
+.user-detail-badge.pending-update {
+    background: rgba(245,158,11,0.2);
+    border: 1px solid rgba(245,158,11,0.4);
+    color: #f59e0b;
+    animation: pendingPulse 2s ease-in-out infinite;
+}
+
+.user-detail-stats-row {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.user-detail-stat {
+    text-align: center;
+    padding: 12px 18px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    min-width: 80px;
+}
+
+.user-detail-stat-val {
+    font-size: 1.4rem;
+    font-weight: 800;
+    display: block;
+    color: #fff;
+}
+
+.user-detail-stat-val.danger { color: #ef4444; }
+.user-detail-stat-val.success { color: #10b981; }
+
+.update-change-value {
+    word-break: break-all;
+    overflow-wrap: break-word;
+}
+.update-change-old {
+    word-break: break-all;
+    overflow-wrap: break-word;
+}
+
+.user-detail-stat-val.warning { color: #f59e0b; }
+.user-detail-stat-val.amber { color: #fbbf24; }
+
+.user-detail-stat-lbl {
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+/* ── Detail Grid ── */
+.user-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.user-detail-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 22px 24px;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.25s;
+}
+
+.user-detail-section:hover {
+    border-color: rgba(99,102,241,0.3);
+}
+
+.user-detail-section.full-width {
+    grid-column: 1 / -1;
+}
+
+.user-detail-section-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--accent-primary);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.user-detail-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    gap: 12px;
+}
+
+.user-detail-info-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.user-detail-info-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.user-detail-info-value {
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: right;
+}
+
+/* ── License Points Bar ── */
+.points-bar-wrap {
+    margin-top: 10px;
+}
+
+.points-bar-track {
+    height: 10px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+.points-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 1s ease;
+}
+
+/* ── Vehicle Cards ── */
+.vehicle-cards-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.vehicle-card-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+}
+
+.vehicle-card-item:hover {
+    background: rgba(99,102,241,0.08);
+    border-color: rgba(99,102,241,0.25);
+}
+
+.vehicle-card-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+}
+
+.vehicle-card-icon.moto { background: rgba(220,38,38,0.15); }
+.vehicle-card-icon.car  { background: rgba(59,130,246,0.15); }
+
+.vehicle-card-plate {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: 1.5px;
+    font-family: monospace;
+}
+
+.vehicle-card-info {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* ── Violation History ── */
+.violation-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.violation-history-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: background 0.2s;
+}
+
+.violation-history-item:hover {
+    background: rgba(239,68,68,0.06);
+    border-color: rgba(239,68,68,0.2);
+}
+
+.violation-history-status {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.violation-history-status.pending { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+.violation-history-status.paid    { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.5); }
+.violation-history-status.pending_payment { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+
+.violation-history-name {
+    flex: 1;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.violation-history-fine {
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.violation-history-fine.unpaid { color: #ef4444; }
+.violation-history-fine.paid   { color: #10b981; }
+
+.violation-history-date {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ── Complaint List ── */
+.complaint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.complaint-item {
+    padding: 12px 14px;
+    background: rgba(245,158,11,0.06);
+    border-radius: 10px;
+    border: 1px solid rgba(245,158,11,0.15);
+}
+
+.complaint-item-reason {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #fbbf24;
+    margin-bottom: 4px;
+}
+
+.complaint-item-desc {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.complaint-item-status {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+/* Review Update Modal */
+.review-update-modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10001;
+    padding: 20px;
+    backdrop-filter: blur(4px);
+}
+
+.review-update-modal-box {
+    background: var(--bg-secondary);
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 480px;
+    padding: 28px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    animation: fadeIn 0.3s ease;
+}
+
+.review-update-modal-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+}
+
+.review-update-modal-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.update-change-row {
+    margin-bottom: 14px;
+}
+
+.update-change-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.update-change-value {
+    padding: 10px 14px;
+    background: rgba(99,102,241,0.08);
+    border-left: 3px solid var(--accent-primary);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* Responsive for detail grid */
+@media (max-width: 768px) {
+    .user-detail-grid {
+        grid-template-columns: 1fr;
+    }
+    .user-detail-header-card {
+        padding: 22px 20px;
+    }
+    .user-detail-stats-row {
+        width: 100%;
+        justify-content: center;
+    }
+}

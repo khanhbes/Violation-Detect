@@ -7,7 +7,7 @@
     <title>Traffic Violation Detection</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="apple-touch-icon" href="/static/app_icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=3">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
         rel="stylesheet">
 </head>
@@ -541,6 +541,17 @@
                 </div>
             </div>
 
+            <!-- Pending Update Requests Banner -->
+            <div id="pendingUpdatesBanner" style="display:none;" class="pending-updates-banner">
+                <div class="pending-updates-inner">
+                    <span class="pending-updates-icon">🔔</span>
+                    <span class="pending-updates-text">Có <strong id="pendingUpdatesCount">0</strong> yêu cầu thay đổi thông tin đang chờ duyệt từ người dùng App</span>
+                    <button class="btn btn-warning btn-sm" onclick="scrollToPendingUpdates()" style="margin-left:12px; padding: 6px 14px; font-size: 0.85rem;">
+                        Xem ngay
+                    </button>
+                </div>
+            </div>
+
             <!-- Table Card -->
             <div class="card manage-table-card">
                 <!-- Toolbar -->
@@ -562,18 +573,17 @@
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>Tài khoản</th>
-                                <th>Thông tin cá nhân</th>
-                                <th>Bằng lái & Điểm</th>
-                                <th>Phương tiện</th>
-                                <th>Vi phạm & Thanh toán</th>
-                                <th>Khiếu nại / TB</th>
+                                <th>Họ và tên</th>
+                                <th>Số CCCD</th>
+                                <th>Số điện thoại</th>
+                                <th>Vi phạm / Thanh toán</th>
+                                <th>Khiếu nại / Thông báo</th>
                                 <th>Hành động</th>
                             </tr>
                         </thead>
                         <tbody id="adminDataTableBody">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 60px 40px; font-weight: 500;">
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 60px 40px; font-weight: 500;">
                                     <div style="font-size: 2.5rem; margin-bottom: 12px;">📡</div>
                                     Nhấn <strong>Làm mới</strong> hoặc chuyển sang tab này để tải dữ liệu từ Firebase.
                                 </td>
@@ -585,6 +595,25 @@
                 <div class="manage-table-footer" id="manageTableFooter">
                     <span id="manageRowCount">0 người dùng</span>
                 </div>
+            </div>
+        </section>
+
+        <!-- ==================== USER DETAIL PAGE ==================== -->
+        <section id="tab-user-detail" class="tab-panel user-detail-fullpage">
+            <div class="user-detail-container">
+                <!-- Back button -->
+                <div class="user-detail-topbar">
+                    <button class="btn btn-secondary user-detail-back" onclick="closeUserDetailPage()">
+                        ← Quay lại Data Management
+                    </button>
+                    <div class="user-detail-actions-top" id="userDetailActionsTop"></div>
+                </div>
+
+                <!-- Header card -->
+                <div class="user-detail-header-card" id="userDetailHeader"></div>
+
+                <!-- Detail grid -->
+                <div class="user-detail-grid" id="userDetailGrid"></div>
             </div>
         </section>
 
@@ -606,7 +635,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
 
     <script src="/static/firebase-config.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=4"></script>
     <script src="/static/i18n.js"></script>
 </body>
 

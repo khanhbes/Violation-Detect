@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:traffic_violation_app/models/notification.dart';
 import 'package:traffic_violation_app/models/violation.dart';
@@ -126,6 +128,22 @@ class FirestoreService {
       debugPrint('✅ User profile updated in Firestore');
     } catch (e) {
       debugPrint('❌ Error updating user profile: $e');
+    }
+  }
+
+  /// Request profile update (Needs admin approval).
+  Future<void> requestProfileUpdate(String uid, Map<String, dynamic> requestData) async {
+    try {
+      await _db.collection('profile_update_requests').doc(uid).set({
+        ...requestData,
+        'userId': uid,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Profile update request sent to Firestore');
+    } catch (e) {
+      debugPrint('❌ Error sending profile update request: $e');
+      rethrow;
     }
   }
 
@@ -346,14 +364,31 @@ class FirestoreService {
     required String violationId,
     required String reason,
     required String description,
+    File? evidenceFile,
   }) async {
     try {
+      String evidenceUrl = '';
+      
+      // Upload evidence image if provided
+      if (evidenceFile != null) {
+        try {
+          final storage = FirebaseStorage.instance;
+          final ref = storage.ref('complaints/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg');
+          final uploadTask = await ref.putFile(evidenceFile);
+          evidenceUrl = await uploadTask.ref.getDownloadURL();
+        } catch (storageErr) {
+          debugPrint('⚠️ Evidence upload failed (continuing without): $storageErr');
+        }
+      }
+
       await _complaintsRef.add({
         'userId': userId,
         'violationId': violationId,
         'reason': reason,
         'description': description,
         'status': 'pending',
+        'evidenceUrl': evidenceUrl,
+        'adminNote': '',
         'createdAt': FieldValue.serverTimestamp(),
       });
       debugPrint('✅ Complaint submitted successfully');

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.37",
-  "buildNumber": 35,
-  "downloadUrl": "/api/app/download-apk/app-release-v1.0.37.apk",
-  "changelog": "update",
+  "version": "1.0.42",
+  "buildNumber": 40,
+  "downloadUrl": "/api/app/download-apk/app-release-v1.0.42.apk",
+  "changelog": "GPLX, chuong thong bao",
   "forceUpdate": false
 }

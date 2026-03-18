@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:traffic_violation_app/services/firestore_service.dart';
-import 'package:traffic_violation_app/models/user.dart' as app;
+
 
 /// Global app settings singleton — manages theme, locale, notifications, user profile.
 /// Now persists all data to Firebase Firestore.
@@ -54,7 +54,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   // ── Notification Badge Count ───────────────────────────────────
-  int _unreadNotifications = 3; // Default some unread on start
+  int _unreadNotifications = 0; // Will be set from Firestore realtime notifications
   int get unreadNotifications => _unreadNotifications;
 
   void addNotification() {
@@ -70,6 +70,13 @@ class AppSettings extends ChangeNotifier {
   void setNotificationCount(int count) {
     _unreadNotifications = count;
     notifyListeners();
+  }
+
+  void setUserPoints(int points) {
+    if (_userPoints != points) {
+      _userPoints = points;
+      notifyListeners();
+    }
   }
 
   // ── Notification Toggle (on/off) ───────────────────────────────
@@ -95,12 +102,20 @@ class AppSettings extends ChangeNotifier {
   String _userAddress = '';
   String _userAvatar = '';
   String _userIdCard = '';
+  String _userIdCardIssueDate = '';
+  String _userOccupation = '';
+  String _userDateOfBirth = '';
+  int _userPoints = 12;
 
   String get userName => _userName;
   String get userEmail => _userEmail;
   String get userPhone => _userPhone;
   String get userAddress => _userAddress;
   String get userAvatar => _userAvatar;
+  String get userIdCardIssueDate => _userIdCardIssueDate;
+  String get userOccupation => _userOccupation;
+  String get userDateOfBirth => _userDateOfBirth;
+  int get userPoints => _userPoints;
   String get userIdCard {
     if (_userIdCard.isNotEmpty) return _userIdCard;
     if (_userEmail.isNotEmpty && _userEmail.contains('@')) {
@@ -127,6 +142,9 @@ class AppSettings extends ChangeNotifier {
     required String address,
     required String avatar,
     required String idCard,
+    String idCardIssueDate = '',
+    String occupation = '',
+    String dateOfBirth = '',
   }) {
     if (!_profileInitialized) {
       _userName = name;
@@ -135,6 +153,9 @@ class AppSettings extends ChangeNotifier {
       _userAddress = address;
       _userAvatar = avatar;
       _userIdCard = idCard;
+      _userIdCardIssueDate = idCardIssueDate;
+      _userOccupation = occupation;
+      _userDateOfBirth = dateOfBirth;
       _profileInitialized = true;
     }
   }
@@ -146,6 +167,9 @@ class AppSettings extends ChangeNotifier {
     String? address,
     String? avatar,
     String? idCard,
+    String? idCardIssueDate,
+    String? occupation,
+    String? dateOfBirth,
   }) {
     if (name != null) _userName = name;
     if (email != null) _userEmail = email;
@@ -153,6 +177,9 @@ class AppSettings extends ChangeNotifier {
     if (address != null) _userAddress = address;
     if (avatar != null) _userAvatar = avatar;
     if (idCard != null) _userIdCard = idCard;
+    if (idCardIssueDate != null) _userIdCardIssueDate = idCardIssueDate;
+    if (occupation != null) _userOccupation = occupation;
+    if (dateOfBirth != null) _userDateOfBirth = dateOfBirth;
     notifyListeners();
     _saveProfileToFirestore();
   }
@@ -181,6 +208,10 @@ class AppSettings extends ChangeNotifier {
         _userAddress = user.address;
         _userAvatar = user.avatar ?? '';
         _userIdCard = user.idCard;
+        _userIdCardIssueDate = user.idCardIssueDate ?? '';
+        _userOccupation = user.occupation ?? '';
+        _userDateOfBirth = user.dateOfBirth ?? '';
+        _userPoints = user.points;
         _profileInitialized = true;
         debugPrint('✅ Profile loaded from Firestore: $_userName');
       } else {
@@ -202,6 +233,9 @@ class AppSettings extends ChangeNotifier {
               'address': _userAddress,
               'avatar': _userAvatar,
               'idCard': _userIdCard,
+              'idCardIssueDate': _userIdCardIssueDate,
+              'occupation': _userOccupation,
+              'dateOfBirth': _userDateOfBirth,
             });
             debugPrint('✅ Profile auto-created in Firestore from Auth data');
           }
@@ -256,6 +290,9 @@ class AppSettings extends ChangeNotifier {
         'address': _userAddress,
         'avatar': _userAvatar,
         'idCard': _userIdCard,
+        'idCardIssueDate': _userIdCardIssueDate,
+        'occupation': _userOccupation,
+        'dateOfBirth': _userDateOfBirth,
       });
       debugPrint('✅ Profile saved to Firestore');
     } catch (e) {
