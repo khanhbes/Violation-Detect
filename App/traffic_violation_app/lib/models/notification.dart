@@ -32,7 +32,7 @@ class AppNotification {
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     final title = json['title'] ?? '';
     final body = json['body'] ?? '';
-    
+
     // Parse timestamp: support both 'timestamp' and 'createdAt'
     DateTime ts = DateTime.now();
     final rawTs = json['createdAt'] ?? json['timestamp'];
@@ -72,6 +72,7 @@ class AppNotification {
       'detail': detail,
       'detailEn': detailEn,
       'type': type,
+      'violationId': violationId,
       'timestamp': Timestamp.fromDate(timestamp),
       'isRead': isRead,
     };

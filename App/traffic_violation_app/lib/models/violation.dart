@@ -12,6 +12,11 @@ class Violation {
   final double fineAmount;
   final String status; // 'pending', 'paid', 'cancelled'
   final String lawReference;
+  final String complaintStatus; // 'none', 'pending', 'approved', 'rejected'
+  final bool paymentLocked;
+  final bool complaintLocked;
+  final DateTime? paymentDueDate;
+  final DateTime? paidAt;
 
   Violation({
     required this.id,
@@ -25,11 +30,25 @@ class Violation {
     required this.fineAmount,
     this.status = 'pending',
     this.lawReference = '',
+    this.complaintStatus = '',
+    this.paymentLocked = false,
+    this.complaintLocked = false,
+    this.paymentDueDate,
+    this.paidAt,
   });
 
-  bool get isPending => status == 'pending';
+  bool get isPending => status == 'pending' || status == 'pending_payment';
   bool get isPaid => status == 'paid';
   bool get isCancelled => status == 'cancelled';
+  bool get isComplaintPending {
+    final normalized = complaintStatus.trim().toLowerCase();
+    if (normalized == 'pending') return true;
+    if (status == 'complaint_pending') return true;
+    return paymentLocked || complaintLocked;
+  }
+
+  bool get canPay => isPending && !isComplaintPending;
+  bool get canComplain => isPending && !isComplaintPending;
 
   /// Parse timestamp from either Firestore Timestamp or ISO string.
   static DateTime _parseTimestamp(dynamic value) {
@@ -56,6 +75,13 @@ class Violation {
       fineAmount: (json['fineAmount'] ?? 0).toDouble(),
       status: json['status'] ?? 'pending',
       lawReference: json['lawReference'] ?? '',
+      complaintStatus: json['complaintStatus']?.toString() ?? '',
+      paymentLocked: json['paymentLocked'] == true,
+      complaintLocked: json['complaintLocked'] == true,
+      paymentDueDate: json['paymentDueDate'] != null
+          ? _parseTimestamp(json['paymentDueDate'])
+          : null,
+      paidAt: json['paidAt'] != null ? _parseTimestamp(json['paidAt']) : null,
     );
   }
 
@@ -72,6 +98,11 @@ class Violation {
       'fineAmount': fineAmount,
       'status': status,
       'lawReference': lawReference,
+      'complaintStatus': complaintStatus,
+      'paymentLocked': paymentLocked,
+      'complaintLocked': complaintLocked,
+      'paymentDueDate': paymentDueDate?.toIso8601String(),
+      'paidAt': paidAt?.toIso8601String(),
     };
   }
 }

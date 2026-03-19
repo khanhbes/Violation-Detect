@@ -12,9 +12,10 @@ import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:traffic_violation_app/screens/violations_screen.dart';
 import 'package:traffic_violation_app/screens/profile_screen.dart';
-import 'package:traffic_violation_app/screens/vehicles_screen.dart' as home_vehicles;
+import 'package:traffic_violation_app/screens/vehicles_screen.dart'
+    as home_vehicles;
+import 'package:traffic_violation_app/widgets/app_info_dialogs.dart';
 import 'dart:async';
-
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -34,8 +35,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   StreamSubscription? _newViolationSub;
   StreamSubscription? _connectionSub;
   StreamSubscription? _firestoreSub;
-  StreamSubscription? _notifCountSub;  // realtime unread notification count
-  StreamSubscription? _userPointsSub;  // realtime GPLX points from Firestore
+  StreamSubscription? _notifCountSub; // realtime unread notification count
+  StreamSubscription? _userPointsSub; // realtime GPLX points from Firestore
 
   late AnimationController _fadeController;
   late AnimationController _slideController;
@@ -83,7 +84,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
 
     final uid = _settings.uid;
-    _firestoreSub = FirestoreService().violationsStream(userId: uid).listen((violations) {
+    _firestoreSub =
+        FirestoreService().violationsStream(userId: uid).listen((violations) {
       if (mounted) {
         setState(() {
           _violations = violations;
@@ -94,20 +96,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     // ── Realtime notification badge from Firestore ──
     if (uid != null) {
-      _notifCountSub = FirestoreService().notificationsStream(uid).listen((notifs) {
+      _notifCountSub =
+          FirestoreService().notificationsStream(uid).listen((notifs) {
         final unread = notifs.where((n) => !n.isRead).length;
         _settings.setNotificationCount(unread);
       });
 
-      // ── Realtime user points (GPLX) from Firestore ──
+      // ── Realtime user profile + GPLX data from Firestore ──
       _userPointsSub = FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .snapshots()
           .listen((doc) {
         if (doc.exists && mounted) {
-          final pts = (doc.data()?['points'] as num?)?.toInt();
-          if (pts != null) _settings.setUserPoints(pts);
+          final data = doc.data();
+          if (data != null) {
+            _settings.applyRemoteProfileData(data);
+          }
         }
       });
     }
@@ -135,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _showNewViolationDialog(Violation violation) {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -143,7 +148,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           contentPadding: const EdgeInsets.all(24),
           title: Row(
@@ -154,14 +160,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   color: AppTheme.dangerColor.withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.warning_amber_rounded, color: AppTheme.dangerColor),
+                child: const Icon(Icons.warning_amber_rounded,
+                    color: AppTheme.dangerColor),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   _settings.tr('Phát hiện vi phạm!', 'New Violation!'),
                   style: TextStyle(
-                    fontWeight: FontWeight.w700, 
+                    fontWeight: FontWeight.w700,
                     fontSize: 18,
                     color: isDark ? Colors.white : AppTheme.textPrimary,
                   ),
@@ -176,7 +183,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Text(
                 violation.violationType,
                 style: TextStyle(
-                  fontSize: 15, 
+                  fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : AppTheme.textPrimary,
                 ),
@@ -184,10 +191,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const SizedBox(height: 8),
               Text(
                 '${_settings.tr('Mức phạt', 'Fine')}: ${formatter.format(violation.fineAmount)}',
-                style: const TextStyle(color: AppTheme.dangerColor, fontWeight: FontWeight.bold, fontSize: 16),
+                style: const TextStyle(
+                    color: AppTheme.dangerColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
               ),
               const SizedBox(height: 12),
-              if (violation.imageUrl.isNotEmpty && violation.imageUrl.startsWith('http'))
+              if (violation.imageUrl.isNotEmpty &&
+                  violation.imageUrl.startsWith('http'))
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
@@ -202,23 +213,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: Text(
-                _settings.tr('Đóng', 'Close'), 
-                style: TextStyle(color: isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary)
-              ),
+              child: Text(_settings.tr('Đóng', 'Close'),
+                  style: TextStyle(
+                      color: isDark
+                          ? const Color(0xFF9E9E9E)
+                          : AppTheme.textSecondary)),
             ),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 // Also switch to 'Violations' tab just in case
                 setState(() => _selectedIndex = 1);
-                Navigator.pushNamed(context, '/violation_detail', arguments: violation.id);
+                Navigator.pushNamed(context, '/violation_detail',
+                    arguments: violation.id);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryColor,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
-              child: Text(_settings.tr('Nộp phạt ngay', 'Pay Fine'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: Text(_settings.tr('Nộp phạt ngay', 'Pay Fine'),
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -289,15 +305,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Row(
             children: [
               // Trang chủ
-              Expanded(child: _buildNavItem(0, Icons.home_outlined, Icons.home_rounded, _settings.tr('Trang chủ', 'Home'))),
+              Expanded(
+                  child: _buildNavItem(0, Icons.home_outlined,
+                      Icons.home_rounded, _settings.tr('Trang chủ', 'Home'))),
               // Vi phạm
-              Expanded(child: _buildNavItem(1, Icons.warning_amber_outlined, Icons.warning_amber_rounded, _settings.tr('Vi phạm', 'Violations'), badge: pendingCount)),
+              Expanded(
+                  child: _buildNavItem(
+                      1,
+                      Icons.warning_amber_outlined,
+                      Icons.warning_amber_rounded,
+                      _settings.tr('Vi phạm', 'Violations'),
+                      badge: pendingCount)),
               // Center FAB (+)
               _buildCenterFAB(),
               // Ví giấy tờ
-              Expanded(child: _buildNavItem(2, Icons.account_balance_wallet_outlined, Icons.account_balance_wallet_rounded, _settings.tr('Ví giấy tờ', 'Wallet'))),
+              Expanded(
+                  child: _buildNavItem(
+                      2,
+                      Icons.account_balance_wallet_outlined,
+                      Icons.account_balance_wallet_rounded,
+                      _settings.tr('Ví giấy tờ', 'Wallet'))),
               // Cá nhân
-              Expanded(child: _buildNavItem(3, Icons.person_outline_rounded, Icons.person_rounded, _settings.tr('Cá nhân', 'Profile'))),
+              Expanded(
+                  child: _buildNavItem(
+                      3,
+                      Icons.person_outline_rounded,
+                      Icons.person_rounded,
+                      _settings.tr('Cá nhân', 'Profile'))),
             ],
           ),
         ),
@@ -305,7 +339,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildNavItem(int index, IconData icon, IconData activeIcon, String label, {int badge = 0}) {
+  Widget _buildNavItem(
+      int index, IconData icon, IconData activeIcon, String label,
+      {int badge = 0}) {
     final isSelected = _selectedIndex == index;
 
     return GestureDetector(
@@ -318,16 +354,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             duration: const Duration(milliseconds: 250),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             decoration: BoxDecoration(
-              color: isSelected ? AppTheme.primaryColor.withOpacity(0.1) : Colors.transparent,
+              color: isSelected
+                  ? AppTheme.primaryColor.withOpacity(0.1)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Badge(
               isLabelVisible: badge > 0,
-              label: Text('$badge', style: const TextStyle(fontSize: 9, color: Colors.white)),
+              label: Text('$badge',
+                  style: const TextStyle(fontSize: 9, color: Colors.white)),
               backgroundColor: AppTheme.primaryColor,
               child: Icon(
                 isSelected ? activeIcon : icon,
-                color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
+                color:
+                    isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
                 size: 24,
               ),
             ),
@@ -338,7 +378,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             style: TextStyle(
               fontSize: 10,
               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
+              color:
+                  isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -415,7 +456,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.apps_rounded, color: Colors.white, size: 20),
+                    child: const Icon(Icons.apps_rounded,
+                        color: Colors.white, size: 20),
                   ),
                   const SizedBox(width: 12),
                   Text(
@@ -440,59 +482,95 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 mainAxisSpacing: 12,
                 childAspectRatio: 0.85,
                 children: [
-                  _buildSheetItem(Icons.search_rounded, _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'), const Color(0xFFE53935), () {
+                  _buildSheetItem(
+                      Icons.search_rounded,
+                      _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'),
+                      const Color(0xFFE53935), () {
                     Navigator.pop(ctx);
                     _showViolationLookup();
                   }),
-                  _buildSheetItem(Icons.payment_rounded, _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'), const Color(0xFFF57C00), () {
+                  _buildSheetItem(
+                      Icons.payment_rounded,
+                      _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
+                      const Color(0xFFF57C00), () {
                     Navigator.pop(ctx);
                     _showPaymentList();
                   }),
-                  _buildSheetItem(Icons.history_rounded, _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'), const Color(0xFF1565C0), () {
+                  _buildSheetItem(
+                      Icons.history_rounded,
+                      _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'),
+                      const Color(0xFF1565C0), () {
                     Navigator.pop(ctx);
                     setState(() => _selectedIndex = 1);
                   }),
-                  _buildSheetItem(Icons.rate_review_rounded, _settings.tr('Khiếu nại\nvi phạm', 'File\nComplaint'), const Color(0xFF2E7D32), () {
+                  _buildSheetItem(
+                      Icons.rate_review_rounded,
+                      _settings.tr('Khiếu nại\nvi phạm', 'File\nComplaint'),
+                      const Color(0xFF2E7D32), () {
                     Navigator.pop(ctx);
                     Navigator.pushNamed(context, '/complaint');
                   }),
-                  _buildSheetItem(Icons.gavel_rounded, _settings.tr('Luật\nGTĐB', 'Traffic\nLaws'), AppTheme.warningColor, () {
+                  _buildSheetItem(
+                      Icons.gavel_rounded,
+                      _settings.tr('Luật\nGTĐB', 'Traffic\nLaws'),
+                      AppTheme.warningColor, () {
                     Navigator.pop(ctx);
                     Navigator.pushNamed(context, '/traffic-laws');
                   }),
-                  _buildSheetItem(Icons.qr_code_scanner_rounded, _settings.tr('Quét\nQR Code', 'Scan\nQR Code'), AppTheme.infoColor, () {
+                  _buildSheetItem(
+                      Icons.qr_code_scanner_rounded,
+                      _settings.tr('Quét\nQR Code', 'Scan\nQR Code'),
+                      AppTheme.infoColor, () {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(_settings.tr('Tính năng đang phát triển', 'Feature in development'))),
-                    );
+                    Navigator.pushNamed(context, '/qr-scan');
                   }),
-                  _buildSheetItem(Icons.directions_car_rounded, _settings.tr('Phương\ntiện', 'My\nVehicles'), const Color(0xFF5C6BC0), () {
+                  _buildSheetItem(
+                      Icons.directions_car_rounded,
+                      _settings.tr('Phương\ntiện', 'My\nVehicles'),
+                      const Color(0xFF5C6BC0), () {
                     Navigator.pop(ctx);
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const home_vehicles.VehiclesScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const home_vehicles.VehiclesScreen()),
                     );
                   }),
-                  _buildSheetItem(Icons.support_agent_rounded, _settings.tr('Hỗ trợ\ntrực tuyến', 'Online\nSupport'), AppTheme.successColor, () {
+                  _buildSheetItem(
+                      Icons.support_agent_rounded,
+                      _settings.tr('Hỗ trợ\ntrực tuyến', 'Online\nSupport'),
+                      AppTheme.successColor, () {
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Hotline: 1900.xxxx')),
                     );
                   }),
-                  _buildSheetItem(Icons.notifications_outlined, _settings.tr('Thông\nbáo', 'Notifi-\ncations'), Colors.deepOrange, () {
+                  _buildSheetItem(
+                      Icons.notifications_outlined,
+                      _settings.tr('Thông\nbáo', 'Notifi-\ncations'),
+                      Colors.deepOrange, () {
                     Navigator.pop(ctx);
                     Navigator.pushNamed(context, '/notifications');
                   }),
-                  _buildSheetItem(Icons.badge_rounded, _settings.tr('Ví\ngiấy tờ', 'Doc\nWallet'), const Color(0xFF1A237E), () {
+                  _buildSheetItem(
+                      Icons.badge_rounded,
+                      _settings.tr('Ví\ngiấy tờ', 'Doc\nWallet'),
+                      const Color(0xFF1A237E), () {
                     Navigator.pop(ctx);
                     setState(() => _selectedIndex = 2);
                   }),
-                  _buildSheetItem(Icons.router_rounded, _settings.tr('Chỉnh\nIP Server', 'Server\nIP'), AppTheme.primaryColor, () {
+                  _buildSheetItem(
+                      Icons.router_rounded,
+                      _settings.tr('Chỉnh\nIP Server', 'Server\nIP'),
+                      AppTheme.primaryColor, () {
                     Navigator.pop(ctx);
                     setState(() => _selectedIndex = 3);
                   }),
-                  _buildSheetItem(Icons.info_outline_rounded, _settings.tr('Về\nứng dụng', 'About\nApp'), AppTheme.textSecondary, () {
+                  _buildSheetItem(
+                      Icons.info_outline_rounded,
+                      _settings.tr('Về\nứng dụng', 'About\nApp'),
+                      AppTheme.textSecondary, () {
                     Navigator.pop(ctx);
+                    AppInfoDialogs.showAboutDialog(context, _settings);
                   }),
                 ],
               ),
@@ -504,7 +582,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSheetItem(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _buildSheetItem(
+      IconData icon, String label, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
@@ -545,7 +624,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       onRefresh: () async {
         if (_settings.uid != null) {
           await _settings.loadFromFirestore(_settings.uid!);
-          final _ = await FirestoreService().violationsStream(userId: _settings.uid!).first;
+          final _ = await FirestoreService()
+              .violationsStream(userId: _settings.uid!)
+              .first;
         }
         setState(() {});
       },
@@ -584,11 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  WALLET FULL PAGE (tab index 2)
   // ═══════════════════════════════════════════════════════════════
   Widget _buildWalletFullPage() {
-    int licensePoints = 12;
-    for (final v in _violations) {
-      licensePoints -= _getPointsDeducted(v.violationType);
-    }
-    if (licensePoints < 0) licensePoints = 0;
+    final licenses = _walletLicenses();
 
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
@@ -596,7 +673,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         onRefresh: () async {
           if (_settings.uid != null) {
             await _settings.loadFromFirestore(_settings.uid!);
-            final _ = await FirestoreService().violationsStream(userId: _settings.uid!).first;
+            final _ = await FirestoreService()
+                .violationsStream(userId: _settings.uid!)
+                .first;
           }
           setState(() {});
         },
@@ -604,102 +683,107 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-          // Header
-          SliverToBoxAdapter(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: AppTheme.headerGradient,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(28),
-                  bottomRight: Radius.circular(28),
+            // Header
+            SliverToBoxAdapter(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: AppTheme.headerGradient,
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(28),
+                    bottomRight: Radius.circular(28),
+                  ),
                 ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.wallet_rounded,
+                              color: Colors.white, size: 22),
                         ),
-                        child: const Icon(Icons.wallet_rounded, color: Colors.white, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        _settings.tr('Ví giấy tờ', 'Document Wallet'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
+                        const SizedBox(width: 12),
+                        Text(
+                          _settings.tr('Ví giấy tờ', 'Document Wallet'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          // Cards
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                _buildSectionLabel(_settings.tr('Căn cước công dân', 'Citizen ID Card'), Icons.credit_card_rounded, const Color(0xFF1A237E)),
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: () => _showCccdDetail(null),
-                  child: _buildCccdCard(null),
-                ),
-                const SizedBox(height: 20),
-                _buildSectionLabel(_settings.tr('Giấy phép lái xe', 'Driver License'), Icons.badge_rounded, AppTheme.primaryColor),
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: () => _showLicenseDetail(
-                    licenseClass: 'B2',
-                    vehicleType: _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
-                    issueDate: '15/03/2020',
-                    expiryDate: '15/03/2030',
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
+            // Cards
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  _buildSectionLabel(
+                      _settings.tr('Căn cước công dân', 'Citizen ID Card'),
+                      Icons.credit_card_rounded,
+                      const Color(0xFF1A237E)),
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: () => _showCccdDetail(null),
+                    child: _buildCccdCard(null),
                   ),
-                  child: _buildLicenseCard(
-                    licenseClass: 'B2',
-                    vehicleType: _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
-                    issueDate: '15/03/2020',
-                    expiryDate: '15/03/2030',
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () => _showLicenseDetail(
-                    licenseClass: 'A1',
-                    vehicleType: _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
-                    issueDate: '20/06/2018',
-                    expiryDate: _settings.tr('Không thời hạn', 'No expiry'),
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                  child: _buildLicenseCard(
-                    licenseClass: 'A1',
-                    vehicleType: _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
-                    issueDate: '20/06/2018',
-                    expiryDate: _settings.tr('Không thời hạn', 'No expiry'),
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                ),
-                const SizedBox(height: 100),
-              ]),
+                  const SizedBox(height: 20),
+                  _buildSectionLabel(
+                      _settings.tr('Giấy phép lái xe', 'Driver License'),
+                      Icons.badge_rounded,
+                      AppTheme.primaryColor),
+                  const SizedBox(height: 10),
+                  ...licenses.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final license = entry.value;
+                    final licenseType = _resolveLicenseType(license);
+                    final licensePoints = _pointsForLicenseType(licenseType);
+                    final isDisabled = licensePoints <= 0;
+                    return Padding(
+                      padding: EdgeInsets.only(
+                          bottom: index == licenses.length - 1 ? 0 : 12),
+                      child: GestureDetector(
+                        onTap: () => _showLicenseDetail(
+                          licenseIndex: index,
+                          licenseClass: license['class'] ?? '',
+                          vehicleType: license['vehicleType'] ?? '',
+                          issueDate: license['issueDate'] ?? '',
+                          expiryDate: license['expiryDate'] ?? '',
+                          licenseNumber: license['licenseNumber'] ?? '',
+                          issuedBy: license['issuedBy'] ?? '',
+                          licenseType: licenseType,
+                          points: licensePoints,
+                          isDisabled: isDisabled,
+                        ),
+                        child: _buildLicenseCard(
+                          licenseClass: license['class'] ?? '',
+                          vehicleType: license['vehicleType'] ?? '',
+                          issueDate: license['issueDate'] ?? '',
+                          expiryDate: license['expiryDate'] ?? '',
+                          licenseNumber: license['licenseNumber'] ?? '',
+                          licenseType: licenseType,
+                          points: licensePoints,
+                          isDisabled: isDisabled,
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 100),
+                ]),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -759,13 +843,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       height: 48,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+                        border: Border.all(
+                            color: Colors.white.withOpacity(0.4), width: 2),
                         image: _buildAvatarDecoration(avatarUrl),
                       ),
                       child: (avatarUrl.isEmpty)
                           ? Center(
                               child: Text(
-                                displayName.isNotEmpty ? displayName.substring(0, 1).toUpperCase() : '?',
+                                displayName.isNotEmpty
+                                    ? displayName.substring(0, 1).toUpperCase()
+                                    : '?',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 20,
@@ -808,10 +895,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           isLabelVisible: _settings.unreadNotifications > 0,
                           label: Text(
                             '${_settings.unreadNotifications}',
-                            style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700),
+                            style: const TextStyle(
+                                fontSize: 9,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700),
                           ),
                           backgroundColor: AppTheme.accentColor,
-                          child: const Icon(Icons.notifications_outlined, color: Colors.white),
+                          child: const Icon(Icons.notifications_outlined,
+                              color: Colors.white),
                         ),
                         onPressed: () {
                           _settings.clearNotifications();
@@ -824,14 +915,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 const SizedBox(height: 20),
                 // Verification bar
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.verified_user_outlined, color: Colors.white.withOpacity(0.9), size: 20),
+                      Icon(Icons.verified_user_outlined,
+                          color: Colors.white.withOpacity(0.9), size: 20),
                       const SizedBox(width: 10),
                       Text(
                         '${_settings.tr('Xác thực', 'Verified')}: $idCard',
@@ -843,7 +936,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: AppTheme.accentColor,
                           borderRadius: BorderRadius.circular(20),
@@ -881,12 +975,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: isConnected
-            ? (isRealtime ? Colors.green.withOpacity(0.08) : Colors.blue.withOpacity(0.08))
+            ? (isRealtime
+                ? Colors.green.withOpacity(0.08)
+                : Colors.blue.withOpacity(0.08))
             : Colors.red.withOpacity(0.08),
         borderRadius: BorderRadius.circular(AppTheme.radiusM),
         border: Border.all(
           color: isConnected
-              ? (isRealtime ? Colors.green.withOpacity(0.25) : Colors.blue.withOpacity(0.25))
+              ? (isRealtime
+                  ? Colors.green.withOpacity(0.25)
+                  : Colors.blue.withOpacity(0.25))
               : Colors.red.withOpacity(0.25),
         ),
       ),
@@ -896,7 +994,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: (isConnected ? (isRealtime ? Colors.green : Colors.blue) : Colors.red)
+              color: (isConnected
+                      ? (isRealtime ? Colors.green : Colors.blue)
+                      : Colors.red)
                   .withOpacity(0.12),
               borderRadius: BorderRadius.circular(8),
             ),
@@ -904,7 +1004,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               isConnected
                   ? (isRealtime ? Icons.bolt_rounded : Icons.sync_rounded)
                   : Icons.wifi_off_rounded,
-              color: isConnected ? (isRealtime ? Colors.green : Colors.blue) : Colors.red,
+              color: isConnected
+                  ? (isRealtime ? Colors.green : Colors.blue)
+                  : Colors.red,
               size: 18,
             ),
           ),
@@ -912,7 +1014,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Expanded(
             child: Text(
               isConnected
-                  ? (isRealtime ? _settings.tr('Đã kết nối (Real-time)', 'Connected (Real-time)') : _settings.tr('Đã kết nối (Polling)', 'Connected (Polling)'))
+                  ? (isRealtime
+                      ? _settings.tr(
+                          'Đã kết nối (Real-time)', 'Connected (Real-time)')
+                      : _settings.tr(
+                          'Đã kết nối (Polling)', 'Connected (Polling)'))
                   : _settings.tr('Mất kết nối máy chủ', 'Server disconnected'),
               style: TextStyle(
                 color: isConnected
@@ -927,7 +1033,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: (isRealtime ? Colors.green : Colors.blue).withOpacity(0.15),
+                color:
+                    (isRealtime ? Colors.green : Colors.blue).withOpacity(0.15),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -945,11 +1052,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               onTap: () {
                 _api.reconnect();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(_settings.tr('Đang kết nối lại...', 'Reconnecting...'))),
+                  SnackBar(
+                      content: Text(_settings.tr(
+                          'Đang kết nối lại...', 'Reconnecting...'))),
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.red.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
@@ -1026,8 +1136,430 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ═══════════════════════════════════════════════════════════════
   //  DOCUMENT WALLET (Ví giấy tờ — CCCD + GPLX + Điểm)
   // ═══════════════════════════════════════════════════════════════
+  List<Map<String, String>> _walletLicenses() {
+    final fromProfile = _settings.driverLicenses
+        .where((l) =>
+            (l['class'] ?? '').isNotEmpty ||
+            (l['licenseNumber'] ?? '').isNotEmpty)
+        .map((l) => Map<String, String>.from(l))
+        .toList();
+    if (fromProfile.isNotEmpty) return fromProfile;
+
+    return [
+      {
+        'class': 'B2',
+        'vehicleType': _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
+        'issueDate': '15/03/2020',
+        'expiryDate': '15/03/2030',
+        'licenseNumber': '079201001234',
+        'issuedBy': _settings.userLicenseIssuedBy,
+      },
+      {
+        'class': 'A2',
+        'vehicleType':
+            _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
+        'issueDate': '20/06/2018',
+        'expiryDate': _settings.tr('Không thời hạn', 'No expiry'),
+        'licenseNumber': '079201001234',
+        'issuedBy': _settings.userLicenseIssuedBy,
+      },
+    ];
+  }
+
+  String _resolveLicenseType(Map<String, String> license) {
+    final vehicleType = (license['vehicleType'] ?? '').toLowerCase();
+    final cls = (license['class'] ?? '').toUpperCase();
+    if (vehicleType.contains('xe máy') ||
+        vehicleType.contains('motor') ||
+        cls.startsWith('A')) {
+      return 'motorcycle';
+    }
+    if (vehicleType.contains('ô tô') ||
+        vehicleType.contains('o to') ||
+        vehicleType.contains('car') ||
+        cls.startsWith('B') ||
+        cls.startsWith('C') ||
+        cls.startsWith('D') ||
+        cls.startsWith('E') ||
+        cls.startsWith('F')) {
+      return 'car';
+    }
+    return 'motorcycle';
+  }
+
+  int _pointsForLicenseType(String licenseType) {
+    if (licenseType == 'car') {
+      return _settings.carLicensePoints.clamp(0, 12).toInt();
+    }
+    return _settings.motoLicensePoints.clamp(0, 12).toInt();
+  }
+
+  Map<String, dynamic> _legacyLicenseFieldsFrom(
+      List<Map<String, String>> licenses) {
+    Map<String, String>? car;
+    Map<String, String>? moto;
+    for (final l in licenses) {
+      final vehicleType = (l['vehicleType'] ?? '').toLowerCase();
+      final cls = (l['class'] ?? '').toUpperCase();
+      if (car == null &&
+          (vehicleType.contains('ô tô') ||
+              vehicleType.contains('car') ||
+              cls.startsWith('B') ||
+              cls.startsWith('C') ||
+              cls.startsWith('D') ||
+              cls.startsWith('E') ||
+              cls == 'FB2')) {
+        car = l;
+      }
+      if (moto == null &&
+          (vehicleType.contains('xe máy') ||
+              vehicleType.contains('motor') ||
+              cls.startsWith('A'))) {
+        moto = l;
+      }
+    }
+
+    final first = licenses.isNotEmpty ? licenses.first : null;
+    return {
+      'licenseNumber': first?['licenseNumber'] ?? '',
+      'licenseIssueDate': first?['issueDate'] ?? '',
+      'licenseExpiryDate': first?['expiryDate'] ?? '',
+      'licenseIssuedBy': first?['issuedBy'] ?? _settings.userLicenseIssuedBy,
+      'carLicenseClass': car?['class'] ?? '',
+      'motoLicenseClass': moto?['class'] ?? '',
+    };
+  }
+
+  Future<void> _submitWalletUpdateRequest(
+    Map<String, dynamic> requestData, {
+    required String successVi,
+    required String successEn,
+  }) async {
+    final uid = _settings.uid;
+    if (uid == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      await FirestoreService().requestProfileUpdate(uid, requestData);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settings.tr(successVi, successEn)),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settings.tr('Lỗi khi gửi yêu cầu chỉnh sửa giấy tờ.',
+              'Failed to send document update request.')),
+          backgroundColor: AppTheme.dangerColor,
+        ),
+      );
+    }
+  }
+
+  void _showEditCccdDialog() {
+    final fullNameController = TextEditingController(text: _settings.userName);
+    final idCardController = TextEditingController(text: _settings.userIdCard);
+    final genderController = TextEditingController(text: _settings.userGender);
+    final nationalityController = TextEditingController(
+      text: _settings.userNationality.isNotEmpty
+          ? _settings.userNationality
+          : _settings.tr('Việt Nam', 'Vietnam'),
+    );
+    final originController = TextEditingController(
+      text: _settings.userPlaceOfOrigin,
+    );
+    final addressController =
+        TextEditingController(text: _settings.userAddress);
+    final occupationController =
+        TextEditingController(text: _settings.userOccupation);
+    final issueDateController =
+        TextEditingController(text: _settings.userIdCardIssueDate);
+    final expiryDateController =
+        TextEditingController(text: _settings.userIdCardExpiryDate);
+    final dobController =
+        TextEditingController(text: _settings.userDateOfBirth);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_settings.tr('Chỉnh sửa CCCD', 'Edit Citizen ID')),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: fullNameController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Họ và tên', 'Full name'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: idCardController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Số CCCD', 'ID Number'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: dobController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Ngày sinh', 'Date of birth'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: genderController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Giới tính', 'Gender'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: nationalityController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Quốc tịch', 'Nationality'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: originController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Quê quán', 'Place of origin'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: addressController,
+                  decoration: InputDecoration(
+                    labelText:
+                        _settings.tr('Nơi thường trú', 'Permanent address'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: issueDateController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Ngày cấp', 'Issue date'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: expiryDateController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Có giá trị đến', 'Valid until'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: occupationController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Nghề nghiệp', 'Occupation'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_settings.tr('Hủy', 'Cancel')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final fullName = fullNameController.text.trim();
+              final idCard = idCardController.text.trim();
+              if (fullName.isEmpty || idCard.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_settings.tr(
+                      'Vui lòng nhập đầy đủ Họ tên và Số CCCD',
+                      'Please enter both full name and ID number',
+                    )),
+                    backgroundColor: AppTheme.warningColor,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              _submitWalletUpdateRequest(
+                {
+                  'fullName': fullName,
+                  'idCard': idCard,
+                  'gender': genderController.text.trim(),
+                  'nationality': nationalityController.text.trim(),
+                  'placeOfOrigin': originController.text.trim(),
+                  'address': addressController.text.trim(),
+                  'idCardIssueDate': issueDateController.text.trim(),
+                  'idCardExpiryDate': expiryDateController.text.trim(),
+                  'dateOfBirth': dobController.text.trim(),
+                  'occupation': occupationController.text.trim(),
+                  'requestSection': 'wallet_cccd',
+                },
+                successVi:
+                    'Đã gửi yêu cầu cập nhật CCCD. Vui lòng chờ admin duyệt.',
+                successEn:
+                    'Citizen ID update request sent. Please wait for admin approval.',
+              );
+            },
+            child: Text(_settings.tr('Gửi duyệt', 'Submit for approval')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditLicenseDialog({required int licenseIndex}) {
+    final licenses = _walletLicenses();
+    if (licenses.isEmpty) return;
+    final safeIndex = licenseIndex < 0
+        ? 0
+        : (licenseIndex >= licenses.length
+            ? licenses.length - 1
+            : licenseIndex);
+    final current = licenses[safeIndex];
+
+    final classController = TextEditingController(text: current['class'] ?? '');
+    final vehicleTypeController =
+        TextEditingController(text: current['vehicleType'] ?? '');
+    final issueDateController =
+        TextEditingController(text: current['issueDate'] ?? '');
+    final expiryDateController =
+        TextEditingController(text: current['expiryDate'] ?? '');
+    final numberController =
+        TextEditingController(text: current['licenseNumber'] ?? '');
+    final issuedByController = TextEditingController(
+      text: current['issuedBy'] ?? _settings.userLicenseIssuedBy,
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_settings.tr('Chỉnh sửa GPLX', 'Edit Driver License')),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: classController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Hạng bằng', 'License class'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: vehicleTypeController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Loại xe', 'Vehicle type'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: numberController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Số GPLX', 'License number'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: issueDateController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Ngày cấp', 'Issue date'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: expiryDateController,
+                  decoration: InputDecoration(
+                    labelText: _settings.tr('Có giá trị đến', 'Valid until'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: issuedByController,
+                  decoration: InputDecoration(
+                    labelText:
+                        _settings.tr('Nơi cấp GPLX', 'Issued by authority'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_settings.tr('Hủy', 'Cancel')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (classController.text.trim().isEmpty ||
+                  numberController.text.trim().isEmpty ||
+                  vehicleTypeController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_settings.tr(
+                      'Vui lòng nhập đủ Hạng bằng, Loại xe và Số GPLX',
+                      'Please fill class, vehicle type and license number',
+                    )),
+                    backgroundColor: AppTheme.warningColor,
+                  ),
+                );
+                return;
+              }
+
+              final updated = licenses
+                  .map((l) => Map<String, String>.from(l))
+                  .toList(growable: false);
+              updated[safeIndex] = {
+                'class': classController.text.trim(),
+                'vehicleType': vehicleTypeController.text.trim(),
+                'issueDate': issueDateController.text.trim(),
+                'expiryDate': expiryDateController.text.trim(),
+                'licenseNumber': numberController.text.trim(),
+                'issuedBy': issuedByController.text.trim(),
+              };
+
+              Navigator.pop(ctx);
+              _submitWalletUpdateRequest(
+                {
+                  'driverLicenses': updated,
+                  ..._legacyLicenseFieldsFrom(updated),
+                  'licenseIssuedBy': issuedByController.text.trim(),
+                  'requestSection': 'wallet_gplx',
+                },
+                successVi:
+                    'Đã gửi yêu cầu cập nhật GPLX. Vui lòng chờ admin duyệt.',
+                successEn:
+                    'Driver license update request sent. Please wait for admin approval.',
+              );
+            },
+            child: Text(_settings.tr('Gửi duyệt', 'Submit for approval')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDocumentWallet() {
-    int licensePoints = _settings.userPoints;
+    final licenses = _walletLicenses();
+    final totalPages = 1 + licenses.length;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -1040,16 +1572,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             color: const Color(0xFF1A237E),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
-              children: List.generate(3, (i) => AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                width: _walletPage == i ? 18 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: _walletPage == i ? const Color(0xFF1A237E) : AppTheme.dividerColor,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              )),
+              children: List.generate(
+                  totalPages,
+                  (i) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        width: _walletPage == i ? 18 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: _walletPage == i
+                              ? const Color(0xFF1A237E)
+                              : AppTheme.dividerColor,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      )),
             ),
           ),
           const SizedBox(height: 14),
@@ -1063,42 +1599,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   onTap: () => _showCccdDetail(null),
                   child: _buildCccdCard(null),
                 ),
-                GestureDetector(
-                  onTap: () => _showLicenseDetail(
-                    licenseClass: 'B2',
-                    vehicleType: _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
-                    issueDate: '15/03/2020',
-                    expiryDate: '15/03/2030',
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                  child: _buildLicenseCard(
-                    licenseClass: 'B2',
-                    vehicleType: _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
-                    issueDate: '15/03/2020',
-                    expiryDate: '15/03/2030',
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _showLicenseDetail(
-                    licenseClass: 'A1',
-                    vehicleType: _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
-                    issueDate: '20/06/2018',
-                    expiryDate: _settings.tr('Không thời hạn', 'No expiry'),
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                  child: _buildLicenseCard(
-                    licenseClass: 'A1',
-                    vehicleType: _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
-                    issueDate: '20/06/2018',
-                    expiryDate: _settings.tr('Không thời hạn', 'No expiry'),
-                    licenseNumber: '079201001234',
-                    points: licensePoints,
-                  ),
-                ),
+                ...licenses.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final license = entry.value;
+                  final licenseType = _resolveLicenseType(license);
+                  final licensePoints = _pointsForLicenseType(licenseType);
+                  final isDisabled = licensePoints <= 0;
+                  return GestureDetector(
+                    onTap: () => _showLicenseDetail(
+                      licenseIndex: index,
+                      licenseClass: license['class'] ?? '',
+                      vehicleType: license['vehicleType'] ?? '',
+                      issueDate: license['issueDate'] ?? '',
+                      expiryDate: license['expiryDate'] ?? '',
+                      licenseNumber: license['licenseNumber'] ?? '',
+                      issuedBy: license['issuedBy'] ?? '',
+                      licenseType: licenseType,
+                      points: licensePoints,
+                      isDisabled: isDisabled,
+                    ),
+                    child: _buildLicenseCard(
+                      licenseClass: license['class'] ?? '',
+                      vehicleType: license['vehicleType'] ?? '',
+                      issueDate: license['issueDate'] ?? '',
+                      expiryDate: license['expiryDate'] ?? '',
+                      licenseNumber: license['licenseNumber'] ?? '',
+                      licenseType: licenseType,
+                      points: licensePoints,
+                      isDisabled: isDisabled,
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -1150,7 +1681,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.credit_card_rounded, color: Colors.amber, size: 18),
+                      child: const Icon(Icons.credit_card_rounded,
+                          color: Colors.amber, size: 18),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -1165,7 +1697,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: Colors.green.withOpacity(0.3),
                         borderRadius: BorderRadius.circular(8),
@@ -1173,7 +1706,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.verified_rounded, color: Colors.greenAccent, size: 12),
+                          const Icon(Icons.verified_rounded,
+                              color: Colors.greenAccent, size: 12),
                           const SizedBox(width: 4),
                           Text(
                             _settings.tr('Hợp lệ', 'Valid'),
@@ -1190,7 +1724,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _settings.userIdCard.isNotEmpty ? _settings.userIdCard : '---',
+                  _settings.userIdCard.isNotEmpty
+                      ? _settings.userIdCard
+                      : '---',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
@@ -1235,9 +1771,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        const Text(
-                          '01/01/2001',
-                          style: TextStyle(
+                        Text(
+                          _settings.userDateOfBirth.isNotEmpty
+                              ? _settings.userDateOfBirth
+                              : '01/01/2001',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -1262,188 +1800,237 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required String issueDate,
     required String expiryDate,
     required String licenseNumber,
+    required String licenseType,
     required int points,
+    required bool isDisabled,
   }) {
-    final isExpiring = expiryDate != 'Không thời hạn' && expiryDate != 'No expiry' && points <= 4;
-    const pointColor = Colors.amber;
+    final disabled = isDisabled || points <= 0;
+    final isExpiring = !disabled &&
+        expiryDate != 'Không thời hạn' &&
+        expiryDate != 'No expiry' &&
+        points <= 4;
+    final pointColor = disabled ? Colors.white70 : Colors.amber;
+    final vehicleIcon = licenseType == 'motorcycle'
+        ? Icons.two_wheeler_rounded
+        : Icons.directions_car_rounded;
+    final gradientColors = disabled
+        ? const [Color(0xFF9E9E9E), Color(0xFF616161)]
+        : const [Color(0xFFD32F2F), Color(0xFF8B1A1A)];
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFD32F2F), Color(0xFF8B1A1A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Opacity(
+      opacity: disabled ? 0.75 : 1.0,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: gradientColors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: (disabled ? Colors.black54 : AppTheme.primaryColor)
+                  .withOpacity(0.25),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryColor.withOpacity(0.3),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -15,
-            bottom: -15,
-            child: Icon(
-              Icons.directions_car_rounded,
-              size: 100,
-              color: Colors.white.withOpacity(0.04),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -15,
+              bottom: -15,
+              child: Icon(
+                vehicleIcon,
+                size: 100,
+                color: Colors.white.withOpacity(0.04),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(8),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.badge_rounded,
+                            color: pointColor, size: 18),
                       ),
-                      child: const Icon(Icons.badge_rounded, color: Colors.amber, size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _settings.tr('GIẤY PHÉP LÁI XE', 'DRIVER LICENSE'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.5,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _settings.tr('GIẤY PHÉP LÁI XE', 'DRIVER LICENSE'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.5,
+                          ),
                         ),
                       ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: pointColor.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(10),
+                          border:
+                              Border.all(color: pointColor.withOpacity(0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.star_rounded,
+                                color: pointColor, size: 14),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$points/12',
+                              style: TextStyle(
+                                color: pointColor,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${_settings.tr('Hạng', 'Class')} $licenseClass',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          vehicleType,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_settings.tr('Ngày cấp', 'Issued'),
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.5),
+                                    fontSize: 10)),
+                            const SizedBox(height: 2),
+                            Text(issueDate,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_settings.tr('Có giá trị đến', 'Valid until'),
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.5),
+                                    fontSize: 10)),
+                            const SizedBox(height: 2),
+                            Text(
+                              expiryDate,
+                              style: TextStyle(
+                                color: isExpiring ? Colors.amber : Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(_settings.tr('Số GPLX', 'License No.'),
+                              style: TextStyle(
+                                  color: Colors.white.withOpacity(0.5),
+                                  fontSize: 10)),
+                          const SizedBox(height: 2),
+                          Text(licenseNumber,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (disabled)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.25),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: pointColor.withOpacity(0.25),
+                        color: Colors.black.withOpacity(0.5),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: pointColor.withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.star_rounded, color: pointColor, size: 14),
-                          const SizedBox(width: 4),
-                          Text(
-                            '$points/12',
-                            style: TextStyle(
-                              color: pointColor,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '${_settings.tr('Hạng', 'Class')} $licenseClass',
+                        _settings.tr(
+                          'GPLX tạm vô hiệu (0/12)\nAdmin web mới khôi phục được',
+                          'License disabled (0/12)\nOnly web admin can restore',
+                        ),
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        vehicleType,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(_settings.tr('Ngày cấp', 'Issued'), style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10)),
-                          const SizedBox(height: 2),
-                          Text(issueDate, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(_settings.tr('Có giá trị đến', 'Valid until'), style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10)),
-                          const SizedBox(height: 2),
-                          Text(
-                            expiryDate,
-                            style: TextStyle(
-                              color: isExpiring ? Colors.amber : Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(_settings.tr('Số GPLX', 'License No.'), style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10)),
-                        const SizedBox(height: 2),
-                        Text(licenseNumber, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
+              ),
+          ],
+        ),
       ),
     );
-  }
-
-  /// Map violation type to points deducted (Vietnamese traffic law — NĐ 168/2024)
-  int _getPointsDeducted(String violationType) {
-    final lower = violationType.toLowerCase();
-    // Rất nặng — 10 điểm
-    if (lower.contains('nồng độ cồn') || lower.contains('ma túy')) return 10;
-    // Nặng — 6 điểm
-    if (lower.contains('ngược chiều') || lower.contains('wrong way') ||
-        lower.contains('đường cao tốc')) return 6;
-    // Trung bình nặng — 4 điểm
-    if (lower.contains('đèn đỏ') || lower.contains('red light') ||
-        lower.contains('quá tốc độ') || lower.contains('tốc độ')) return 4;
-    // Trung bình — 2 điểm
-    if (lower.contains('sai làn') || lower.contains('wrong lane') ||
-        lower.contains('vỉa hè') || lower.contains('biển báo') ||
-        lower.contains('sign')) return 2;
-    // Nhẹ — 1 điểm
-    if (lower.contains('mũ bảo hiểm') || lower.contains('no helmet') ||
-        lower.contains('không thắt dây')) return 1;
-    return 0;
   }
 
   // ── Avatar decoration helper ─────────────────────────────────────
@@ -1453,7 +2040,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return DecorationImage(image: NetworkImage(avatarUrl), fit: BoxFit.cover);
     }
     // Local file path (from image_picker)
-    return DecorationImage(image: FileImage(File(avatarUrl)), fit: BoxFit.cover);
+    return DecorationImage(
+        image: FileImage(File(avatarUrl)), fit: BoxFit.cover);
   }
 
   // ── CCCD Detail Dialog ───────────────────────────────────────────
@@ -1461,7 +2049,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textPrimary = isDark ? const Color(0xFFE0E0E0) : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
+    final textSecondary =
+        isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
     final displayName = _settings.userName;
 
     showModalBottomSheet(
@@ -1469,7 +2058,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -1480,9 +2070,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: [
               // Drag handle
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 margin: const EdgeInsets.only(top: 12),
-                decoration: BoxDecoration(color: AppTheme.dividerColor, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: AppTheme.dividerColor,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               // Header
               Container(
@@ -1490,27 +2083,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [Color(0xFF1A237E), Color(0xFF283593)]),
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFF1A237E), Color(0xFF283593)]),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Column(
                   children: [
-                    const Icon(Icons.shield_rounded, color: Colors.amber, size: 36),
+                    const Icon(Icons.shield_rounded,
+                        color: Colors.amber, size: 36),
                     const SizedBox(height: 8),
                     Text(
-                      _settings.tr('CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', 'SOCIALIST REPUBLIC OF VIETNAM'),
+                      _settings.tr('CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM',
+                          'SOCIALIST REPUBLIC OF VIETNAM'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5),
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _settings.tr('CĂN CƯỚC CÔNG DÂN', 'CITIZEN IDENTITY CARD'),
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1.5),
+                      _settings.tr(
+                          'CĂN CƯỚC CÔNG DÂN', 'CITIZEN IDENTITY CARD'),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.5),
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      _settings.userIdCard.isNotEmpty ? _settings.userIdCard : '---',
-                      style: const TextStyle(color: Colors.amber, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 4),
+                      _settings.userIdCard.isNotEmpty
+                          ? _settings.userIdCard
+                          : '---',
+                      style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 4),
                     ),
                   ],
                 ),
@@ -1520,28 +2131,105 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    _buildDetailRow(_settings.tr('Họ và tên', 'Full name'), displayName.toUpperCase(), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Ngày sinh', 'Date of birth'), '01/01/2001', textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Giới tính', 'Gender'), _settings.tr('Nam', 'Male'), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Quốc tịch', 'Nationality'), _settings.tr('Việt Nam', 'Vietnam'), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Quê quán', 'Place of origin'), _settings.tr('TP. Hồ Chí Minh', 'Ho Chi Minh City'), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Nơi thường trú', 'Permanent address'), _settings.profileInitialized && _settings.userAddress.isNotEmpty ? _settings.userAddress : _settings.tr('123 Nguyễn Huệ, Q.1, TP.HCM', '123 Nguyen Hue, D.1, HCMC'), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Ngày cấp', 'Issue date'), '15/01/2021', textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Có giá trị đến', 'Valid until'), '15/01/2046', textPrimary, textSecondary),
+                    _buildDetailRow(_settings.tr('Họ và tên', 'Full name'),
+                        displayName.toUpperCase(), textPrimary, textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Ngày sinh', 'Date of birth'),
+                        _settings.userDateOfBirth.isNotEmpty
+                            ? _settings.userDateOfBirth
+                            : '—',
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Giới tính', 'Gender'),
+                        _settings.userGender.isNotEmpty
+                            ? _settings.userGender
+                            : _settings.tr('Chưa cập nhật', 'Not updated'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Quốc tịch', 'Nationality'),
+                        _settings.userNationality.isNotEmpty
+                            ? _settings.userNationality
+                            : _settings.tr('Việt Nam', 'Vietnam'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Quê quán', 'Place of origin'),
+                        _settings.userPlaceOfOrigin.isNotEmpty
+                            ? _settings.userPlaceOfOrigin
+                            : _settings.tr('Chưa cập nhật', 'Not updated'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Nơi thường trú', 'Permanent address'),
+                        _settings.profileInitialized &&
+                                _settings.userAddress.isNotEmpty
+                            ? _settings.userAddress
+                            : _settings.tr('123 Nguyễn Huệ, Q.1, TP.HCM',
+                                '123 Nguyen Hue, D.1, HCMC'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Ngày cấp', 'Issue date'),
+                        _settings.userIdCardIssueDate.isNotEmpty
+                            ? _settings.userIdCardIssueDate
+                            : '15/01/2021',
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Có giá trị đến', 'Valid until'),
+                        _settings.userIdCardExpiryDate.isNotEmpty
+                            ? _settings.userIdCardExpiryDate
+                            : '15/01/2046',
+                        textPrimary,
+                        textSecondary),
                     const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A237E),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          elevation: 0,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 48,
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: textSecondary,
+                                side: BorderSide(color: AppTheme.dividerColor),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                              child: Text(_settings.tr('Đóng', 'Close'),
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ),
                         ),
-                        child: Text(_settings.tr('Đóng', 'Close'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                      ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 48,
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _showEditCccdDialog();
+                              },
+                              icon: const Icon(Icons.edit_rounded, size: 18),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1A237E),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                                elevation: 0,
+                              ),
+                              label: Text(_settings.tr('Chỉnh sửa', 'Edit'),
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
                   ],
@@ -1556,27 +2244,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ── License Detail Dialog ────────────────────────────────────────
   void _showLicenseDetail({
+    required int licenseIndex,
     required String licenseClass,
     required String vehicleType,
     required String issueDate,
     required String expiryDate,
     required String licenseNumber,
+    required String issuedBy,
+    required String licenseType,
     required int points,
+    required bool isDisabled,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textPrimary = isDark ? const Color(0xFFE0E0E0) : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
+    final textSecondary =
+        isDark ? const Color(0xFF9E9E9E) : AppTheme.textSecondary;
     final displayName = _settings.userName;
 
-    const pointColor = Colors.amber;
-    final pointPercent = points / 12.0;
+    final pointColor =
+        (isDisabled || points <= 0) ? Colors.white70 : Colors.amber;
+    final pointPercent = (isDisabled || points <= 0) ? 0.0 : (points / 12.0);
 
-    // Points now come from Firestore via _settings.userPoints — no local recalculation needed
-    // Show deduction history only if points < 12 as a signal label
+    // Points come from Firestore via separate moto/car pools.
+    // Show deduction history only if points < 12 as a signal label.
     final deductions = <Map<String, dynamic>>[];
     if (points < 12) {
-      deductions.add({'type': _settings.tr('điểm đã được trừ theo vi phạm', 'points deducted from violations'), 'points': 12 - points, 'date': ''});
+      deductions.add({
+        'type': _settings.tr(
+            'điểm đã được trừ theo vi phạm', 'points deducted from violations'),
+        'points': 12 - points,
+        'date': ''
+      });
     }
 
     showModalBottomSheet(
@@ -1584,7 +2283,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -1594,9 +2294,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 margin: const EdgeInsets.only(top: 12),
-                decoration: BoxDecoration(color: AppTheme.dividerColor, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: AppTheme.dividerColor,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               // Header
               Container(
@@ -1604,27 +2307,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [Color(0xFFD32F2F), Color(0xFF8B1A1A)]),
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFFD32F2F), Color(0xFF8B1A1A)]),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Column(
                   children: [
-                    const Icon(Icons.badge_rounded, color: Colors.amber, size: 36),
+                    const Icon(Icons.badge_rounded,
+                        color: Colors.amber, size: 36),
                     const SizedBox(height: 8),
                     Text(
                       _settings.tr('GIẤY PHÉP LÁI XE', 'DRIVER LICENSE'),
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1.5),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.5),
                     ),
                     const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         '${_settings.tr('Hạng', 'Class')} $licenseClass',
-                        style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -1633,7 +2346,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       alignment: Alignment.center,
                       children: [
                         SizedBox(
-                          width: 72, height: 72,
+                          width: 72,
+                          height: 72,
                           child: CircularProgressIndicator(
                             value: pointPercent,
                             strokeWidth: 6,
@@ -1643,8 +2357,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         ),
                         Column(
                           children: [
-                            Text('$points', style: TextStyle(color: pointColor, fontSize: 24, fontWeight: FontWeight.w800)),
-                            Text('/12', style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                            Text('$points',
+                                style: TextStyle(
+                                    color: pointColor,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800)),
+                            Text('/12',
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.6),
+                                    fontSize: 12)),
                           ],
                         ),
                       ],
@@ -1652,7 +2373,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     const SizedBox(height: 6),
                     Text(
                       _settings.tr('Điểm giấy phép', 'License Points'),
-                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7), fontSize: 12),
                     ),
                   ],
                 ),
@@ -1663,52 +2385,137 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildDetailRow(_settings.tr('Họ và tên', 'Full name'), displayName.toUpperCase(), textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Số GPLX', 'License No.'), licenseNumber, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Hạng', 'Class'), licenseClass, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Loại xe', 'Vehicle type'), vehicleType, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Ngày cấp', 'Issue date'), issueDate, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Có giá trị đến', 'Valid until'), expiryDate, textPrimary, textSecondary),
-                    _buildDetailRow(_settings.tr('Ngày sinh', 'Date of birth'), _settings.userDateOfBirth.isNotEmpty ? _settings.userDateOfBirth : '—', textPrimary, textSecondary),
-                    if (deductions.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _settings.tr('Lịch sử trừ điểm', 'Point deduction history'),
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.dangerColor),
-                      ),
-                      const SizedBox(height: 8),
-                      ...deductions.map((d) => Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                    _buildDetailRow(_settings.tr('Họ và tên', 'Full name'),
+                        displayName.toUpperCase(), textPrimary, textSecondary),
+                    _buildDetailRow(_settings.tr('Số GPLX', 'License No.'),
+                        licenseNumber, textPrimary, textSecondary),
+                    _buildDetailRow(_settings.tr('Hạng', 'Class'), licenseClass,
+                        textPrimary, textSecondary),
+                    _buildDetailRow(_settings.tr('Loại xe', 'Vehicle type'),
+                        vehicleType, textPrimary, textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Nơi cấp', 'Issued by'),
+                        issuedBy.isNotEmpty
+                            ? issuedBy
+                            : (_settings.userLicenseIssuedBy.isNotEmpty
+                                ? _settings.userLicenseIssuedBy
+                                : '—'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Nhóm GPLX', 'License target'),
+                        licenseType == 'motorcycle'
+                            ? _settings.tr('Xe máy (A2)', 'Motorcycle (A2)')
+                            : _settings.tr('Ô tô', 'Car'),
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(_settings.tr('Ngày cấp', 'Issue date'),
+                        issueDate, textPrimary, textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Có giá trị đến', 'Valid until'),
+                        expiryDate,
+                        textPrimary,
+                        textSecondary),
+                    _buildDetailRow(
+                        _settings.tr('Ngày sinh', 'Date of birth'),
+                        _settings.userDateOfBirth.isNotEmpty
+                            ? _settings.userDateOfBirth
+                            : '—',
+                        textPrimary,
+                        textSecondary),
+                    if (isDisabled || points <= 0) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppTheme.dangerColor.withOpacity(isDark ? 0.15 : 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppTheme.dangerColor.withOpacity(0.15)),
+                          color: AppTheme.dangerColor.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: AppTheme.dangerColor.withOpacity(0.2),
+                          ),
                         ),
                         child: Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: AppTheme.dangerColor.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text('-${d['points']}', style: const TextStyle(color: AppTheme.dangerColor, fontSize: 14, fontWeight: FontWeight.w800)),
-                            ),
-                            const SizedBox(width: 12),
+                            const Icon(Icons.block_rounded,
+                                color: AppTheme.dangerColor, size: 18),
+                            const SizedBox(width: 8),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(d['type'], style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textPrimary)),
-                                  const SizedBox(height: 2),
-                                  Text(d['date'], style: TextStyle(fontSize: 11, color: textSecondary)),
-                                ],
+                              child: Text(
+                                _settings.tr(
+                                  'GPLX này đang tạm vô hiệu do 0/12 điểm. Chỉ admin trên web mới khôi phục điểm được.',
+                                  'This license is temporarily disabled at 0/12 points. Only web admin can restore points.',
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.dangerColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                      )),
+                      ),
+                    ],
+                    if (deductions.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        _settings.tr(
+                            'Lịch sử trừ điểm', 'Point deduction history'),
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.dangerColor),
+                      ),
+                      const SizedBox(height: 8),
+                      ...deductions.map((d) => Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.dangerColor
+                                  .withOpacity(isDark ? 0.15 : 0.05),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color:
+                                      AppTheme.dangerColor.withOpacity(0.15)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        AppTheme.dangerColor.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text('-${d['points']}',
+                                      style: const TextStyle(
+                                          color: AppTheme.dangerColor,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800)),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(d['type'],
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                              color: textPrimary)),
+                                      const SizedBox(height: 2),
+                                      Text(d['date'],
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: textSecondary)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )),
                     ] else ...[
                       const SizedBox(height: 12),
                       Container(
@@ -1720,30 +2527,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+                            const Icon(Icons.check_circle_rounded,
+                                color: Colors.green, size: 20),
                             const SizedBox(width: 10),
                             Text(
-                              _settings.tr('Chưa bị trừ điểm', 'No points deducted'),
-                              style: const TextStyle(color: Colors.green, fontSize: 13, fontWeight: FontWeight.w600),
+                              _settings.tr(
+                                  'Chưa bị trừ điểm', 'No points deducted'),
+                              style: const TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
                       ),
                     ],
                     const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          elevation: 0,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 48,
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: textSecondary,
+                                side: BorderSide(color: AppTheme.dividerColor),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                              child: Text(_settings.tr('Đóng', 'Close'),
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ),
                         ),
-                        child: Text(_settings.tr('Đóng', 'Close'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                      ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 48,
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _showEditLicenseDialog(
+                                    licenseIndex: licenseIndex);
+                              },
+                              icon: const Icon(Icons.edit_rounded, size: 18),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryColor,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                                elevation: 0,
+                              ),
+                              label: Text(_settings.tr('Chỉnh sửa', 'Edit'),
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
                   ],
@@ -1757,7 +2602,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ── Detail row helper ───────────────────────────────────────────
-  Widget _buildDetailRow(String label, String value, Color textPrimary, Color textSecondary) {
+  Widget _buildDetailRow(
+      String label, String value, Color textPrimary, Color textSecondary) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
@@ -1765,10 +2611,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         children: [
           SizedBox(
             width: 130,
-            child: Text(label, style: TextStyle(fontSize: 13, color: textSecondary, fontWeight: FontWeight.w500)),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: textSecondary,
+                    fontWeight: FontWeight.w500)),
           ),
           Expanded(
-            child: Text(value, style: TextStyle(fontSize: 14, color: textPrimary, fontWeight: FontWeight.w600)),
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 14,
+                    color: textPrimary,
+                    fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -1802,19 +2656,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _buildMenuCard(
                 icon: Icons.search_rounded,
                 label: _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'),
-                gradientColors: [const Color(0xFFE53935), const Color(0xFFD32F2F)],
+                gradientColors: [
+                  const Color(0xFFE53935),
+                  const Color(0xFFD32F2F)
+                ],
                 onTap: () => _showViolationLookup(),
               ),
               _buildMenuCard(
                 icon: Icons.payment_rounded,
-                label: _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
-                gradientColors: [const Color(0xFFF57C00), const Color(0xFFE65100)],
+                label:
+                    _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
+                gradientColors: [
+                  const Color(0xFFF57C00),
+                  const Color(0xFFE65100)
+                ],
                 onTap: () => _showPaymentList(),
               ),
               _buildMenuCard(
                 icon: Icons.history_rounded,
                 label: _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'),
-                gradientColors: [const Color(0xFF1565C0), const Color(0xFF0D47A1)],
+                gradientColors: [
+                  const Color(0xFF1565C0),
+                  const Color(0xFF0D47A1)
+                ],
                 onTap: () {
                   setState(() => _selectedIndex = 1);
                 },
@@ -1822,7 +2686,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _buildMenuCard(
                 icon: Icons.rate_review_rounded,
                 label: _settings.tr('Khiếu nại\nvi phạm', 'File\nComplaint'),
-                gradientColors: [const Color(0xFF2E7D32), const Color(0xFF1B5E20)],
+                gradientColors: [
+                  const Color(0xFF2E7D32),
+                  const Color(0xFF1B5E20)
+                ],
                 onTap: () => Navigator.pushNamed(context, '/complaint'),
               ),
             ],
@@ -1932,12 +2799,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 20),
+                      child: const Icon(Icons.account_balance_wallet_rounded,
+                          color: Colors.white, size: 20),
                     ),
                     const SizedBox(width: 10),
                     Text(
-                      _settings.tr('Tổng tiền phạt chưa nộp', 'Total unpaid fines'),
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      _settings.tr(
+                          'Tổng tiền phạt chưa nộp', 'Total unpaid fines'),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ],
                 ),
@@ -1969,13 +2839,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    _settings.tr('$pending khoản chưa thanh toán', '$pending unpaid'),
+                    _settings.tr(
+                        '$pending khoản chưa thanh toán', '$pending unpaid'),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -1990,7 +2862,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           // Stat cards row
           Row(
             children: [
-              Expanded(child: _buildStatCard(
+              Expanded(
+                  child: _buildStatCard(
                 icon: Icons.pending_actions_rounded,
                 label: _settings.tr('Chưa nộp', 'Unpaid'),
                 value: pending.toString(),
@@ -1998,7 +2871,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 delay: 0,
               )),
               const SizedBox(width: 10),
-              Expanded(child: _buildStatCard(
+              Expanded(
+                  child: _buildStatCard(
                 icon: Icons.check_circle_outline_rounded,
                 label: _settings.tr('Đã nộp', 'Paid'),
                 value: paid.toString(),
@@ -2006,7 +2880,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 delay: 1,
               )),
               const SizedBox(width: 10),
-              Expanded(child: _buildStatCard(
+              Expanded(
+                  child: _buildStatCard(
                 icon: Icons.folder_outlined,
                 label: _settings.tr('Tổng cộng', 'Total'),
                 value: _violations.length.toString(),
@@ -2112,7 +2987,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 children: [
                   // Handle
                   Container(
-                    width: 40, height: 4,
+                    width: 40,
+                    height: 4,
                     margin: const EdgeInsets.only(top: 12),
                     decoration: BoxDecoration(
                       color: AppTheme.dividerColor,
@@ -2132,7 +3008,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.search_rounded, color: Colors.white, size: 20),
+                          child: const Icon(Icons.search_rounded,
+                              color: Colors.white, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Text(
@@ -2157,11 +3034,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           'Nhập biển số xe, loại vi phạm, địa điểm...',
                           'Enter license plate, violation type, location...',
                         ),
-                        hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 14),
-                        prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary),
+                        hintStyle: const TextStyle(
+                            color: AppTheme.textHint, fontSize: 14),
+                        prefixIcon: const Icon(Icons.search,
+                            color: AppTheme.textSecondary),
                         suffixIcon: searchController.text.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(Icons.clear, color: AppTheme.textSecondary),
+                                icon: const Icon(Icons.clear,
+                                    color: AppTheme.textSecondary),
                                 onPressed: () {
                                   searchController.clear();
                                   setSheetState(() {});
@@ -2180,7 +3060,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // Results count (only when searching)
                   if (hasQuery)
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 4),
                       child: Row(
                         children: [
                           Text(
@@ -2205,10 +3086,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.manage_search_rounded, size: 56, color: AppTheme.textHint.withOpacity(0.35)),
+                                Icon(Icons.manage_search_rounded,
+                                    size: 56,
+                                    color: AppTheme.textHint.withOpacity(0.35)),
                                 const SizedBox(height: 14),
                                 Text(
-                                  _settings.tr('Nhập thông tin để tra cứu', 'Enter info to search'),
+                                  _settings.tr('Nhập thông tin để tra cứu',
+                                      'Enter info to search'),
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
@@ -2217,7 +3101,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 ),
                                 const SizedBox(height: 6),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 40),
                                   child: Text(
                                     _settings.tr(
                                       'Tìm kiếm theo biển số xe, loại vi phạm, hoặc địa điểm để xem lịch sử vi phạm chi tiết',
@@ -2239,10 +3124,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.search_off, size: 48, color: AppTheme.textHint.withOpacity(0.4)),
+                                    Icon(Icons.search_off,
+                                        size: 48,
+                                        color:
+                                            AppTheme.textHint.withOpacity(0.4)),
                                     const SizedBox(height: 12),
                                     Text(
-                                      _settings.tr('Không tìm thấy vi phạm', 'No violations found'),
+                                      _settings.tr('Không tìm thấy vi phạm',
+                                          'No violations found'),
                                       style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,
@@ -2251,144 +3140,186 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      _settings.tr('Thử từ khóa khác', 'Try a different keyword'),
+                                      _settings.tr('Thử từ khóa khác',
+                                          'Try a different keyword'),
                                       style: TextStyle(
                                         fontSize: 13,
-                                        color: AppTheme.textHint.withOpacity(0.6),
+                                        color:
+                                            AppTheme.textHint.withOpacity(0.6),
                                       ),
                                     ),
                                   ],
                                 ),
                               )
-                        : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                            itemCount: results.length,
-                            itemBuilder: (context, index) {
-                              final v = results[index];
-                              final isPaid = v.isPaid;
-                              final statusColor = isPaid ? AppTheme.successColor : AppTheme.warningColor;
-                              final statusText = isPaid
-                                  ? _settings.tr('Đã thanh toán', 'Paid')
-                                  : _settings.tr('Chưa thanh toán', 'Unpaid');
+                            : ListView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                                itemCount: results.length,
+                                itemBuilder: (context, index) {
+                                  final v = results[index];
+                                  final isPaid = v.isPaid;
+                                  final statusColor = isPaid
+                                      ? AppTheme.successColor
+                                      : AppTheme.warningColor;
+                                  final statusText = isPaid
+                                      ? _settings.tr('Đã thanh toán', 'Paid')
+                                      : _settings.tr(
+                                          'Chưa thanh toán', 'Unpaid');
 
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: AppTheme.dividerColor),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.04),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(14),
-                                  onTap: () {
-                                    Navigator.pop(ctx);
-                                    Navigator.pushNamed(context, '/violation-detail', arguments: v);
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(14),
-                                    child: Row(
-                                      children: [
-                                        // Icon
-                                        Container(
-                                          width: 44,
-                                          height: 44,
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryColor.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: const Icon(Icons.warning_amber_rounded, color: AppTheme.primaryColor, size: 22),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        // Content
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                v.violationType,
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppTheme.textPrimary,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: AppTheme.infoColor.withOpacity(0.1),
-                                                      borderRadius: BorderRadius.circular(4),
-                                                    ),
-                                                    child: Text(
-                                                      v.licensePlate,
-                                                      style: const TextStyle(
-                                                        fontSize: 11,
-                                                        fontWeight: FontWeight.w700,
-                                                        color: AppTheme.infoColor,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    DateFormat('dd/MM/yyyy').format(v.timestamp),
-                                                    style: const TextStyle(
-                                                      fontSize: 11,
-                                                      color: AppTheme.textSecondary,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        // Right side: fine + status
-                                        Column(
-                                          crossAxisAlignment: CrossAxisAlignment.end,
-                                          children: [
-                                            Text(
-                                              formatter.format(v.fineAmount),
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppTheme.dangerColor,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                              decoration: BoxDecoration(
-                                                color: statusColor.withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
-                                              child: Text(
-                                                statusText,
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: statusColor,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                          color: AppTheme.dividerColor),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.04),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(14),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        Navigator.pushNamed(
+                                            context, '/violation-detail',
+                                            arguments: v);
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(14),
+                                        child: Row(
+                                          children: [
+                                            // Icon
+                                            Container(
+                                              width: 44,
+                                              height: 44,
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primaryColor
+                                                    .withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: const Icon(
+                                                  Icons.warning_amber_rounded,
+                                                  color: AppTheme.primaryColor,
+                                                  size: 22),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            // Content
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    v.violationType,
+                                                    style: const TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color:
+                                                          AppTheme.textPrimary,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      Container(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 6,
+                                                                vertical: 2),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: AppTheme
+                                                              .infoColor
+                                                              .withOpacity(0.1),
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(4),
+                                                        ),
+                                                        child: Text(
+                                                          v.licensePlate,
+                                                          style:
+                                                              const TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            color: AppTheme
+                                                                .infoColor,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        DateFormat('dd/MM/yyyy')
+                                                            .format(
+                                                                v.timestamp),
+                                                        style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color: AppTheme
+                                                              .textSecondary,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            // Right side: fine + status
+                                            Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.end,
+                                              children: [
+                                                Text(
+                                                  formatter
+                                                      .format(v.fineAmount),
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: AppTheme.dangerColor,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3),
+                                                  decoration: BoxDecoration(
+                                                    color: statusColor
+                                                        .withOpacity(0.1),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                  child: Text(
+                                                    statusText,
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: statusColor,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                   ),
                 ],
               ),
@@ -2412,7 +3343,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final unpaidViolations = _violations.where((v) => v.isPending).toList();
-        final totalFine = unpaidViolations.fold<double>(0, (sum, v) => sum + v.fineAmount);
+        final totalFine =
+            unpaidViolations.fold<double>(0, (sum, v) => sum + v.fineAmount);
 
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
@@ -2424,7 +3356,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: [
               // Handle
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
                   color: AppTheme.dividerColor,
@@ -2444,7 +3377,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         ),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.payment_rounded, color: Colors.white, size: 20),
+                      child: const Icon(Icons.payment_rounded,
+                          color: Colors.white, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -2452,7 +3386,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _settings.tr('Nộp phạt trực tuyến', 'Online Payment'),
+                            _settings.tr(
+                                'Nộp phạt trực tuyến', 'Online Payment'),
                             style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w800,
@@ -2489,14 +3424,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 24),
+                    const Icon(Icons.account_balance_wallet_rounded,
+                        color: Colors.white, size: 24),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           _settings.tr('Tổng tiền phạt', 'Total fines'),
-                          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12),
                         ),
                         Text(
                           formatter.format(totalFine),
@@ -2520,16 +3458,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Container(
-                              width: 64, height: 64,
+                              width: 64,
+                              height: 64,
                               decoration: BoxDecoration(
                                 color: AppTheme.successColor.withOpacity(0.1),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.check_circle_outline, size: 36, color: AppTheme.successColor),
+                              child: const Icon(Icons.check_circle_outline,
+                                  size: 36, color: AppTheme.successColor),
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              _settings.tr('Không có khoản phạt nào', 'No pending fines'),
+                              _settings.tr('Không có khoản phạt nào',
+                                  'No pending fines'),
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
@@ -2538,7 +3479,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _settings.tr('Tất cả vi phạm đã được thanh toán', 'All violations have been paid'),
+                              _settings.tr('Tất cả vi phạm đã được thanh toán',
+                                  'All violations have been paid'),
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: AppTheme.textHint,
@@ -2571,7 +3513,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               borderRadius: BorderRadius.circular(14),
                               onTap: () {
                                 Navigator.pop(ctx);
-                                Navigator.pushNamed(context, '/payment', arguments: v);
+                                Navigator.pushNamed(context, '/payment',
+                                    arguments: v);
                               },
                               child: Padding(
                                 padding: const EdgeInsets.all(14),
@@ -2582,16 +3525,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       width: 44,
                                       height: 44,
                                       decoration: BoxDecoration(
-                                        color: AppTheme.warningColor.withOpacity(0.1),
+                                        color: AppTheme.warningColor
+                                            .withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
-                                      child: const Icon(Icons.pending_actions_rounded, color: AppTheme.warningColor, size: 22),
+                                      child: const Icon(
+                                          Icons.pending_actions_rounded,
+                                          color: AppTheme.warningColor,
+                                          size: 22),
                                     ),
                                     const SizedBox(width: 12),
                                     // Content
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             v.violationType,
@@ -2607,10 +3555,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                           Row(
                                             children: [
                                               Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2),
                                                 decoration: BoxDecoration(
-                                                  color: AppTheme.infoColor.withOpacity(0.1),
-                                                  borderRadius: BorderRadius.circular(4),
+                                                  color: AppTheme.infoColor
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
                                                 ),
                                                 child: Text(
                                                   v.licensePlate,
@@ -2623,7 +3576,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                               ),
                                               const SizedBox(width: 8),
                                               Text(
-                                                DateFormat('dd/MM/yyyy').format(v.timestamp),
+                                                DateFormat('dd/MM/yyyy')
+                                                    .format(v.timestamp),
                                                 style: const TextStyle(
                                                   fontSize: 11,
                                                   color: AppTheme.textSecondary,
@@ -2636,7 +3590,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     ),
                                     // Right side: fine + pay button
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
                                       children: [
                                         Text(
                                           formatter.format(v.fineAmount),
@@ -2648,10 +3603,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                         ),
                                         const SizedBox(height: 4),
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
                                           decoration: BoxDecoration(
                                             color: const Color(0xFFF57C00),
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                           ),
                                           child: Text(
                                             _settings.tr('Nộp phạt', 'Pay'),

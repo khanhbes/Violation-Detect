@@ -24,10 +24,12 @@ class AuthService {
   // ── Sign In ────────────────────────────────────────────────────
   Future<fb.UserCredential> signIn(String email, String password) async {
     try {
-      final credential = await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      ).timeout(const Duration(seconds: 15));
+      final credential = await _auth
+          .signInWithEmailAndPassword(
+            email: email.trim(),
+            password: password,
+          )
+          .timeout(const Duration(seconds: 15));
       debugPrint('✅ Signed in: ${credential.user?.email}');
       return credential;
     } on fb.FirebaseAuthException catch (e) {
@@ -58,13 +60,47 @@ class AuthService {
       // Create user profile in Firestore
       // Extract CCCD from email (format: cccd@vnetraffic.vn)
       final idCard = email.trim().split('@').first;
+      final defaultLicenses = [
+        {
+          'class': 'B2',
+          'vehicleType': 'Ô tô dưới 9 chỗ',
+          'issueDate': '15/03/2020',
+          'expiryDate': '15/03/2030',
+          'licenseNumber': '079201001234',
+        },
+        {
+          'class': 'A2',
+          'vehicleType': 'Xe máy dưới 175cc',
+          'issueDate': '20/06/2018',
+          'expiryDate': 'Không thời hạn',
+          'licenseNumber': '079201001234',
+        },
+      ];
+
       await _firestore.collection('users').doc(credential.user!.uid).set({
         'fullName': fullName,
         'email': email.trim(),
         'phone': phone ?? '',
         'avatar': null,
         'idCard': idCard,
+        'idCardIssueDate': '',
+        'idCardExpiryDate': '',
+        'dateOfBirth': '',
+        'gender': '',
+        'nationality': 'Việt Nam',
+        'placeOfOrigin': '',
+        'occupation': '',
         'address': '',
+        'driverLicenses': defaultLicenses,
+        'licenseNumber': '079201001234',
+        'motoLicenseClass': 'A2',
+        'carLicenseClass': 'B2',
+        'licenseIssueDate': '15/03/2020',
+        'licenseExpiryDate': '15/03/2030',
+        'licenseIssuedBy': '',
+        'motoPoints': 12,
+        'carPoints': 12,
+        'points': 12,
         'createdAt': FieldValue.serverTimestamp(),
       });
 

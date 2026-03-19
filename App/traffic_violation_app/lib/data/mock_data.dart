@@ -54,7 +54,7 @@ class MockData {
       location: 'Ngã tư Điện Biên Phủ - Hai Bà Trưng, Q.3',
       imageUrl:
           'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=800',
-      fineAmount: 200000,
+      fineAmount: 10000,
       status: 'pending',
       lawReference: 'Điều 7, NĐ 100/2019/NĐ-CP',
     ),
@@ -68,7 +68,7 @@ class MockData {
       location: 'Vòng xoay Lý Thái Tổ, Q.10',
       imageUrl:
           'https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=800',
-      fineAmount: 800000,
+      fineAmount: 30000,
       status: 'pending',
       lawReference: 'Điều 6, NĐ 100/2019/NĐ-CP',
     ),
@@ -82,7 +82,7 @@ class MockData {
       location: 'Đường Nguyễn Huệ, Q.1',
       imageUrl:
           'https://images.unsplash.com/photo-1573348722427-f1d6819fdf98?w=800',
-      fineAmount: 300000,
+      fineAmount: 20000,
       status: 'paid',
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
     ),
@@ -96,7 +96,7 @@ class MockData {
       location: 'Đường Cách Mạng Tháng 8, Q.3',
       imageUrl:
           'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800',
-      fineAmount: 1000000,
+      fineAmount: 30000,
       status: 'paid',
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
     ),
@@ -110,7 +110,7 @@ class MockData {
       location: 'Đại lộ Võ Văn Kiệt, Q.5',
       imageUrl:
           'https://images.unsplash.com/photo-1606567595334-d39972c85dbe?w=800',
-      fineAmount: 1000000,
+      fineAmount: 25000,
       status: 'pending',
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
     ),
@@ -122,14 +122,14 @@ class MockData {
       code: 'MBH01',
       title: 'Mũ bảo hiểm',
       description:
-          'Phạt tiền 200.000 - 300.000 đồng đối với người điều khiển xe mô tô, xe gắn máy không đội mũ bảo hiểm.',
+          'Phạt tiền 10.000 - 15.000 đồng (demo) đối với người điều khiển xe mô tô, xe gắn máy không đội mũ bảo hiểm. Trừ 1 điểm GPLX A2.',
       category: 'Mũ bảo hiểm',
       fineLevels: [
         FineLevel(
             vehicleType: 'Xe máy',
-            minAmount: 200000,
-            maxAmount: 300000,
-            additionalPenalty: null),
+            minAmount: 10000,
+            maxAmount: 15000,
+            additionalPenalty: 'Mức nhẹ: trừ 1 điểm GPLX A2'),
       ],
       lawReference: 'Điều 7, NĐ 100/2019/NĐ-CP',
       effectiveDate: DateTime(2020, 1, 1),
@@ -138,19 +138,19 @@ class MockData {
       code: 'DD01',
       title: 'Vượt đèn đỏ',
       description:
-          'Phạt tiền 800.000 - 1.000.000 đồng (xe máy) hoặc 4.000.000 - 6.000.000 đồng (ô tô).',
+          'Phạt tiền 20.000 - 25.000 đồng (xe máy) hoặc 25.000 - 30.000 đồng (ô tô) (demo).',
       category: 'Đèn tín hiệu',
       fineLevels: [
         FineLevel(
             vehicleType: 'Xe máy',
-            minAmount: 800000,
-            maxAmount: 1000000,
-            additionalPenalty: null),
+            minAmount: 20000,
+            maxAmount: 25000,
+            additionalPenalty: 'Mức nặng: trừ 2 điểm GPLX A2'),
         FineLevel(
             vehicleType: 'Ô tô',
-            minAmount: 4000000,
-            maxAmount: 6000000,
-            additionalPenalty: 'Tước GPLX 1-3 tháng'),
+            minAmount: 25000,
+            maxAmount: 30000,
+            additionalPenalty: 'Mức nặng: trừ 3 điểm GPLX ô tô'),
       ],
       lawReference: 'Điều 6, NĐ 100/2019/NĐ-CP',
       effectiveDate: DateTime(2020, 1, 1),
@@ -159,19 +159,19 @@ class MockData {
       code: 'VH01',
       title: 'Chạy lên vỉa hè',
       description:
-          'Phạt tiền 300.000 - 400.000 đồng (xe máy) hoặc 2.000.000 - 3.000.000 đồng (ô tô).',
+          'Phạt tiền 15.000 - 20.000 đồng (xe máy) hoặc 20.000 - 25.000 đồng (ô tô) (demo).',
       category: 'Vỉa hè',
       fineLevels: [
         FineLevel(
             vehicleType: 'Xe máy',
-            minAmount: 300000,
-            maxAmount: 400000,
-            additionalPenalty: null),
+            minAmount: 15000,
+            maxAmount: 20000,
+            additionalPenalty: 'Mức vừa: trừ 2 điểm GPLX A2'),
         FineLevel(
             vehicleType: 'Ô tô',
-            minAmount: 2000000,
-            maxAmount: 3000000,
-            additionalPenalty: null),
+            minAmount: 20000,
+            maxAmount: 25000,
+            additionalPenalty: 'Mức vừa: trừ 2 điểm GPLX ô tô'),
       ],
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
       effectiveDate: DateTime(2020, 1, 1),
@@ -180,19 +180,19 @@ class MockData {
       code: 'NC01',
       title: 'Chạy ngược chiều',
       description:
-          'Phạt tiền 1.000.000 - 2.000.000 đồng (xe máy) hoặc 5.000.000 - 8.000.000 đồng (ô tô). Có thể tước GPLX.',
+          'Phạt tiền 25.000 - 30.000 đồng (xe máy/ô tô) (demo). Mức rất nặng.',
       category: 'Ngược chiều',
       fineLevels: [
         FineLevel(
             vehicleType: 'Xe máy',
-            minAmount: 1000000,
-            maxAmount: 2000000,
-            additionalPenalty: null),
+            minAmount: 25000,
+            maxAmount: 30000,
+            additionalPenalty: 'Mức nặng: trừ 3 điểm GPLX A2'),
         FineLevel(
             vehicleType: 'Ô tô',
-            minAmount: 5000000,
-            maxAmount: 8000000,
-            additionalPenalty: 'Tước GPLX 2-4 tháng'),
+            minAmount: 25000,
+            maxAmount: 30000,
+            additionalPenalty: 'Mức nặng: trừ 3 điểm GPLX ô tô'),
       ],
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
       effectiveDate: DateTime(2020, 1, 1),
@@ -201,19 +201,19 @@ class MockData {
       code: 'LD01',
       title: 'Đi sai làn đường',
       description:
-          'Phạt tiền 1.000.000 - 2.000.000 đồng (xe máy) hoặc 4.000.000 - 6.000.000 đồng (ô tô).',
+          'Phạt tiền 20.000 - 25.000 đồng (xe máy) hoặc 25.000 - 30.000 đồng (ô tô) (demo).',
       category: 'Làn đường',
       fineLevels: [
         FineLevel(
             vehicleType: 'Xe máy',
-            minAmount: 1000000,
-            maxAmount: 2000000,
-            additionalPenalty: null),
+            minAmount: 20000,
+            maxAmount: 25000,
+            additionalPenalty: 'Mức vừa: trừ 2 điểm GPLX A2'),
         FineLevel(
             vehicleType: 'Ô tô',
-            minAmount: 4000000,
-            maxAmount: 6000000,
-            additionalPenalty: null),
+            minAmount: 25000,
+            maxAmount: 30000,
+            additionalPenalty: 'Mức vừa: trừ 2 điểm GPLX ô tô'),
       ],
       lawReference: 'Điều 4, NĐ 100/2019/NĐ-CP',
       effectiveDate: DateTime(2020, 1, 1),

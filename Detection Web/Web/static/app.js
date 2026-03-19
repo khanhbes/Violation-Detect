@@ -84,10 +84,14 @@ const confRange = document.getElementById('confRange');
 const debugToggle = document.getElementById('debugToggle');
 const confBubble = document.getElementById('confBubble');
 const rangeFill = document.getElementById('rangeFill');
+const globalPageLoader = document.getElementById('globalPageLoader');
+const globalPageLoaderMessage = document.getElementById('globalPageLoaderMessage');
 
 let ws = null;
 let selectedDetectors = ['helmet'];
 let isRunning = false;
+let _globalLoaderCount = 0;
+let _globalLoaderDelayTimer = null;
 
 // =====================================================================
 // UTILITIES
@@ -98,6 +102,41 @@ function showToast(message, type = 'success') {
     setTimeout(() => toast.classList.remove('show'), 3000);
 }
 function formatSize(bytes) { return (bytes / 1024 / 1024).toFixed(1) + ' MB'; }
+
+function showGlobalPageLoader(message = 'Vui lòng chờ trong giây lát...') {
+    if (!globalPageLoader) return () => {};
+
+    _globalLoaderCount += 1;
+    if (globalPageLoaderMessage && message) {
+        globalPageLoaderMessage.textContent = message;
+    }
+
+    if (!_globalLoaderDelayTimer && !globalPageLoader.classList.contains('active')) {
+        _globalLoaderDelayTimer = setTimeout(() => {
+            if (_globalLoaderCount > 0) {
+                globalPageLoader.classList.add('active');
+                globalPageLoader.setAttribute('aria-hidden', 'false');
+            }
+            _globalLoaderDelayTimer = null;
+        }, 120);
+    }
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+
+        _globalLoaderCount = Math.max(0, _globalLoaderCount - 1);
+        if (_globalLoaderCount > 0) return;
+
+        if (_globalLoaderDelayTimer) {
+            clearTimeout(_globalLoaderDelayTimer);
+            _globalLoaderDelayTimer = null;
+        }
+        globalPageLoader.classList.remove('active');
+        globalPageLoader.setAttribute('aria-hidden', 'true');
+    };
+}
 
 function resetUI() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -328,6 +367,9 @@ function showImagePreview() {
 imageDetectBtn.addEventListener('click', async () => {
     if (!imageFile) return;
     imageDetectBtn.disabled = true; imageDetectBtn.textContent = '⏳ Detecting...';
+    const finishLoading = showGlobalPageLoader(
+        currentLang === 'en' ? 'Analyzing image with AI...' : 'Đang phân tích ảnh bằng AI...',
+    );
     const fd = new FormData();
     fd.append('file', imageFile);
     fd.append('conf', parseInt(imageConf.value) / 100);
@@ -345,7 +387,11 @@ imageDetectBtn.addEventListener('click', async () => {
         ).join('');
         showToast(`Detected ${data.total} objects!`, 'success');
     } catch (e) { showToast('Detection failed: ' + e.message, 'error'); }
-    finally { imageDetectBtn.disabled = false; imageDetectBtn.textContent = '🔍 Detect Objects'; }
+    finally {
+        finishLoading();
+        imageDetectBtn.disabled = false;
+        imageDetectBtn.textContent = '🔍 Detect Objects';
+    }
 });
 
 // =====================================================================
@@ -383,6 +429,9 @@ videoDetectBtn.addEventListener('click', async () => {
     videoDetectBtn.disabled = true; videoDetectBtn.textContent = '⏳ Uploading...';
     document.getElementById('videoProcessCard').style.display = 'block';
     document.getElementById('videoResultCard').style.display = 'none';
+    const finishLoading = showGlobalPageLoader(
+        currentLang === 'en' ? 'Uploading video for processing...' : 'Đang tải video lên để xử lý...',
+    );
 
     const fd = new FormData();
     fd.append('file', videoFile);
@@ -393,6 +442,9 @@ videoDetectBtn.addEventListener('click', async () => {
         if (data.error) { showToast('Error: ' + data.error, 'error'); return; }
         pollVideoStatus(data.task_id);
     } catch (e) { showToast('Upload failed: ' + e.message, 'error'); videoDetectBtn.disabled = false; videoDetectBtn.textContent = '🎬 Process Video'; }
+    finally {
+        finishLoading();
+    }
 });
 
 function pollVideoStatus(taskId) {
@@ -437,6 +489,9 @@ document.getElementById('lookupBtn').addEventListener('click', async () => {
 
     const btn = document.getElementById('lookupBtn');
     btn.disabled = true; btn.textContent = '⏳ Đang tra cứu...';
+    const finishLoading = showGlobalPageLoader(
+        currentLang === 'en' ? 'Searching violation records...' : 'Đang tra cứu dữ liệu vi phạm...',
+    );
     const fd = new FormData();
     fd.append('license_plate', plate); fd.append('cccd', cccd); fd.append('phone', phone);
     try {
@@ -459,15 +514,27 @@ document.getElementById('lookupBtn').addEventListener('click', async () => {
         }
         showToast(`Tìm thấy ${data.total} kết quả`, 'success');
     } catch (e) { showToast('Lỗi tra cứu: ' + e.message, 'error'); }
-    finally { btn.disabled = false; btn.textContent = '🔍 Tra cứu'; }
+    finally {
+        finishLoading();
+        btn.disabled = false;
+        btn.textContent = '🔍 Tra cứu';
+    }
 });
 
 // =====================================================================
 // INIT
 // =====================================================================
-loadVideos();
-loadModels();
-loadSnapshots();
+(async function bootstrapWebPageData() {
+    const startupLang = localStorage.getItem('lang') || 'vi';
+    const finishLoading = showGlobalPageLoader(
+        startupLang === 'en' ? 'Loading initial data...' : 'Đang tải dữ liệu ban đầu...',
+    );
+    try {
+        await Promise.all([loadVideos(), loadModels(), loadSnapshots()]);
+    } finally {
+        finishLoading();
+    }
+})();
 updateConfUI();
 debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
 
@@ -569,6 +636,75 @@ const i18n = {
         lookup_btn: '🔍 Tra cứu',
         lookup_results_title: 'Kết quả tra cứu',
         lookup_empty: 'Nhập thông tin và nhấn Tra cứu để tìm kiếm vi phạm.',
+        // Navigation + Manage + Complaints
+        nav_home: 'Trang chủ',
+        nav_image: 'Ảnh',
+        nav_video: 'Video',
+        nav_realtime: 'Thời gian thực',
+        nav_lookup: 'Tra cứu',
+        nav_manage: 'Quản lý dữ liệu',
+        nav_complaints: 'Khiếu nại',
+        manage_stat_users: 'Người dùng',
+        manage_stat_vehicles: 'Phương tiện',
+        manage_stat_violations: 'Vi phạm',
+        manage_stat_pending_fines: 'Tổng nợ phạt',
+        manage_stat_complaints: 'Khiếu nại',
+        manage_pending_updates_prefix: 'Có',
+        manage_pending_updates_suffix: 'yêu cầu thay đổi thông tin đang chờ duyệt từ người dùng App',
+        manage_pending_updates_cta: 'Xem ngay',
+        manage_overview_title: '👥 Tổng quan người dùng',
+        manage_search_placeholder: 'Tìm kiếm theo tên, email, biển số...',
+        manage_auto_sync_badge: '⚡ Tự động đồng bộ',
+        auto_sync_on: 'Auto Sync: Bật',
+        auto_sync_off: 'Auto Sync: Tắt',
+        manage_initial_hint: 'Dữ liệu sẽ tự động đồng bộ khi có thay đổi từ App/Web.',
+        manage_row_count_initial: '0 người dùng',
+        complaints_title: 'Quản lý khiếu nại',
+        complaints_subtitle: 'Theo dõi, lọc, duyệt khiếu nại và kiểm tra bằng chứng từ App theo thời gian thực',
+        complaints_search_placeholder: 'Tìm theo người dùng, lý do, mã vi phạm, mô tả...',
+        complaints_filter_all: 'Tất cả trạng thái',
+        complaints_filter_pending: 'Đang xử lý',
+        complaints_filter_approved: 'Đã duyệt',
+        complaints_filter_rejected: 'Đã từ chối',
+        complaints_empty_title: 'Chưa có dữ liệu khiếu nại',
+        complaints_empty_subtitle: 'Dữ liệu sẽ xuất hiện khi app gửi khiếu nại.',
+        complaints_total: 'Tổng khiếu nại',
+        complaints_pending: 'Đang xử lý',
+        complaints_approved: 'Đã duyệt',
+        complaints_rejected: 'Đã từ chối',
+        complaints_not_found_title: 'Không tìm thấy khiếu nại phù hợp',
+        complaints_not_found_subtitle: 'Hãy đổi từ khóa tìm kiếm hoặc bộ lọc trạng thái.',
+        complaints_fallback_reason: 'Khiếu nại',
+        complaints_fallback_desc: 'Không có mô tả chi tiết',
+        complaints_no_evidence: 'Không có ảnh bằng chứng',
+        complaints_image_loading: 'Đang tải ảnh...',
+        complaints_image_error: 'Không tải được ảnh',
+        complaints_meta_id: 'Mã khiếu nại',
+        complaints_meta_violation_id: 'Mã vi phạm',
+        complaints_meta_type: 'Loại vi phạm',
+        complaints_meta_fine: 'Mức phạt',
+        complaints_admin_note: '💬 Ghi chú admin',
+        complaints_btn_detail: '👁️ Chi tiết',
+        complaints_btn_profile: '👤 Hồ sơ',
+        complaints_btn_approve: '✅ Chấp nhận',
+        complaints_btn_reject: '❌ Từ chối',
+        complaints_btn_delete: '🗑️ Xóa',
+        complaints_btn_processing: 'Đang xử lý...',
+        complaints_pagination_info: 'Hiển thị {from}-{to} / {total}',
+        complaints_pagination_prev: '← Trước',
+        complaints_pagination_next: 'Tiếp →',
+        complaints_pagination_page: 'Trang {page}/{total}',
+        complaints_delete_confirm: 'Bạn có chắc muốn xóa khiếu nại này khỏi hệ thống?',
+        complaints_delete_success: '🗑️ Đã xóa khiếu nại',
+        complaints_delete_error: 'Lỗi khi xóa khiếu nại',
+        complaints_delete_loading: 'Đang xóa khiếu nại...',
+        complaint_status_pending: '⏳ Đang xử lý',
+        complaint_status_approved: '✅ Đã duyệt',
+        complaint_status_rejected: '❌ Đã từ chối',
+        global_loader_title: 'Đang xử lý',
+        global_loader_message: 'Vui lòng chờ trong giây lát...',
+        admin_sync_success: 'Dữ liệu đã được đồng bộ tự động',
+        user_count_suffix: 'người dùng',
         // Typed.js
         typed_strings: [
             'trí tuệ nhân tạo YOLOv12-Seg',
@@ -633,6 +769,75 @@ const i18n = {
         lookup_btn: '🔍 Search',
         lookup_results_title: 'Search Results',
         lookup_empty: 'Enter information and click Search to find violations.',
+        // Navigation + Manage + Complaints
+        nav_home: 'Home',
+        nav_image: 'Image',
+        nav_video: 'Video',
+        nav_realtime: 'Real-Time',
+        nav_lookup: 'Look Up',
+        nav_manage: 'Data Management',
+        nav_complaints: 'Complaints',
+        manage_stat_users: 'Users',
+        manage_stat_vehicles: 'Vehicles',
+        manage_stat_violations: 'Violations',
+        manage_stat_pending_fines: 'Pending Fines',
+        manage_stat_complaints: 'Complaints',
+        manage_pending_updates_prefix: 'There are',
+        manage_pending_updates_suffix: 'profile change requests waiting for admin review from the app',
+        manage_pending_updates_cta: 'Review now',
+        manage_overview_title: '👥 User Overview',
+        manage_search_placeholder: 'Search by name, email, plate number...',
+        manage_auto_sync_badge: '⚡ Auto Sync Enabled',
+        auto_sync_on: 'Auto Sync: On',
+        auto_sync_off: 'Auto Sync: Off',
+        manage_initial_hint: 'Data will auto-sync whenever App/Web changes are detected.',
+        manage_row_count_initial: '0 users',
+        complaints_title: 'Complaint Management',
+        complaints_subtitle: 'Track, filter, review complaints and verify app evidence in realtime',
+        complaints_search_placeholder: 'Search by user, reason, violation ID, description...',
+        complaints_filter_all: 'All statuses',
+        complaints_filter_pending: 'Pending',
+        complaints_filter_approved: 'Approved',
+        complaints_filter_rejected: 'Rejected',
+        complaints_empty_title: 'No complaint data yet',
+        complaints_empty_subtitle: 'Items will appear when complaints are submitted from the app.',
+        complaints_total: 'Total complaints',
+        complaints_pending: 'Pending',
+        complaints_approved: 'Approved',
+        complaints_rejected: 'Rejected',
+        complaints_not_found_title: 'No matching complaints found',
+        complaints_not_found_subtitle: 'Try another keyword or status filter.',
+        complaints_fallback_reason: 'Complaint',
+        complaints_fallback_desc: 'No detailed description',
+        complaints_no_evidence: 'No evidence image',
+        complaints_image_loading: 'Loading image...',
+        complaints_image_error: 'Failed to load image',
+        complaints_meta_id: 'Complaint ID',
+        complaints_meta_violation_id: 'Violation ID',
+        complaints_meta_type: 'Violation type',
+        complaints_meta_fine: 'Fine amount',
+        complaints_admin_note: '💬 Admin note',
+        complaints_btn_detail: '👁️ Detail',
+        complaints_btn_profile: '👤 Profile',
+        complaints_btn_approve: '✅ Approve',
+        complaints_btn_reject: '❌ Reject',
+        complaints_btn_delete: '🗑️ Delete',
+        complaints_btn_processing: 'Processing...',
+        complaints_pagination_info: 'Showing {from}-{to} / {total}',
+        complaints_pagination_prev: '← Prev',
+        complaints_pagination_next: 'Next →',
+        complaints_pagination_page: 'Page {page}/{total}',
+        complaints_delete_confirm: 'Delete this complaint from the system?',
+        complaints_delete_success: '🗑️ Complaint deleted',
+        complaints_delete_error: 'Failed to delete complaint',
+        complaints_delete_loading: 'Deleting complaint...',
+        complaint_status_pending: '⏳ Pending',
+        complaint_status_approved: '✅ Approved',
+        complaint_status_rejected: '❌ Rejected',
+        global_loader_title: 'Processing',
+        global_loader_message: 'Please wait for a moment...',
+        admin_sync_success: 'Data auto-synced successfully',
+        user_count_suffix: 'users',
         // Typed.js
         typed_strings: [
             'powered by YOLOv12-Seg AI',
@@ -655,13 +860,30 @@ function setLanguage(lang) {
     // Update all data-i18n elements
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.dataset.i18n;
-        if (t[key] !== undefined) {
-            // Use innerHTML for keys that contain HTML (like upload-link spans)
-            if (t[key].includes('<')) {
-                el.innerHTML = t[key];
-            } else {
-                el.textContent = t[key];
-            }
+        const value = t[key];
+        if (value === undefined || value === null) return;
+        if (typeof value === 'string' && value.includes('<')) {
+            el.innerHTML = value;
+        } else if (typeof value === 'string') {
+            el.textContent = value;
+        } else {
+            el.textContent = String(value);
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.dataset.i18nPlaceholder;
+        const value = t[key];
+        if (typeof value === 'string') {
+            el.setAttribute('placeholder', value);
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle;
+        const value = t[key];
+        if (typeof value === 'string') {
+            el.setAttribute('title', value);
         }
     });
 
@@ -689,6 +911,46 @@ function setLanguage(lang) {
     document.title = lang === 'vi'
         ? '🚦 Phát hiện vi phạm giao thông'
         : '🚦 Traffic Violation Detection';
+
+    try {
+        if (typeof renderAutoSyncToggleState === 'function') {
+            renderAutoSyncToggleState();
+        }
+        if (_adminCachedData) {
+            renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+            renderComplaintBoard(_adminCachedData);
+            const detailPanel = document.getElementById('tab-user-detail');
+            if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid) {
+                showUserDetails(detailPanel.dataset.uid);
+            }
+        }
+    } catch (_) {}
+}
+
+function tr(key, fallback = '') {
+    const langDict = i18n[currentLang] || {};
+    const value = langDict[key];
+    if (typeof value === 'string') return value;
+    return fallback || key;
+}
+
+function trTemplate(key, params = {}, fallback = '') {
+    let template = tr(key, fallback);
+    Object.entries(params).forEach(([name, value]) => {
+        template = template.replace(new RegExp(`\\{${name}\\}`, 'g'), String(value));
+    });
+    return template;
+}
+
+function getCurrentLocale() {
+    return currentLang === 'en' ? 'en-US' : 'vi-VN';
+}
+
+function formatVnd(value) {
+    return new Intl.NumberFormat(getCurrentLocale(), {
+        style: 'currency',
+        currency: 'VND',
+    }).format(Number(value || 0));
 }
 
 // Language toggle button
@@ -847,7 +1109,7 @@ if (scrollTopBtn) {
 
         // Register Service Worker for background notifications
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/firebase-messaging-sw.js')
+            navigator.serviceWorker.register('/firebase-messaging-sw.js')
                 .then((registration) => {
                     console.log('[FCM] Service Worker registered:', registration.scope);
                     messaging.useServiceWorker(registration);
@@ -945,7 +1207,6 @@ async function requestNotificationPermission(messaging) {
 // =====================================================================
 // DATA MANAGEMENT (Admin Dashboard)
 // =====================================================================
-const refreshManageBtn = document.getElementById('refreshManageBtn');
 const adminDataTableBody = document.getElementById('adminDataTableBody');
 const manageSearchInput = document.getElementById('manageSearchInput');
 
@@ -956,9 +1217,231 @@ const statTotalViolations = document.getElementById('statTotalViolations');
 const statPendingFines = document.getElementById('statPendingFines');
 const statTotalComplaints = document.getElementById('statTotalComplaints');
 const manageRowCount = document.getElementById('manageRowCount');
+const complaintBoardList = document.getElementById('complaintBoardList');
+const complaintBoardStats = document.getElementById('complaintBoardStats');
+const complaintSearchInput = document.getElementById('complaintSearchInput');
+const complaintStatusFilter = document.getElementById('complaintStatusFilter');
+const manageAutoSyncToggle = document.getElementById('manageAutoSyncToggle');
+const complaintAutoSyncToggle = document.getElementById('complaintAutoSyncToggle');
 
 // Cache data for search
 let _adminCachedData = null;
+let _complaintBoardQuery = '';
+let _complaintBoardStatus = 'all';
+let _complaintBoardPage = 1;
+const COMPLAINT_PAGE_SIZE = 10;
+const _complaintReviewLoading = new Set();
+const _complaintDeleteLoading = new Set();
+let _adminAutoSyncEnabled = localStorage.getItem('adminAutoSyncEnabled') !== '0';
+if (complaintStatusFilter) {
+    _complaintBoardStatus = complaintStatusFilter.value || 'all';
+}
+
+function normalizeDriverLicenses(user) {
+    if (!user) return [];
+
+    if (Array.isArray(user.driverLicenses) && user.driverLicenses.length > 0) {
+        return user.driverLicenses.map(item => ({
+            class: (item?.class || '').toString(),
+            vehicleType: (item?.vehicleType || '').toString(),
+            issueDate: (item?.issueDate || '').toString(),
+            expiryDate: (item?.expiryDate || '').toString(),
+            licenseNumber: (item?.licenseNumber || '').toString(),
+        }));
+    }
+
+    const fallback = [];
+    if (user.carLicenseClass || user.licenseNumber || user.licenseIssueDate || user.licenseExpiryDate) {
+        fallback.push({
+            class: (user.carLicenseClass || user.licenseClass || '').toString(),
+            vehicleType: 'Ô tô',
+            issueDate: (user.licenseIssueDate || '').toString(),
+            expiryDate: (user.licenseExpiryDate || '').toString(),
+            licenseNumber: (user.licenseNumber || '').toString(),
+        });
+    }
+    if (user.motoLicenseClass) {
+        fallback.push({
+            class: user.motoLicenseClass.toString(),
+            vehicleType: 'Xe máy',
+            issueDate: (user.licenseIssueDate || '').toString(),
+            expiryDate: (user.licenseExpiryDate || '').toString(),
+            licenseNumber: (user.licenseNumber || '').toString(),
+        });
+    }
+    return fallback;
+}
+
+function isMotoLicense(license) {
+    const vehicleType = (license?.vehicleType || '').toString().toLowerCase();
+    const cls = (license?.class || '').toString().toUpperCase();
+    return vehicleType.includes('xe máy') || vehicleType.includes('motor') || cls.startsWith('A');
+}
+
+function isCarLicense(license) {
+    const vehicleType = (license?.vehicleType || '').toString().toLowerCase();
+    const cls = (license?.class || '').toString().toUpperCase();
+    return vehicleType.includes('ô tô') || vehicleType.includes('o to') || vehicleType.includes('car') || /^[BCDEF]/.test(cls);
+}
+
+function getLicensePointState(user, licenses) {
+    const fallbackPoints = Number.isFinite(Number(user?.points)) ? Number(user.points) : 12;
+    const motoPoints = Number.isFinite(Number(user?.motoPoints))
+        ? Number(user.motoPoints)
+        : (Number.isFinite(Number(user?.motoLicensePoints)) ? Number(user.motoLicensePoints) : fallbackPoints);
+    const carPoints = Number.isFinite(Number(user?.carPoints))
+        ? Number(user.carPoints)
+        : (Number.isFinite(Number(user?.carLicensePoints)) ? Number(user.carLicensePoints) : fallbackPoints);
+
+    const motoLicenses = (licenses || []).filter(isMotoLicense);
+    const carLicenses = (licenses || []).filter(isCarLicense);
+
+    return {
+        moto: {
+            exists: motoLicenses.length > 0,
+            points: Math.max(0, Math.min(12, Math.round(motoPoints))),
+            licenses: motoLicenses,
+        },
+        car: {
+            exists: carLicenses.length > 0,
+            points: Math.max(0, Math.min(12, Math.round(carPoints))),
+            licenses: carLicenses,
+        },
+    };
+}
+
+function getPointColor(points) {
+    if (points >= 8) return '#10b981';
+    if (points >= 4) return '#f59e0b';
+    return '#ef4444';
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function toEpochMs(value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number') {
+        return value > 1e12 ? value : value * 1000;
+    }
+    if (value && typeof value.toDate === 'function') {
+        try { return value.toDate().getTime(); } catch (_) {}
+    }
+    const parsed = Date.parse(String(value));
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function formatDateTime(value) {
+    const ms = toEpochMs(value);
+    if (!ms) return '—';
+    return new Date(ms).toLocaleString(getCurrentLocale(), {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+function normalizeComplaintStatus(status) {
+    const normalized = String(status || '').toLowerCase().trim();
+    if (normalized === 'approved' || normalized === 'rejected' || normalized === 'pending') {
+        return normalized;
+    }
+    return 'pending';
+}
+
+function getComplaintStatusMeta(status) {
+    const normalized = normalizeComplaintStatus(status);
+    if (normalized === 'approved') {
+        return { label: tr('complaint_status_approved', '✅ Đã duyệt'), tagClass: 'tag-success', cardClass: 'approved' };
+    }
+    if (normalized === 'rejected') {
+        return { label: tr('complaint_status_rejected', '❌ Đã từ chối'), tagClass: 'tag-danger', cardClass: 'rejected' };
+    }
+    return { label: tr('complaint_status_pending', '⏳ Đang xử lý'), tagClass: 'tag-warning', cardClass: 'pending' };
+}
+
+function getComplaintEvidenceUrl(complaint) {
+    if (!complaint) return '';
+    const complaintId = String(complaint.id || '').trim();
+    const candidates = [
+        complaint.evidenceUrlResolved,
+        complaint.evidenceUrl,
+        complaint.evidenceURL,
+        complaint.evidenceDownloadUrl,
+        complaint.evidence_download_url,
+        complaint.evidenceImageUrl,
+        complaint.evidence_image_url,
+        complaint.downloadUrl,
+        complaint.downloadURL,
+        complaint.proofUrl,
+        complaint.imageUrl,
+        complaint.image_url,
+        complaint.evidencePath,
+        complaint.evidence_path,
+        complaint.storagePath,
+        complaint.storage_path,
+        complaint.fileUrl,
+        complaint.file_url,
+    ];
+
+    if (complaint.evidence && typeof complaint.evidence === 'object') {
+        candidates.push(complaint.evidence.url);
+        candidates.push(complaint.evidence.downloadUrl);
+        candidates.push(complaint.evidence.downloadURL);
+        candidates.push(complaint.evidence.download_url);
+        candidates.push(complaint.evidence.path);
+        candidates.push(complaint.evidence.storagePath);
+        candidates.push(complaint.evidence.storage_path);
+        candidates.push(complaint.evidence.fullPath);
+        candidates.push(complaint.evidence.full_path);
+    }
+
+    const found = candidates.find(v => typeof v === 'string' && v.trim().length > 0);
+    if (!found) return '';
+
+    const value = found.trim();
+    if (!value) return '';
+
+    if (value.startsWith('/api/admin/complaints/')) return value;
+    if (value.startsWith('/')) return value;
+
+    const looksLikeStoragePath =
+        value.startsWith('complaints/') ||
+        value.startsWith('gs://') ||
+        value.includes('/o/') ||
+        value.includes('firebasestorage.googleapis.com') ||
+        value.includes('storage.googleapis.com');
+
+    if (looksLikeStoragePath && complaintId) {
+        return `/api/admin/complaints/${encodeURIComponent(complaintId)}/evidence?path=${encodeURIComponent(value)}`;
+    }
+
+    return value;
+}
+
+function setActionButtonLoading(button, isLoading, loadingText) {
+    if (!button) return;
+    if (isLoading) {
+        button.dataset.originalHtml = button.innerHTML;
+        button.classList.add('btn-loading');
+        button.disabled = true;
+        button.innerHTML = `<span class="spin"></span><span>${escapeHtml(loadingText || tr('complaints_btn_processing', 'Đang xử lý...'))}</span>`;
+        return;
+    }
+    const original = button.dataset.originalHtml;
+    if (original) button.innerHTML = original;
+    delete button.dataset.originalHtml;
+    button.classList.remove('btn-loading');
+    button.disabled = false;
+}
 
 function updateManageStats(data) {
     const users = data.users || [];
@@ -971,7 +1454,7 @@ function updateManageStats(data) {
         if (v.status === 'pending') totalPending += (v.fineAmount || 0);
     });
 
-    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+    const formatter = { format: formatVnd };
 
     if (statTotalUsers) statTotalUsers.textContent = users.length;
     if (statTotalVehicles) statTotalVehicles.textContent = vehicles.length;
@@ -1015,7 +1498,7 @@ function renderAdminTable(data, searchQuery = '') {
     const profileUpdates = data.profile_updates || [];
 
     const query = searchQuery.toLowerCase().trim();
-    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+    const formatter = { format: formatVnd };
 
     let html = '';
     let rowIndex = 0;
@@ -1028,6 +1511,12 @@ function renderAdminTable(data, searchQuery = '') {
         const uComplaints = complaints.filter(c => c.userId === uid);
         const uNotifications = notifications.filter(n => n.userId === uid);
         const isPendingUpdate = profileUpdates.find(r => r.id === uid);
+        const licenses = normalizeDriverLicenses(u);
+        const licensePointState = getLicensePointState(u, licenses);
+        const licensePointQuick = [
+            licensePointState.moto.exists ? `🏍️ ${licensePointState.moto.points}/12` : '',
+            licensePointState.car.exists ? `🚗 ${licensePointState.car.points}/12` : '',
+        ].filter(Boolean).join(' • ');
 
         // Search filter
         if (query) {
@@ -1035,6 +1524,7 @@ function renderAdminTable(data, searchQuery = '') {
                 u.email, u.fullName, u.idCard, u.phone, uid,
                 ...targetPlates,
                 ...uVehicles.map(v => `${v.brand || ''} ${v.model || ''}`),
+                ...licenses.map(l => `${l.class || ''} ${l.licenseNumber || ''} ${l.vehicleType || ''}`),
             ].join(' ').toLowerCase();
             if (!searchable.includes(query)) return;
         }
@@ -1074,6 +1564,7 @@ function renderAdminTable(data, searchQuery = '') {
                     <span class="data-tag tag-danger">Chưa nộp: ${pendingCount}</span>
                     <span class="data-tag tag-success">Đã nộp: ${paidCount}</span>
                     ${totalPendingFine > 0 ? `<div style="font-weight:700;color:var(--danger);margin-top:6px;font-size:0.8rem;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color:var(--success);margin-top:4px;font-weight:600;font-size:0.78rem;">✓ Không nợ</div>'}
+                    ${licensePointQuick ? `<div style="margin-top:6px;font-size:0.78rem;color:var(--text-secondary);font-weight:600;">${licensePointQuick}</div>` : ''}
                 </td>
                 <td>
                     ${uComplaints.length > 0
@@ -1095,21 +1586,240 @@ function renderAdminTable(data, searchQuery = '') {
     if (rowIndex === 0) {
         html = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:50px 40px;">
             <div style="font-size:2rem;margin-bottom:8px;">🔍</div>
-            ${query ? 'Không tìm thấy kết quả phù hợp.' : 'Hệ thống chưa có dữ liệu người dùng.'}
+            ${query
+                ? (currentLang === 'en' ? 'No matching result found.' : 'Không tìm thấy kết quả phù hợp.')
+                : (currentLang === 'en' ? 'No user data available yet.' : 'Hệ thống chưa có dữ liệu người dùng.')}
         </td></tr>`;
     }
 
     adminDataTableBody.innerHTML = html;
-    if (manageRowCount) manageRowCount.textContent = `${rowIndex} người dùng`;
+    if (manageRowCount) manageRowCount.textContent = `${rowIndex} ${tr('user_count_suffix', currentLang === 'en' ? 'users' : 'người dùng')}`;
 }
 
-async function loadAdminData() {
-    if (!adminDataTableBody) return;
-
-    adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:60px 40px;">
-        <div class="manage-loading" style="font-size:2.5rem;margin-bottom:12px;">⏳</div>
-        <div style="font-weight:500;">Đang tải dữ liệu từ Firebase...</div>
+function renderManageLoadingRow(message) {
+    return `<tr><td colspan="7" style="text-align:center;padding:60px 40px;">
+        <div class="manage-loading-wrap">
+            <div class="manage-loading manage-loading-spinner"></div>
+            <div class="manage-loading-text">${escapeHtml(message || (currentLang === 'en' ? 'Loading data from Firebase...' : 'Đang tải dữ liệu từ Firebase...'))}</div>
+            <div class="manage-loading-dots"><span></span><span></span><span></span></div>
+        </div>
     </td></tr>`;
+}
+
+function renderComplaintBoardLoading(message) {
+    if (!complaintBoardList) return;
+    complaintBoardList.innerHTML = `
+        <div class="complaint-board-empty">
+            <div class="manage-loading-wrap">
+                <div class="manage-loading manage-loading-spinner"></div>
+                <div class="manage-loading-text">${escapeHtml(message || (currentLang === 'en' ? 'Loading complaint list...' : 'Đang tải danh sách khiếu nại...'))}</div>
+                <div class="manage-loading-dots"><span></span><span></span><span></span></div>
+            </div>
+        </div>
+    `;
+}
+
+function renderComplaintBoard(data) {
+    if (!complaintBoardList) return;
+
+    const users = data?.users || [];
+    const violations = data?.violations || [];
+    const complaints = data?.complaints || [];
+
+    const usersById = new Map(users.map(u => [String(u.id || ''), u]));
+    const violationsById = new Map(violations.map(v => [String(v.id || '').toUpperCase(), v]));
+
+    const normalized = complaints.map(c => {
+        const complaintId = String(c.id || '');
+        const userId = String(c.userId || '');
+        const violationId = String(c.violationId || '');
+        const user = usersById.get(userId);
+        const relatedViolation = violationsById.get(violationId.toUpperCase()) || null;
+        const status = normalizeComplaintStatus(c.status);
+        const meta = getComplaintStatusMeta(status);
+        const evidenceUrl = getComplaintEvidenceUrl(c);
+        const createdMs = toEpochMs(c.createdAt ?? c.updatedAt ?? c.reviewedAt ?? c.timestamp) || 0;
+        return {
+            ...c,
+            id: complaintId,
+            userId,
+            violationId,
+            status,
+            statusMeta: meta,
+            evidenceUrl,
+            createdMs,
+            userName: user?.fullName || user?.email || userId || (currentLang === 'en' ? 'Unknown' : 'Không rõ'),
+            userEmail: user?.email || '—',
+            relatedViolation,
+        };
+    }).sort((a, b) => b.createdMs - a.createdMs);
+
+    const pendingCount = normalized.filter(c => c.status === 'pending').length;
+    const approvedCount = normalized.filter(c => c.status === 'approved').length;
+    const rejectedCount = normalized.filter(c => c.status === 'rejected').length;
+
+    if (complaintBoardStats) {
+        complaintBoardStats.innerHTML = `
+            <div class="complaint-board-stat"><div class="stat-icon icon-total">📋</div><div class="stat-content"><div class="value">${normalized.length}</div><div class="label">${escapeHtml(tr('complaints_total', 'Tổng khiếu nại'))}</div></div></div>
+            <div class="complaint-board-stat"><div class="stat-icon icon-pending">⏳</div><div class="stat-content"><div class="value" style="color:#f59e0b;">${pendingCount}</div><div class="label">${escapeHtml(tr('complaints_pending', 'Đang xử lý'))}</div></div></div>
+            <div class="complaint-board-stat"><div class="stat-icon icon-approved">✅</div><div class="stat-content"><div class="value" style="color:#10b981;">${approvedCount}</div><div class="label">${escapeHtml(tr('complaints_approved', 'Đã duyệt'))}</div></div></div>
+            <div class="complaint-board-stat"><div class="stat-icon icon-rejected">❌</div><div class="stat-content"><div class="value" style="color:#ef4444;">${rejectedCount}</div><div class="label">${escapeHtml(tr('complaints_rejected', 'Đã từ chối'))}</div></div></div>
+        `;
+    }
+
+    const query = (_complaintBoardQuery || '').toLowerCase().trim();
+    const statusFilter = (_complaintBoardStatus || 'all').toLowerCase().trim();
+    const filtered = normalized.filter(c => {
+        if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+        if (!query) return true;
+
+        const searchable = [
+            c.id,
+            c.userId,
+            c.userName,
+            c.userEmail,
+            c.violationId,
+            c.reason,
+            c.description,
+            c.adminNote,
+            c.relatedViolation?.violationType,
+            c.relatedViolation?.type,
+        ].map(v => (v || '').toString().toLowerCase()).join(' ');
+
+        return searchable.includes(query);
+    });
+
+    if (filtered.length === 0) {
+        complaintBoardList.innerHTML = `
+            <div class="complaint-board-empty">
+                <div style="font-size:2rem;">🔍</div>
+                <div style="margin-top:8px;font-weight:700;">${escapeHtml(tr('complaints_not_found_title', 'Không tìm thấy khiếu nại phù hợp'))}</div>
+                <div style="margin-top:4px;font-size:0.85rem;color:var(--text-muted);">${escapeHtml(tr('complaints_not_found_subtitle', 'Hãy đổi từ khóa tìm kiếm hoặc bộ lọc trạng thái.'))}</div>
+            </div>
+        `;
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / COMPLAINT_PAGE_SIZE));
+    _complaintBoardPage = Math.max(1, Math.min(_complaintBoardPage, totalPages));
+
+    const startIndex = (_complaintBoardPage - 1) * COMPLAINT_PAGE_SIZE;
+    const endIndex = Math.min(startIndex + COMPLAINT_PAGE_SIZE, filtered.length);
+    const pagedItems = filtered.slice(startIndex, endIndex);
+
+    const cardsHtml = pagedItems.map(c => {
+        const relatedViolation = c.relatedViolation;
+        const fineText = relatedViolation ? formatVnd(relatedViolation.fineAmount || 0) : '—';
+        const actionBusy = _complaintReviewLoading.has(c.id) || _complaintDeleteLoading.has(c.id);
+        const loadingText = escapeHtml(tr('complaints_image_loading', 'Đang tải ảnh...'));
+        const imageErrorText = escapeHtml(tr('complaints_image_error', 'Không tải được ảnh'));
+
+        const evidenceHtml = c.evidenceUrl
+            ? `
+                <div class="complaint-card-evidence">
+                    <div class="image-loading-mask">${loadingText}</div>
+                    <img
+                        src="${escapeHtml(c.evidenceUrl)}"
+                        alt="Complaint evidence"
+                        loading="lazy"
+                        onload="if(this.previousElementSibling){this.previousElementSibling.style.display='none';}"
+                        onerror="this.style.display='none'; if(this.previousElementSibling){this.previousElementSibling.style.display='flex'; this.previousElementSibling.style.animation='none'; this.previousElementSibling.textContent='${imageErrorText}';}"
+                    />
+                </div>
+            `
+            : `<div class="complaint-card-evidence"><div class="complaint-card-evidence-fallback">${escapeHtml(tr('complaints_no_evidence', 'Không có ảnh bằng chứng'))}</div></div>`;
+
+        return `
+            <article class="complaint-card ${c.statusMeta.cardClass}">
+                <div class="complaint-card-main">
+                    <div class="complaint-card-top">
+                        <div>
+                            <div class="complaint-card-title">${escapeHtml(c.reason || tr('complaints_fallback_reason', 'Khiếu nại'))}</div>
+                            <div class="complaint-card-subtitle">👤 ${escapeHtml(c.userName)} • ${formatDateTime(c.createdAt)}</div>
+                        </div>
+                        <span class="data-tag ${c.statusMeta.tagClass}" style="white-space:nowrap;">${c.statusMeta.label}</span>
+                    </div>
+
+                    <div class="complaint-card-desc">${escapeHtml(c.description || tr('complaints_fallback_desc', 'Không có mô tả chi tiết'))}</div>
+
+                    <div class="complaint-card-meta">
+                        <div><span class="meta-label">${escapeHtml(tr('complaints_meta_id', 'Mã khiếu nại'))}:</span> <span class="meta-value">${escapeHtml(c.id || '—')}</span></div>
+                        <div><span class="meta-label">${escapeHtml(tr('complaints_meta_violation_id', 'Mã vi phạm'))}:</span> <span class="meta-value">${escapeHtml(c.violationId || '—')}</span></div>
+                        <div><span class="meta-label">${escapeHtml(tr('complaints_meta_type', 'Loại vi phạm'))}:</span> <span class="meta-value">${escapeHtml(relatedViolation?.violationType || relatedViolation?.type || '—')}</span></div>
+                        <div><span class="meta-label">${escapeHtml(tr('complaints_meta_fine', 'Mức phạt'))}:</span> <span class="meta-value">${escapeHtml(fineText)}</span></div>
+                    </div>
+
+                    ${c.adminNote ? `<div style="font-size:0.78rem;color:#fca5a5;">${escapeHtml(tr('complaints_admin_note', '💬 Ghi chú admin'))}: ${escapeHtml(c.adminNote)}</div>` : ''}
+                </div>
+
+                <div class="complaint-card-side">
+                    ${evidenceHtml}
+                    <div class="complaint-card-actions">
+                        <button class="complaint-card-btn detail" onclick="showComplaintDetailModal('${c.id}')">${escapeHtml(tr('complaints_btn_detail', '👁️ Chi tiết'))}</button>
+                        <button class="complaint-card-btn profile" onclick="showUserDetailPage('${c.userId}')">${escapeHtml(tr('complaints_btn_profile', '👤 Hồ sơ'))}</button>
+                        ${c.status === 'pending' ? `
+                            <button class="complaint-card-btn approve ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="reviewComplaint('${c.id}', 'approve', '', this)">
+                                ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_approve', '✅ Chấp nhận'))}
+                            </button>
+                            <button class="complaint-card-btn reject ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="showRejectComplaintModal('${c.id}')">
+                                ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_reject', '❌ Từ chối'))}
+                            </button>
+                        ` : `
+                            <button class="complaint-card-btn remove ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="confirmDeleteComplaint('${c.id}', this)">
+                                ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_delete', '🗑️ Xóa'))}
+                            </button>
+                        `}
+                    </div>
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    const paginationHtml = `
+        <div class="complaint-board-pagination">
+            <div class="info">${escapeHtml(trTemplate('complaints_pagination_info', {
+                from: startIndex + 1,
+                to: endIndex,
+                total: filtered.length,
+            }, `Hiển thị ${startIndex + 1}-${endIndex} / ${filtered.length}`))}</div>
+            <div class="complaint-board-page-controls">
+                <button class="complaint-board-page-btn" ${_complaintBoardPage <= 1 ? 'disabled' : ''} onclick="setComplaintBoardPage(${_complaintBoardPage - 1})">${escapeHtml(tr('complaints_pagination_prev', '← Trước'))}</button>
+                <span class="complaint-board-page-number">${escapeHtml(trTemplate('complaints_pagination_page', {
+                    page: _complaintBoardPage,
+                    total: totalPages,
+                }, `Trang ${_complaintBoardPage}/${totalPages}`))}</span>
+                <button class="complaint-board-page-btn" ${_complaintBoardPage >= totalPages ? 'disabled' : ''} onclick="setComplaintBoardPage(${_complaintBoardPage + 1})">${escapeHtml(tr('complaints_pagination_next', 'Tiếp →'))}</button>
+            </div>
+        </div>
+    `;
+
+    complaintBoardList.innerHTML = cardsHtml + paginationHtml;
+}
+
+function setComplaintBoardPage(nextPage) {
+    const safePage = Number(nextPage);
+    if (!Number.isFinite(safePage)) return;
+    _complaintBoardPage = Math.max(1, Math.floor(safePage));
+    if (_adminCachedData) renderComplaintBoard(_adminCachedData);
+}
+
+async function loadAdminData(options = {}) {
+    if (!adminDataTableBody) return;
+    const silent = options.silent === true;
+    const finishLoading = !silent
+        ? showGlobalPageLoader(currentLang === 'en'
+            ? 'Syncing Data Management...'
+            : 'Đang đồng bộ dữ liệu Data Management...')
+        : null;
+
+    if (!silent) {
+        adminDataTableBody.innerHTML = renderManageLoadingRow(currentLang === 'en'
+            ? 'Loading data from Firebase...'
+            : 'Đang tải dữ liệu từ Firebase...');
+        renderComplaintBoardLoading(currentLang === 'en'
+            ? 'Loading complaint list...'
+            : 'Đang tải danh sách khiếu nại...');
+    }
 
     try {
         const resp = await fetch('/api/admin/data');
@@ -1120,19 +1830,25 @@ async function loadAdminData() {
             adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:50px;">
                 <div style="font-size:2rem;margin-bottom:8px;">⚠️</div>${json.message}
             </td></tr>`;
+            renderComplaintBoardLoading(json.message || 'Không tải được dữ liệu khiếu nại');
             return;
         }
 
         _adminCachedData = json.data;
         updateManageStats(_adminCachedData);
         renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
-        showToast('Đã làm mới dữ liệu hệ thống!', 'success');
+        renderComplaintBoard(_adminCachedData);
 
     } catch (e) {
         console.error(e);
-        adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:50px;">
-            <div style="font-size:2rem;margin-bottom:8px;">❌</div>Lỗi kết nối máy chủ.
-        </td></tr>`;
+        if (!silent) {
+            adminDataTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:50px;">
+                <div style="font-size:2rem;margin-bottom:8px;">❌</div>Lỗi kết nối máy chủ.
+            </td></tr>`;
+            renderComplaintBoardLoading('Lỗi kết nối khi tải khiếu nại');
+        }
+    } finally {
+        if (finishLoading) finishLoading();
     }
 }
 
@@ -1170,24 +1886,90 @@ function confirmDeleteUser(uid, name) {
 async function deleteUser(uid) {
     const overlay = document.getElementById('deleteConfirmOverlay');
     if (overlay) overlay.remove();
+    const finishLoading = showGlobalPageLoader(currentLang === 'en'
+        ? 'Deleting account and related data...'
+        : 'Đang xóa tài khoản và dữ liệu liên quan...');
     try {
         const resp = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE' });
         const json = await resp.json();
         if (json.status === 'ok') {
-            showToast('✅ Đã xóa tài khoản người dùng thành công', 'success');
-            loadAdminData();
+            showToast(
+                currentLang === 'en'
+                    ? '✅ User account deleted successfully'
+                    : '✅ Đã xóa tài khoản người dùng thành công',
+                'success',
+            );
+            await loadAdminData({ silent: true });
         } else {
-            showToast('Lỗi khi xóa người dùng: ' + json.message, 'error');
+            showToast((currentLang === 'en' ? 'Error deleting user: ' : 'Lỗi khi xóa người dùng: ') + json.message, 'error');
         }
     } catch (e) {
         console.error(e);
-        showToast('Lỗi kết nối máy chủ khi xóa người dùng', 'error');
+        showToast(currentLang === 'en' ? 'Server connection error while deleting user' : 'Lỗi kết nối máy chủ khi xóa người dùng', 'error');
+    } finally {
+        finishLoading();
     }
 }
 
-// Refresh button
-if (refreshManageBtn) {
-    refreshManageBtn.addEventListener('click', loadAdminData);
+function confirmDeleteComplaint(complaintId, triggerButton = null) {
+    const normalizedId = String(complaintId || '').trim();
+    if (!normalizedId) return;
+    if (_complaintReviewLoading.has(normalizedId) || _complaintDeleteLoading.has(normalizedId)) return;
+
+    const message = tr(
+        'complaints_delete_confirm',
+        'Bạn có chắc muốn xóa khiếu nại này khỏi hệ thống?',
+    );
+    if (!confirm(message)) return;
+    deleteComplaint(normalizedId, triggerButton);
+}
+
+async function deleteComplaint(complaintId, triggerButton = null) {
+    const normalizedId = String(complaintId || '').trim();
+    if (!normalizedId) return;
+    if (_complaintDeleteLoading.has(normalizedId)) return;
+
+    _complaintDeleteLoading.add(normalizedId);
+    setActionButtonLoading(triggerButton, true, tr('complaints_delete_loading', 'Đang xóa khiếu nại...'));
+    const finishLoading = showGlobalPageLoader(tr('complaints_delete_loading', 'Đang xóa khiếu nại...'));
+
+    try {
+        const res = await fetch(`/api/admin/complaints/${encodeURIComponent(normalizedId)}`, {
+            method: 'DELETE',
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'ok') {
+            if (_adminCachedData) {
+                _adminCachedData.complaints = (_adminCachedData.complaints || []).filter(
+                    c => String(c.id || '') !== normalizedId,
+                );
+                updateManageStats(_adminCachedData);
+                renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+                renderComplaintBoard(_adminCachedData);
+            }
+
+            const detailModal = document.getElementById('complaintDetailModal');
+            if (detailModal) detailModal.remove();
+
+            await loadAdminData({ silent: true });
+            const detailPanel = document.getElementById('tab-user-detail');
+            if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid) {
+                showUserDetails(detailPanel.dataset.uid);
+            }
+
+            showToast(data.message || tr('complaints_delete_success', '🗑️ Đã xóa khiếu nại'), 'success');
+        } else {
+            showToast(data.message || tr('complaints_delete_error', 'Lỗi khi xóa khiếu nại'), 'error');
+        }
+    } catch (e) {
+        showToast(tr('complaints_delete_error', 'Lỗi khi xóa khiếu nại'), 'error');
+    } finally {
+        _complaintDeleteLoading.delete(normalizedId);
+        setActionButtonLoading(triggerButton, false);
+        finishLoading();
+        if (_adminCachedData) renderComplaintBoard(_adminCachedData);
+    }
 }
 
 // Search input
@@ -1203,54 +1985,160 @@ if (manageSearchInput) {
     });
 }
 
+if (complaintSearchInput) {
+    let complaintSearchTimeout;
+    complaintSearchInput.addEventListener('input', () => {
+        clearTimeout(complaintSearchTimeout);
+        complaintSearchTimeout = setTimeout(() => {
+            _complaintBoardQuery = complaintSearchInput.value || '';
+            _complaintBoardPage = 1;
+            if (_adminCachedData) renderComplaintBoard(_adminCachedData);
+        }, 220);
+    });
+}
+
+if (complaintStatusFilter) {
+    complaintStatusFilter.addEventListener('change', () => {
+        _complaintBoardStatus = complaintStatusFilter.value || 'all';
+        _complaintBoardPage = 1;
+        if (_adminCachedData) renderComplaintBoard(_adminCachedData);
+    });
+}
+
 // Auto-load when switching to the tab
-document.querySelectorAll('.nav-link[data-tab="manage"]').forEach(link => {
+document.querySelectorAll('.nav-link[data-tab="manage"], .nav-link[data-tab="complaints"]').forEach(link => {
     link.addEventListener('click', () => {
-        loadAdminData();
+        loadAdminData({ silent: true });
     });
 });
 
-// ── Realtime auto-refresh every 30 seconds ─────────────────────────
+// ── Realtime auto-refresh + WebSocket channel ─────────────────────
 let _adminAutoRefreshTimer = null;
-function startAdminAutoRefresh() {
-    stopAdminAutoRefresh();
-    _adminAutoRefreshTimer = setInterval(async () => {
-        // Silently refresh in background (no loading indicator)
-        try {
-            const resp = await fetch('/api/admin/data');
-            const json = await resp.json();
-            if (json.status === 'ok') {
-                const prevUpdateCount = (_adminCachedData?.profile_updates || []).length;
-                const prevComplaintCount = (_adminCachedData?.complaints || []).length;
-                _adminCachedData = json.data;
-                const newUpdateCount = (json.data.profile_updates || []).length;
-                const newComplaintCount = (json.data.complaints || []).length;
-                // Notify of new changes
-                if (newUpdateCount > prevUpdateCount) showToast('🔔 Có yêu cầu sửa thông tin mới!', 'warning');
-                if (newComplaintCount > prevComplaintCount) showToast('📝 Có khiếu nại mới!', 'info');
-                updateManageStats(_adminCachedData);
-                // If manage tab is active, re-render table silently
-                const managePanel = document.getElementById('tab-manage');
-                if (managePanel?.classList.contains('active')) {
-                    renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
-                }
-                // If detail tab is active, re-render detail silently
-                const detailPanel = document.getElementById('tab-user-detail');
-                if (detailPanel?.classList.contains('active')) {
-                    const currentUid = detailPanel.dataset.uid;
-                    if (currentUid) showUserDetails(currentUid);
-                }
-            }
-        } catch (_) {}
-    }, 30000); // every 30 seconds
-}
-function stopAdminAutoRefresh() {
-    if (_adminAutoRefreshTimer) { clearInterval(_adminAutoRefreshTimer); _adminAutoRefreshTimer = null; }
+let _adminRealtimeWs = null;
+let _adminRealtimeReconnectTimer = null;
+let _adminWsPingTimer = null;
+
+function renderAutoSyncToggleState() {
+    const label = _adminAutoSyncEnabled
+        ? tr('auto_sync_on', 'Auto Sync')
+        : tr('auto_sync_off', 'Auto Sync');
+    [manageAutoSyncToggle, complaintAutoSyncToggle].forEach(btn => {
+        if (!btn) return;
+        btn.innerHTML = `<span class="sync-switch"></span><span>${label}</span>`;
+        btn.classList.toggle('is-on', _adminAutoSyncEnabled);
+        btn.classList.toggle('is-off', !_adminAutoSyncEnabled);
+        btn.setAttribute('aria-pressed', _adminAutoSyncEnabled ? 'true' : 'false');
+    });
 }
 
-// Start polling when page loads (if admin is logged in)
+function stopAdminRealtimeChannel() {
+    if (_adminWsPingTimer) {
+        clearInterval(_adminWsPingTimer);
+        _adminWsPingTimer = null;
+    }
+    if (_adminRealtimeReconnectTimer) {
+        clearTimeout(_adminRealtimeReconnectTimer);
+        _adminRealtimeReconnectTimer = null;
+    }
+    if (_adminRealtimeWs) {
+        try { _adminRealtimeWs.close(); } catch (_) {}
+        _adminRealtimeWs = null;
+    }
+}
+
+function connectAdminRealtimeChannel() {
+    if (!_adminAutoSyncEnabled) return;
+    stopAdminRealtimeChannel();
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsProtocol}://${window.location.host}/ws/admin`;
+
+    try {
+        const ws = new WebSocket(wsUrl);
+        _adminRealtimeWs = ws;
+
+        ws.onopen = () => {
+            _adminWsPingTimer = setInterval(() => {
+                if (_adminRealtimeWs && _adminRealtimeWs.readyState === WebSocket.OPEN) {
+                    _adminRealtimeWs.send(JSON.stringify({ action: 'ping' }));
+                }
+            }, 15000);
+        };
+
+        ws.onmessage = async (event) => {
+            if (!_adminAutoSyncEnabled) return;
+            let msg = null;
+            try { msg = JSON.parse(event.data); } catch (_) { return; }
+            if (!msg || msg.type !== 'admin_data_changed') return;
+            await loadAdminData({ silent: true });
+        };
+
+        ws.onclose = () => {
+            if (_adminWsPingTimer) {
+                clearInterval(_adminWsPingTimer);
+                _adminWsPingTimer = null;
+            }
+            _adminRealtimeWs = null;
+            if (_adminAutoSyncEnabled) {
+                _adminRealtimeReconnectTimer = setTimeout(connectAdminRealtimeChannel, 2000);
+            }
+        };
+
+        ws.onerror = () => {
+            try { ws.close(); } catch (_) {}
+        };
+    } catch (_) {}
+}
+
+function startAdminAutoRefresh() {
+    if (!_adminAutoSyncEnabled) return;
+    stopAdminAutoRefresh();
+    _adminAutoRefreshTimer = setInterval(() => {
+        loadAdminData({ silent: true });
+    }, 10000); // fallback polling every 10s if websocket misses
+}
+
+function stopAdminAutoRefresh() {
+    if (_adminAutoRefreshTimer) {
+        clearInterval(_adminAutoRefreshTimer);
+        _adminAutoRefreshTimer = null;
+    }
+}
+
+function setAdminAutoSyncEnabled(enabled, options = {}) {
+    _adminAutoSyncEnabled = !!enabled;
+    localStorage.setItem('adminAutoSyncEnabled', _adminAutoSyncEnabled ? '1' : '0');
+    renderAutoSyncToggleState();
+
+    if (_adminAutoSyncEnabled) {
+        startAdminAutoRefresh();
+        connectAdminRealtimeChannel();
+        if (options.loadNow !== false) {
+            loadAdminData({ silent: true });
+        }
+        return;
+    }
+
+    stopAdminAutoRefresh();
+    stopAdminRealtimeChannel();
+}
+
+// Start realtime sync when page loads
 document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('adminDashboard')) startAdminAutoRefresh();
+    if (adminDataTableBody || complaintBoardList) {
+        renderAutoSyncToggleState();
+        setAdminAutoSyncEnabled(_adminAutoSyncEnabled, { loadNow: false });
+    }
+
+    [manageAutoSyncToggle, complaintAutoSyncToggle].forEach(btn => {
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            setAdminAutoSyncEnabled(!_adminAutoSyncEnabled);
+        });
+    });
+
+    if (_adminAutoSyncEnabled && (adminDataTableBody || complaintBoardList)) {
+        loadAdminData({ silent: true });
+    }
 });
 
 // =====================================================================
@@ -1284,7 +2172,7 @@ function showUserDetails(uid) {
     const uComplaints = complaints.filter(c => c.userId === uid);
     const isPendingUpdate = profileUpdates.find(r => r.id === uid);
 
-    const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
+    const formatter = { format: formatVnd };
 
     let pendingCount = 0, paidCount = 0, totalPendingFine = 0;
     uViolations.forEach(v => {
@@ -1292,10 +2180,27 @@ function showUserDetails(uid) {
         else if (v.status === 'paid') paidCount++;
     });
 
-    const points = u.points ?? 12;
+    const driverLicenses = normalizeDriverLicenses(u);
+    const licensePointState = getLicensePointState(u, driverLicenses);
+    const licenseStatsHtml = [
+        licensePointState.moto.exists
+            ? `
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val amber">${licensePointState.moto.points}/12</span>
+                    <div class="user-detail-stat-lbl">GPLX xe máy</div>
+                </div>
+            `
+            : '',
+        licensePointState.car.exists
+            ? `
+                <div class="user-detail-stat">
+                    <span class="user-detail-stat-val amber">${licensePointState.car.points}/12</span>
+                    <div class="user-detail-stat-lbl">GPLX ô tô</div>
+                </div>
+            `
+            : '',
+    ].join('');
     const nameInitial = (u.fullName || '?').charAt(0).toUpperCase();
-    const pointsPct = Math.max(0, Math.round((points / 12) * 100));
-    const pointsColor = points >= 8 ? '#10b981' : points >= 4 ? '#f59e0b' : '#ef4444';
 
     // ── HEADER ──
     const headerEl = document.getElementById('userDetailHeader');
@@ -1319,10 +2224,7 @@ function showUserDetails(uid) {
                     <span class="user-detail-stat-val success">${paidCount}</span>
                     <div class="user-detail-stat-lbl">Đã nộp</div>
                 </div>
-                <div class="user-detail-stat">
-                    <span class="user-detail-stat-val amber">${points}/12</span>
-                    <div class="user-detail-stat-lbl">Điểm bằng lái</div>
-                </div>
+                ${licenseStatsHtml}
                 <div class="user-detail-stat">
                     <span class="user-detail-stat-val">${uVehicles.length}</span>
                     <div class="user-detail-stat-lbl">Phương tiện</div>
@@ -1358,29 +2260,57 @@ function showUserDetails(uid) {
                 ${row('Nghề nghiệp', u.occupation || '—')}
             </div>`;
 
-        // License info
-        const licenseHtml = `
+        // License info (show separately for motorcycle/car and hide if none)
+        const renderLicenseBlock = (title, icon, licenses, points) => {
+            if (!licenses || licenses.length === 0) return '';
+            const pointColor = getPointColor(points);
+            const pointPct = Math.max(0, Math.round((points / 12) * 100));
+            const licenseListHtml = licenses.map((l, idx) => `
+                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;">
+                    <div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">GPLX ${idx + 1}: Hạng ${escapeHtml(l.class || '—')}</div>
+                    ${row('Loại xe', escapeHtml(l.vehicleType || '—'))}
+                    ${row('Số GPLX', escapeHtml(l.licenseNumber || '—'))}
+                    ${row('Ngày cấp', escapeHtml(l.issueDate || '—'))}
+                    ${row('Ngày hết hạn', escapeHtml(l.expiryDate || '—'))}
+                </div>
+            `).join('');
+
+            return `
+                <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);margin-bottom:12px;">
+                    <div style="font-weight:800;color:var(--text-primary);margin-bottom:8px;">${icon} ${title}</div>
+                    ${licenseListHtml}
+                    <div class="user-detail-info-row" style="margin-top:8px;">
+                        <span class="user-detail-info-label">Điểm GPLX</span>
+                        <span class="user-detail-info-value" style="color:${pointColor};font-weight:800;">${points}/12 điểm</span>
+                    </div>
+                    <div class="points-bar-wrap">
+                        <div class="points-bar-track">
+                            <div class="points-bar-fill" style="width:${pointPct}%;background:${pointColor};"></div>
+                        </div>
+                    </div>
+                    ${points === 0 ? `<div style="margin-top:8px;font-size:0.78rem;color:#ef4444;font-weight:700;">🚫 GPLX đang bị vô hiệu hóa do 0 điểm</div>` : ''}
+                </div>
+            `;
+        };
+
+        const licenseBlocksHtml = [
+            renderLicenseBlock('Giấy phép lái xe máy', '🏍️', licensePointState.moto.licenses, licensePointState.moto.points),
+            renderLicenseBlock('Giấy phép lái xe ô tô', '🚗', licensePointState.car.licenses, licensePointState.car.points),
+        ].join('');
+
+        const hasAnyLicense = licensePointState.moto.exists || licensePointState.car.exists;
+        const licenseHtml = hasAnyLicense ? `
             <div class="user-detail-section" style="position:relative;">
                 <div class="user-detail-section-title">🪪 Giấy phép lái xe</div>
-                ${row('Số GPLX', u.licenseNumber || '—')}
-                ${row('Hạng bằng xe máy', u.motoLicenseClass || u.licenseClass || '—')}
-                ${row('Hạng bằng ô tô', u.carLicenseClass || '—')}
-                ${row('Ngày cấp', u.licenseIssueDate || '—')}
-                ${row('Ngày hết hạn', u.licenseExpiryDate || '—')}
+                ${licenseBlocksHtml}
                 ${row('Nơi cấp', u.licenseIssuedBy || '—')}
-                <div class="user-detail-info-row" style="margin-top:10px;">
-                    <span class="user-detail-info-label">Điểm bằng lái</span>
-                    <span class="user-detail-info-value" style="color:${pointsColor};font-weight:800;display:flex;align-items:center;gap:12px;">
-                        ${points}/12 điểm
-                        ${points < 12 ? `<button onclick="restoreUserPoints('${uid}')" style="padding:6px 12px;border-radius:6px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.75rem;font-family:inherit;">🔄 Phục hồi</button>` : ''}
-                    </span>
-                </div>
-                <div class="points-bar-wrap">
-                    <div class="points-bar-track">
-                        <div class="points-bar-fill" style="width:${pointsPct}%;background:${pointsColor};"></div>
-                    </div>
-                </div>
-            </div>`;
+                ${(licensePointState.moto.points < 12 || licensePointState.car.points < 12)
+                    ? `<div style="margin-top:10px;">
+                        <button onclick="restoreUserPoints('${uid}')" style="padding:7px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.78rem;font-family:inherit;">🔄 Admin phục hồi điểm</button>
+                       </div>`
+                    : ''}
+            </div>
+        ` : '';
 
         // Vehicles
         const vehiclesHtml = `
@@ -1432,32 +2362,75 @@ function showUserDetails(uid) {
             </div>`;
 
         // Complaints
-        const complaintsHtml = uComplaints.length > 0 ? `
+        const complaintsHtml = `
             <div class="user-detail-section full-width">
                 <div class="user-detail-section-title">📝 Khiếu nại (${uComplaints.length})</div>
-                <div class="complaint-list">
-                    ${uComplaints.map(c => `
-                        <div class="complaint-item" style="margin-bottom:14px;padding:14px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);">
-                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
-                                <div>
-                                    <div class="complaint-item-reason" style="font-weight:700;margin-bottom:4px;">📋 ${c.reason || 'Khác'}</div>
-                                    <div class="complaint-item-desc" style="font-size:0.85rem;color:var(--text-secondary);">${c.description || '—'}</div>
-                                    ${c.adminNote ? `<div style="font-size:0.8rem;color:#ef4444;margin-top:6px;">💬 Lý do từ chối: ${c.adminNote}</div>` : ''}
-                                    ${c.evidenceUrl ? `<a href="${c.evidenceUrl}" target="_blank" style="font-size:0.8rem;color:#60a5fa;margin-top:6px;display:inline-block;">🖼️ Xem ảnh bằng chứng</a>` : ''}
-                                </div>
-                                <span class="complaint-item-status data-tag ${c.status === 'approved' ? 'tag-success' : c.status === 'rejected' ? 'tag-danger' : 'tag-warning'}" style="white-space:nowrap;flex-shrink:0;">
-                                    ${c.status === 'approved' ? '✅ Đã duyệt' : c.status === 'rejected' ? '❌ Đã từ chối' : '⏳ Đang xử lý'}
-                                </span>
-                            </div>
-                            ${c.status === 'pending' ? `
-                            <div style="display:flex;gap:8px;margin-top:10px;">
-                                <button onclick="reviewComplaint('${c.id}', 'approve', '')" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-size:0.78rem;font-family:inherit;">✅ Chấp nhận</button>
-                                <button onclick="showRejectComplaintModal('${c.id}')" style="flex:1;padding:7px 10px;border-radius:8px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-size:0.78rem;font-family:inherit;">❌ Từ chối</button>
-                            </div>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>` : '';
+                ${uComplaints.length === 0 ? '<p style="color:var(--text-muted);font-size:0.88rem;">Chưa có khiếu nại nào</p>' : `
+                    <div class="complaint-board-list">
+                        ${uComplaints.map(c => {
+                            const statusMeta = getComplaintStatusMeta(c.status);
+                            const evidenceUrl = getComplaintEvidenceUrl(c);
+                            const relatedViolation = (uViolations || []).find(v => String(v.id || '').toUpperCase() === String(c.violationId || '').toUpperCase()) || null;
+                            const actionBusy = _complaintReviewLoading.has(c.id) || _complaintDeleteLoading.has(c.id);
+
+                            const evidenceHtml = evidenceUrl
+                                ? `
+                                    <div class="complaint-card-evidence">
+                                        <div class="image-loading-mask">${escapeHtml(tr('complaints_image_loading', 'Đang tải ảnh...'))}</div>
+                                        <img
+                                            src="${escapeHtml(evidenceUrl)}"
+                                            alt="Complaint evidence"
+                                            loading="lazy"
+                                            onload="if(this.previousElementSibling){this.previousElementSibling.style.display='none';}"
+                                            onerror="this.style.display='none'; if(this.previousElementSibling){this.previousElementSibling.style.display='flex'; this.previousElementSibling.style.animation='none'; this.previousElementSibling.textContent='${escapeHtml(tr('complaints_image_error', 'Không tải được ảnh'))}';}"
+                                        />
+                                    </div>
+                                `
+                                : `<div class="complaint-card-evidence"><div class="complaint-card-evidence-fallback">${escapeHtml(tr('complaints_no_evidence', 'Không có ảnh bằng chứng'))}</div></div>`;
+
+                            return `
+                                <article class="complaint-card ${statusMeta.cardClass}">
+                                    <div class="complaint-card-main">
+                                        <div class="complaint-card-top">
+                                            <div>
+                                                <div class="complaint-card-title">${escapeHtml(c.reason || tr('complaints_fallback_reason', 'Khiếu nại'))}</div>
+                                                <div class="complaint-card-subtitle">${formatDateTime(c.createdAt || c.updatedAt || c.reviewedAt)}</div>
+                                            </div>
+                                            <span class="data-tag ${statusMeta.tagClass}" style="white-space:nowrap;">${statusMeta.label}</span>
+                                        </div>
+                                        <div class="complaint-card-desc">${escapeHtml(c.description || tr('complaints_fallback_desc', 'Không có mô tả'))}</div>
+                                        <div class="complaint-card-meta">
+                                            <div><span class="meta-label">${escapeHtml(tr('complaints_meta_id', 'Mã khiếu nại'))}:</span> <span class="meta-value">${escapeHtml(c.id || '—')}</span></div>
+                                            <div><span class="meta-label">${escapeHtml(tr('complaints_meta_violation_id', 'Mã vi phạm'))}:</span> <span class="meta-value">${escapeHtml(c.violationId || '—')}</span></div>
+                                            <div><span class="meta-label">${escapeHtml(tr('complaints_meta_type', 'Loại vi phạm'))}:</span> <span class="meta-value">${escapeHtml(relatedViolation?.violationType || relatedViolation?.type || '—')}</span></div>
+                                            <div><span class="meta-label">${escapeHtml(tr('complaints_meta_fine', 'Mức phạt'))}:</span> <span class="meta-value">${escapeHtml(formatVnd(relatedViolation?.fineAmount || 0))}</span></div>
+                                        </div>
+                                        ${c.adminNote ? `<div style="font-size:0.78rem;color:#fca5a5;">${escapeHtml(tr('complaints_admin_note', '💬 Ghi chú admin'))}: ${escapeHtml(c.adminNote)}</div>` : ''}
+                                    </div>
+                                    <div class="complaint-card-side">
+                                        ${evidenceHtml}
+                                        <div class="complaint-card-actions">
+                                            <button class="complaint-card-btn detail" onclick="showComplaintDetailModal('${c.id}')">${escapeHtml(tr('complaints_btn_detail', '👁️ Chi tiết'))}</button>
+                                            ${c.status === 'pending' ? `
+                                                <button class="complaint-card-btn approve ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="reviewComplaint('${c.id}', 'approve', '', this)">
+                                                    ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_approve', '✅ Chấp nhận'))}
+                                                </button>
+                                                <button class="complaint-card-btn reject ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="showRejectComplaintModal('${c.id}')">
+                                                    ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_reject', '❌ Từ chối'))}
+                                                </button>
+                                            ` : `
+                                                <button class="complaint-card-btn remove ${actionBusy ? 'btn-loading' : ''}" ${actionBusy ? 'disabled' : ''} onclick="confirmDeleteComplaint('${c.id}', this)">
+                                                    ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_delete', '🗑️ Xóa'))}
+                                                </button>
+                                            `}
+                                        </div>
+                                    </div>
+                                </article>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
+            </div>`;
 
         gridEl.innerHTML = personalHtml + licenseHtml + vehiclesHtml + violationsHtml + complaintsHtml;
     }
@@ -1490,6 +2463,84 @@ function row(label, value) {
     </div>`;
 }
 
+function showComplaintDetailModal(complaintId) {
+    if (!_adminCachedData) return;
+    const complaint = (_adminCachedData.complaints || []).find(c => c.id === complaintId);
+    if (!complaint) return;
+
+    const relatedViolation = (_adminCachedData.violations || []).find(v => String(v.id || '').toUpperCase() === String(complaint.violationId || '').toUpperCase());
+    const evidenceUrl = getComplaintEvidenceUrl(complaint);
+    const statusMeta = getComplaintStatusMeta(complaint.status);
+    const actionBusy = _complaintReviewLoading.has(complaint.id) || _complaintDeleteLoading.has(complaint.id);
+    const existing = document.getElementById('complaintDetailModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'complaintDetailModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10006;padding:18px;backdrop-filter:blur(4px);';
+    modal.innerHTML = `
+        <div style="background:var(--bg-secondary);border:1px solid rgba(96,165,250,0.35);border-radius:18px;max-width:560px;width:100%;padding:20px;max-height:85vh;overflow:auto;box-shadow:0 24px 64px rgba(0,0,0,0.7);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+                <div>
+                    <div style="font-size:1.05rem;font-weight:800;color:#fff;">📝 Chi tiết khiếu nại</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px;">${statusMeta.label} • ${formatDateTime(complaint.createdAt || complaint.updatedAt || complaint.reviewedAt)}</div>
+                </div>
+                <button onclick="document.getElementById('complaintDetailModal').remove()" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-weight:700;cursor:pointer;">✕</button>
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6;">
+                <div><strong style="color:#fff;">Mã khiếu nại:</strong> ${escapeHtml(complaint.id || '—')}</div>
+                <div><strong style="color:#fff;">Mã vi phạm:</strong> ${escapeHtml(complaint.violationId || '—')}</div>
+                <div><strong style="color:#fff;">Người gửi:</strong> ${escapeHtml(((_adminCachedData.users || []).find(u => u.id === complaint.userId)?.fullName) || complaint.userId || '—')}</div>
+                <div><strong style="color:#fff;">Lý do:</strong> ${escapeHtml(complaint.reason || '—')}</div>
+                <div style="margin-top:8px;"><strong style="color:#fff;">Mô tả chi tiết:</strong></div>
+                <div style="margin-top:4px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);white-space:pre-wrap;">${escapeHtml(complaint.description || '—')}</div>
+                ${complaint.adminNote ? `<div style="margin-top:10px;"><strong style="color:#fff;">Ghi chú admin:</strong> <span style="color:#fca5a5;">${escapeHtml(complaint.adminNote)}</span></div>` : ''}
+                ${relatedViolation ? `
+                    <div style="margin-top:12px;padding:10px;border-radius:10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);">
+                        <div><strong style="color:#fff;">Lỗi vi phạm:</strong> ${escapeHtml(relatedViolation.violationType || relatedViolation.type || '—')}</div>
+                        <div><strong style="color:#fff;">Mức phạt:</strong> ${formatVnd(relatedViolation.fineAmount || 0)}</div>
+                        <div><strong style="color:#fff;">Trừ điểm:</strong> ${escapeHtml(String(relatedViolation.deductedPoints ?? '—'))}</div>
+                    </div>
+                ` : ''}
+                ${evidenceUrl ? `
+                    <div style="margin-top:12px;">
+                        <div style="margin-bottom:6px;"><strong style="color:#fff;">Ảnh bằng chứng:</strong></div>
+                        <a href="${escapeHtml(evidenceUrl)}" target="_blank" style="display:inline-block;margin-bottom:8px;color:#93c5fd;">🔗 Mở ảnh gốc</a>
+                        <div class="complaint-card-evidence" style="min-height:150px;">
+                            <div class="image-loading-mask">Đang tải ảnh...</div>
+                            <img
+                                src="${escapeHtml(evidenceUrl)}"
+                                alt="evidence"
+                                style="width:100%;max-height:260px;height:auto;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,0.12);"
+                                onload="if(this.previousElementSibling){this.previousElementSibling.style.display='none';}"
+                                onerror="this.style.display='none'; if(this.previousElementSibling){this.previousElementSibling.style.display='flex'; this.previousElementSibling.style.animation='none'; this.previousElementSibling.textContent='Không tải được ảnh';}"
+                            />
+                        </div>
+                    </div>
+                ` : '<div style="margin-top:10px;color:var(--text-muted);">Không có ảnh bằng chứng.</div>'}
+            </div>
+            ${complaint.status === 'pending' ? `
+                <div style="display:flex;gap:8px;margin-top:14px;">
+                    <button ${actionBusy ? 'disabled' : ''} class="${actionBusy ? 'btn-loading' : ''}" onclick="reviewComplaint('${complaint.id}', 'approve', '', this)" style="flex:1;padding:9px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;">
+                        ${actionBusy ? '<span class="spin"></span><span>Đang xử lý...</span>' : '✅ Chấp nhận'}
+                    </button>
+                    <button ${actionBusy ? 'disabled' : ''} class="${actionBusy ? 'btn-loading' : ''}" onclick="document.getElementById('complaintDetailModal').remove(); showRejectComplaintModal('${complaint.id}');" style="flex:1;padding:9px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;">
+                        ${actionBusy ? '<span class="spin"></span><span>Đang xử lý...</span>' : '❌ Từ chối'}
+                    </button>
+                </div>
+            ` : `
+                <div style="display:flex;gap:8px;margin-top:14px;">
+                    <button ${actionBusy ? 'disabled' : ''} class="${actionBusy ? 'btn-loading' : ''}" onclick="confirmDeleteComplaint('${complaint.id}', this)" style="flex:1;padding:9px 12px;border-radius:9px;border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.15);color:#fecaca;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;">
+                        ${actionBusy ? `<span class="spin"></span><span>${escapeHtml(tr('complaints_btn_processing', 'Đang xử lý...'))}</span>` : escapeHtml(tr('complaints_btn_delete', '🗑️ Xóa'))}
+                    </button>
+                </div>
+            `}
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
 // ── Review pending update request ───────────────────────────────────
 function reviewUserUpdate(uid) {
     if (!_adminCachedData || !_adminCachedData.profile_updates) return;
@@ -1503,27 +2554,73 @@ function reviewUserUpdate(uid) {
         fullName: 'Họ và tên',
         phone: 'Số điện thoại',
         idCard: 'CCCD/CMND',
+        idCardExpiryDate: 'Ngày hết hạn CCCD',
         address: 'Địa chỉ',
         email: 'Email',
         dateOfBirth: 'Ngày sinh',
         gender: 'Giới tính',
         idCardIssueDate: 'Ngày cấp CCCD',
         occupation: 'Nghề nghiệp',
+        driverLicenses: 'Giấy phép lái xe',
+        licenseIssuedBy: 'Nơi cấp GPLX',
     };
 
-    const ignoreKeys = ['userId', 'status', 'createdAt', 'id'];
+    const ignoreKeys = [
+        'userId',
+        'status',
+        'createdAt',
+        'updatedAt',
+        'reviewedAt',
+        'requestSection',
+        'requestType',
+        'requestSource',
+        'requestedAt',
+        'id',
+    ];
+
+    const formatValue = (value) => {
+        if (value === null || value === undefined || value === '') return '—';
+        if (typeof value === 'object') {
+            return `<pre style="white-space:pre-wrap;margin:0;font-size:0.75rem;line-height:1.4;">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+        }
+        return escapeHtml(String(value));
+    };
+
+    const formatLicenses = (licenses) => {
+        if (!Array.isArray(licenses) || licenses.length === 0) return '—';
+        return licenses.map((l, i) => {
+            return [
+                `GPLX ${i + 1}: Hạng ${escapeHtml(l?.class || '—')}`,
+                `Số: ${escapeHtml(l?.licenseNumber || '—')}`,
+                `Loại xe: ${escapeHtml(l?.vehicleType || '—')}`,
+                `Ngày cấp: ${escapeHtml(l?.issueDate || '—')}`,
+                `Hạn: ${escapeHtml(l?.expiryDate || '—')}`,
+            ].join('<br>');
+        }).join('<hr style="border-color:rgba(255,255,255,0.12);margin:8px 0;">');
+    };
+
     let changesHtml = '';
     for (const [key, value] of Object.entries(req)) {
         if (ignoreKeys.includes(key)) continue;
         const label = fieldLabels[key] || key;
-        const currentVal = u ? (u[key] || '—') : '—';
+        let currentVal = u ? (u[key] || '—') : '—';
+        let nextVal = value;
+
+        if (key === 'driverLicenses') {
+            currentVal = formatLicenses(normalizeDriverLicenses(u || {}));
+            nextVal = formatLicenses(Array.isArray(value) ? value : []);
+        } else {
+            currentVal = formatValue(currentVal);
+            nextVal = formatValue(value);
+        }
+
         changesHtml += `
             <div class="update-change-row">
                 <div class="update-change-label">${label}</div>
                 <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;font-size:0.82rem;margin-top:4px;">
                     <div class="update-change-old" style="padding:8px 10px;background:rgba(255,255,255,0.04);border-radius:6px;color:var(--text-muted);text-decoration:line-through;">${currentVal}</div>
                     <span style="color:var(--accent-primary);font-size:1.1rem;">→</span>
-                    <div class="update-change-value">${value}</div>
+                    <div class="update-change-value">${nextVal}</div>
                 </div>
             </div>
         `;
@@ -1555,6 +2652,11 @@ async function submitReviewUpdate(uid, action) {
     const modal = document.getElementById('reviewUpdateModal');
     const btns = modal ? modal.querySelectorAll('button') : [];
     btns.forEach(b => { b.disabled = true; });
+    const finishLoading = showGlobalPageLoader(
+        action === 'approve'
+            ? (currentLang === 'en' ? 'Reviewing profile updates...' : 'Đang duyệt thay đổi thông tin người dùng...')
+            : (currentLang === 'en' ? 'Rejecting profile update request...' : 'Đang từ chối yêu cầu thay đổi...'),
+    );
 
     try {
         const res = await fetch(`/api/admin/users/${uid}/approve_update`, {
@@ -1564,71 +2666,147 @@ async function submitReviewUpdate(uid, action) {
         });
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
-            showToast(action === 'approve' ? '✅ Đã chấp nhận và cập nhật thông tin!' : '❌ Đã từ chối yêu cầu thay đổi', action === 'approve' ? 'success' : 'warning');
+            showToast(
+                action === 'approve'
+                    ? (currentLang === 'en' ? '✅ Profile update approved and applied' : '✅ Đã chấp nhận và cập nhật thông tin!')
+                    : (currentLang === 'en' ? '❌ Profile update request rejected' : '❌ Đã từ chối yêu cầu thay đổi'),
+                action === 'approve' ? 'success' : 'warning',
+            );
             if (modal) modal.remove();
-            await loadAdminData(); // Wait for data to reload
+            await loadAdminData({ silent: true });
             if (document.getElementById('tab-user-detail')?.classList.contains('active')) {
                 showUserDetails(uid); // Refresh detail page in real-time
             }
         } else {
-            showToast(data.message || 'Lỗi khi xử lý', 'error');
+            showToast(data.message || (currentLang === 'en' ? 'Request processing failed' : 'Lỗi khi xử lý'), 'error');
             btns.forEach(b => { b.disabled = false; });
         }
     } catch(e) {
-        showToast('Lỗi mạng', 'error');
+        showToast(currentLang === 'en' ? 'Network error' : 'Lỗi mạng', 'error');
         btns.forEach(b => { b.disabled = false; });
+    } finally {
+        finishLoading();
     }
 }
 
 // ── Restore Points ───────────────────────────────────
 async function restoreUserPoints(uid) {
-    if (!confirm('Bạn có chắc chắn muốn phục hồi 12 điểm cho người dùng này?')) return;
+    const confirmText = currentLang === 'en'
+        ? 'Are you sure you want to restore motorcycle and car license points to 12/12 for this user?'
+        : 'Bạn có chắc chắn muốn phục hồi 12/12 điểm GPLX xe máy và ô tô cho người dùng này?';
+    if (!confirm(confirmText)) return;
+    const finishLoading = showGlobalPageLoader(
+        currentLang === 'en' ? 'Restoring driver license points...' : 'Đang phục hồi điểm GPLX cho người dùng...',
+    );
     try {
         const res = await fetch(`/api/admin/users/${uid}/restore_points`, {
             method: 'POST'
         });
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
-            showToast(data.message || '✅ Đã phục hồi điểm', 'success');
-            await loadAdminData();
+            showToast(data.message || (currentLang === 'en' ? '✅ Points restored successfully' : '✅ Đã phục hồi điểm'), 'success');
+            await loadAdminData({ silent: true });
             if (document.getElementById('tab-user-detail')?.classList.contains('active')) {
                 showUserDetails(uid);
             }
         } else {
-            showToast(data.message || 'Lỗi khi phục hồi điểm', 'error');
+            showToast(data.message || (currentLang === 'en' ? 'Failed to restore points' : 'Lỗi khi phục hồi điểm'), 'error');
         }
     } catch(e) {
-        showToast('Lỗi mạng', 'error');
+        showToast(currentLang === 'en' ? 'Network error' : 'Lỗi mạng', 'error');
+    } finally {
+        finishLoading();
     }
 }
 
 // ── Review Complaint (Approve / Reject) ────────────────────────────
-async function reviewComplaint(complaintId, action, adminNote) {
+async function reviewComplaint(complaintId, action, adminNote, triggerButton = null) {
+    const normalizedId = String(complaintId || '').trim();
+    if (!normalizedId) return;
+    if (_complaintReviewLoading.has(normalizedId)) return;
+
+    _complaintReviewLoading.add(normalizedId);
+    setActionButtonLoading(
+        triggerButton,
+        true,
+        action === 'approve'
+            ? (currentLang === 'en' ? 'Approving...' : 'Đang chấp nhận...')
+            : (currentLang === 'en' ? 'Rejecting...' : 'Đang từ chối...'),
+    );
+    const finishLoading = showGlobalPageLoader(
+        action === 'approve'
+            ? (currentLang === 'en' ? 'Reviewing complaint and updating system...' : 'Đang duyệt khiếu nại và cập nhật hệ thống...')
+            : (currentLang === 'en' ? 'Rejecting complaint...' : 'Đang từ chối khiếu nại...'),
+    );
+
     try {
-        const res = await fetch(`/api/admin/complaints/${complaintId}/review`, {
+        const res = await fetch(`/api/admin/complaints/${normalizedId}/review`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, adminNote: adminNote || '' })
         });
         const data = await res.json();
+
         if (res.ok && data.status === 'ok') {
-            showToast(action === 'approve' ? '✅ Đã chấp nhận khiếu nại!' : '❌ Đã từ chối khiếu nại', action === 'approve' ? 'success' : 'warning');
-            const existingModal = document.getElementById('rejectComplaintModal');
-            if (existingModal) existingModal.remove();
-            await loadAdminData();
+            // Optimistic local update for instant UI feedback
+            if (_adminCachedData) {
+                const complaints = _adminCachedData.complaints || [];
+                const target = complaints.find(c => String(c.id || '') === normalizedId);
+                if (target) {
+                    target.status = action === 'approve' ? 'approved' : 'rejected';
+                    target.adminNote = adminNote || '';
+                    target.reviewedAt = new Date().toISOString();
+
+                    if (action === 'approve') {
+                        const violationId = String(target.violationId || '').toUpperCase();
+                        if (violationId) {
+                            _adminCachedData.violations = (_adminCachedData.violations || []).filter(
+                                v => String(v.id || '').toUpperCase() !== violationId,
+                            );
+                        }
+                    }
+                }
+
+                updateManageStats(_adminCachedData);
+                renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+                renderComplaintBoard(_adminCachedData);
+            }
+
+            const rejectModal = document.getElementById('rejectComplaintModal');
+            if (rejectModal) rejectModal.remove();
+            const detailModal = document.getElementById('complaintDetailModal');
+            if (detailModal) detailModal.remove();
+
+            // Sync latest from backend immediately after optimistic update
+            await loadAdminData({ silent: true });
             const detailPanel = document.getElementById('tab-user-detail');
             if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid) {
                 showUserDetails(detailPanel.dataset.uid);
             }
+
+            showToast(
+                action === 'approve'
+                    ? (currentLang === 'en' ? '✅ Complaint approved!' : '✅ Đã chấp nhận khiếu nại!')
+                    : (currentLang === 'en' ? '❌ Complaint rejected' : '❌ Đã từ chối khiếu nại'),
+                action === 'approve' ? 'success' : 'warning',
+            );
         } else {
-            showToast(data.message || 'Lỗi khi xử lý khiếu nại', 'error');
+            showToast(data.message || (currentLang === 'en' ? 'Error while processing complaint' : 'Lỗi khi xử lý khiếu nại'), 'error');
         }
-    } catch(e) {
-        showToast('Lỗi mạng', 'error');
+    } catch (e) {
+        showToast(currentLang === 'en' ? 'Network error' : 'Lỗi mạng', 'error');
+    } finally {
+        _complaintReviewLoading.delete(normalizedId);
+        setActionButtonLoading(triggerButton, false);
+        finishLoading();
+        if (_adminCachedData) {
+            renderComplaintBoard(_adminCachedData);
+        }
     }
 }
 
 function showRejectComplaintModal(complaintId) {
+    if (_complaintReviewLoading.has(String(complaintId || ''))) return;
     const existing = document.getElementById('rejectComplaintModal');
     if (existing) existing.remove();
     const overlay = document.createElement('div');
@@ -1646,7 +2824,7 @@ function showRejectComplaintModal(complaintId) {
             <textarea id="rejectNoteInput" placeholder="Nhập lý do từ chối..." rows="4" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-family:inherit;font-size:0.9rem;resize:vertical;box-sizing:border-box;margin-bottom:16px;"></textarea>
             <div style="display:flex;gap:10px;justify-content:flex-end;">
                 <button onclick="document.getElementById('rejectComplaintModal').remove()" style="padding:10px 18px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-family:inherit;">Hủy</button>
-                <button onclick="reviewComplaint('${complaintId}', 'reject', document.getElementById('rejectNoteInput').value)" style="padding:10px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">❌ Xác nhận từ chối</button>
+                <button onclick="reviewComplaint('${complaintId}', 'reject', document.getElementById('rejectNoteInput').value, this)" style="padding:10px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">❌ Xác nhận từ chối</button>
             </div>
         </div>
     `;

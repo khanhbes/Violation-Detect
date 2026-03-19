@@ -1,7 +1,7 @@
 ﻿name: traffic_violation_app
 description: Traffic Violation Detection & Fine Payment App
 publish_to: 'none'
-version: 1.0.42+40
+version: 1.0.45+43
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -29,6 +29,7 @@ dependencies:
   
   # QR Code
   qr_flutter: ^4.1.0
+  mobile_scanner: ^7.1.3
   
   # Image Picker
   image_picker: ^1.0.7

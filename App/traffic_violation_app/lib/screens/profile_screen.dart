@@ -7,10 +7,10 @@ import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:traffic_violation_app/screens/vehicles_screen.dart'
     as traffic_vehicles;
+import 'package:traffic_violation_app/widgets/app_info_dialogs.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool embedded;
@@ -260,7 +260,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: Row(
                           children: [
-                            _buildStatItem(_settings.userPoints.toString(), s.tr('Điểm', 'Points'),
+                            _buildStatItem(_settings.userPoints.toString(),
+                                s.tr('Điểm', 'Points'),
                                 valueColor: Colors.amber),
                             _buildStatDivider(),
                             _buildStatItem(
@@ -358,12 +359,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Icons.calendar_month_rounded,
                             AppTheme.infoColor,
                             s.tr('Ngày cấp CCCD', 'ID Card Issue Date'),
-                            s.userIdCardIssueDate.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userIdCardIssueDate,
+                            s.userIdCardIssueDate.isEmpty
+                                ? s.tr('Chưa cập nhật', 'Not updated')
+                                : s.userIdCardIssueDate,
                             textPrimary,
                             textSecondary,
                             divider,
-                            onTap: () => _editField(s.tr('Ngày cấp CCCD', 'ID Card Issue Date'), s.userIdCardIssueDate,
-                                (v) => _submitProfileUpdate('idCardIssueDate', v))),
+                            onTap: () => _editField(
+                                s.tr('Ngày cấp CCCD', 'ID Card Issue Date'),
+                                s.userIdCardIssueDate,
+                                (v) => _submitProfileUpdate(
+                                    'idCardIssueDate', v))),
                         Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
                             height: 1,
@@ -372,11 +378,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Icons.cake_rounded,
                             AppTheme.warningColor,
                             s.tr('Ngày sinh', 'Date of Birth'),
-                            s.userDateOfBirth.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userDateOfBirth,
+                            s.userDateOfBirth.isEmpty
+                                ? s.tr('Chưa cập nhật', 'Not updated')
+                                : s.userDateOfBirth,
                             textPrimary,
                             textSecondary,
                             divider,
-                            onTap: () => _editField(s.tr('Ngày sinh', 'Date of Birth'), s.userDateOfBirth,
+                            onTap: () => _editField(
+                                s.tr('Ngày sinh', 'Date of Birth'),
+                                s.userDateOfBirth,
                                 (v) => _submitProfileUpdate('dateOfBirth', v))),
                         Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -386,11 +396,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Icons.work_rounded,
                             AppTheme.secondaryColor,
                             s.tr('Nghề nghiệp', 'Occupation'),
-                            s.userOccupation.isEmpty ? s.tr('Chưa cập nhật', 'Not updated') : s.userOccupation,
+                            s.userOccupation.isEmpty
+                                ? s.tr('Chưa cập nhật', 'Not updated')
+                                : s.userOccupation,
                             textPrimary,
                             textSecondary,
                             divider,
-                            onTap: () => _editField(s.tr('Nghề nghiệp', 'Occupation'), s.userOccupation,
+                            onTap: () => _editField(
+                                s.tr('Nghề nghiệp', 'Occupation'),
+                                s.userOccupation,
                                 (v) => _submitProfileUpdate('occupation', v))),
                         Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1041,12 +1055,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               AppTheme.secondaryColor,
               s.tr('Chính sách bảo mật', 'Privacy Policy'),
               textPrimary,
-              textSecondary,
-              () {}),
+              textSecondary, () {
+            AppInfoDialogs.showPrivacyPolicyDialog(context, s);
+          }),
           _menuDivider(divider),
           _buildMenuItem(Icons.info_outline_rounded, textSecondary,
               s.tr('Về ứng dụng', 'About'), textPrimary, textSecondary, () {
-            _showAboutDialog(context);
+            AppInfoDialogs.showAboutDialog(context, s);
           }),
         ],
       ),
@@ -1097,256 +1112,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       height: 1,
       color: color,
     );
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  //  ABOUT DIALOG
-  // ═══════════════════════════════════════════════════════════════
-  void _showAboutDialog(BuildContext context) {
-    final s = _settings;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final updateService = UpdateService();
-
-    // UI Helpers inside dialog
-    Widget _buildSectionHeader(IconData icon, String title) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 20, bottom: 10),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: AppTheme.primaryColor),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                color: isDark ? Colors.white : Colors.black87,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    Widget _buildBullet(String text) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 5, right: 8),
-              child: Icon(Icons.circle, size: 6, color: AppTheme.primaryColor),
-            ),
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    Widget _buildTechChip(String label) {
-      return Container(
-        margin: const EdgeInsets.only(right: 6, bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppTheme.primaryColor.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.primaryColor,
-          ),
-        ),
-      );
-    }
-
-    updateService.init().then((_) {
-      if (!context.mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (ctx) => Dialog(
-          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header Image
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8F9FA),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 15,
-                              offset: const Offset(0, 5)),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.asset('assets/images/app_icon.png',
-                            fit: BoxFit.cover),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('VNeTraffic',
-                        style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.black)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${s.tr("Phiên bản", "Version")} ${updateService.currentVersion} (Build ${updateService.currentBuildNumber})',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Scrollable Content
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildSectionHeader(Icons.info_outline_rounded,
-                          s.tr('Về hệ thống', 'About the System')),
-                      Text(
-                        s.tr(
-                            'VNeTraffic là hệ thống thông minh, tự động phát hiện vi phạm giao thông bằng AI Camera và hỗ trợ công dân tra cứu, nộp phạt, quản lý giấy tờ điện tử.',
-                            'VNeTraffic is a smart system that automatically detects traffic violations using AI Camera and helps citizens look up, pay fines, and manage digital documents.'),
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                            height: 1.5),
-                      ),
-                      _buildSectionHeader(Icons.star_rounded,
-                          s.tr('Điểm nổi bật', 'Key Features')),
-                      _buildBullet(s.tr(
-                          'Nhận diện vi phạm giao thông bằng AI (YOLO & OpenCV).',
-                          'Traffic violation detection via AI (YOLO & OpenCV).')),
-                      _buildBullet(s.tr(
-                          'Thông báo đẩy (Push Notifications) thời gian thực theo biển số xe vi phạm.',
-                          'Real-time push notifications based on license plate violations.')),
-                      _buildBullet(s.tr(
-                          'Quản lý "Ví giấy tờ" và điểm bằng lái của công dân.',
-                          'Digital Document Wallet and driver license points management.')),
-                      _buildBullet(s.tr(
-                          'Nộp phạt trực tuyến nhanh chóng tiện lợi.',
-                          'Fast and convenient online fine payment.')),
-                      _buildBullet(s.tr(
-                          'Cập nhật ứng dụng tự động (OTA Update) liền mạch.',
-                          'Seamless Over-The-Air (OTA) application updates.')),
-                      _buildSectionHeader(Icons.code_rounded,
-                          s.tr('Công nghệ sử dụng', 'Tech Stack')),
-                      Wrap(
-                        children: [
-                          _buildTechChip('Flutter'),
-                          _buildTechChip('Dart'),
-                          _buildTechChip('Python'),
-                          _buildTechChip('FastAPI'),
-                          _buildTechChip('YOLO'),
-                          _buildTechChip('OpenCV'),
-                          _buildTechChip('Firebase (Auth/Firestore/FCM)'),
-                          _buildTechChip('PowerShell / Bash'),
-                        ],
-                      ),
-                      _buildSectionHeader(Icons.developer_mode_rounded,
-                          s.tr('Đội ngũ phát triển', 'Development Team')),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.grey.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            const CircleAvatar(
-                              radius: 20,
-                              backgroundColor: AppTheme.primaryColor,
-                              child: Icon(Icons.person, color: Colors.white),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Khánh Bes',
-                                    style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold)),
-                                Text(
-                                    s.tr('Nhà sáng lập & Kỹ sư phát triển',
-                                        'Founder & Lead Developer'),
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Footer Button
-              Padding(
-                padding: const EdgeInsets.all(24).copyWith(top: 0),
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryColor,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    elevation: 0,
-                  ),
-                  child: Text(s.tr('Đóng', 'Close'),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 16)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    });
   }
 
   // ═══════════════════════════════════════════════════════════════

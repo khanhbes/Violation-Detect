@@ -100,6 +100,50 @@ class FirestoreService {
     await _violationsRef.doc(id).update({'status': status});
   }
 
+  Future<DocumentReference<Map<String, dynamic>>?> _resolveViolationDocRef(
+    String violationId,
+  ) async {
+    final normalizedId = violationId.trim();
+    if (normalizedId.isEmpty) return null;
+
+    final directRef = _violationsRef.doc(normalizedId);
+    final directDoc = await directRef.get();
+    if (directDoc.exists) return directRef;
+
+    final byField = await _violationsRef
+        .where('id', isEqualTo: normalizedId)
+        .limit(1)
+        .get();
+    if (byField.docs.isNotEmpty) {
+      return byField.docs.first.reference;
+    }
+
+    final allDocs = await _violationsRef.get();
+    for (final doc in allDocs.docs) {
+      if (doc.id.toUpperCase() == normalizedId.toUpperCase()) {
+        return doc.reference;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _setViolationComplaintPending(String violationId) async {
+    final violationRef = await _resolveViolationDocRef(violationId);
+    if (violationRef == null) {
+      debugPrint('⚠️ Violation not found to lock complaint: $violationId');
+      return;
+    }
+
+    await violationRef.set({
+      'status': 'complaint_pending',
+      'complaintStatus': 'pending',
+      'paymentLocked': true,
+      'complaintLocked': true,
+      'complaintSubmittedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // USERS
   // ═══════════════════════════════════════════════════════════════
@@ -132,14 +176,22 @@ class FirestoreService {
   }
 
   /// Request profile update (Needs admin approval).
-  Future<void> requestProfileUpdate(String uid, Map<String, dynamic> requestData) async {
+  Future<void> requestProfileUpdate(
+      String uid, Map<String, dynamic> requestData) async {
     try {
-      await _db.collection('profile_update_requests').doc(uid).set({
+      final payload = <String, dynamic>{
         ...requestData,
         'userId': uid,
         'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      payload['createdAt'] = FieldValue.serverTimestamp();
+
+      await _db
+          .collection('profile_update_requests')
+          .doc(uid)
+          .set(payload, SetOptions(merge: true));
       debugPrint('✅ Profile update request sent to Firestore');
     } catch (e) {
       debugPrint('❌ Error sending profile update request: $e');
@@ -308,6 +360,15 @@ class FirestoreService {
     }
   }
 
+  /// Delete a notification by id.
+  Future<void> deleteNotification(String id) async {
+    try {
+      await _notificationsRef.doc(id).delete();
+    } catch (e) {
+      debugPrint('❌ Error deleting notification $id: $e');
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // APP UPDATE (OTA)
   // ═══════════════════════════════════════════════════════════════
@@ -368,16 +429,22 @@ class FirestoreService {
   }) async {
     try {
       String evidenceUrl = '';
-      
+      String evidencePath = '';
+
       // Upload evidence image if provided
       if (evidenceFile != null) {
         try {
           final storage = FirebaseStorage.instance;
-          final ref = storage.ref('complaints/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg');
+          evidencePath =
+              'complaints/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+          final ref = storage.ref(evidencePath);
           final uploadTask = await ref.putFile(evidenceFile);
           evidenceUrl = await uploadTask.ref.getDownloadURL();
         } catch (storageErr) {
-          debugPrint('⚠️ Evidence upload failed (continuing without): $storageErr');
+          debugPrint('❌ Evidence upload failed: $storageErr');
+          throw Exception(
+            'Không thể tải ảnh bằng chứng. Vui lòng kiểm tra mạng và thử lại.',
+          );
         }
       }
 
@@ -388,9 +455,16 @@ class FirestoreService {
         'description': description,
         'status': 'pending',
         'evidenceUrl': evidenceUrl,
+        'evidencePath': evidencePath,
+        'evidence': {
+          'downloadUrl': evidenceUrl,
+          'path': evidencePath,
+        },
         'adminNote': '',
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      await _setViolationComplaintPending(violationId);
       debugPrint('✅ Complaint submitted successfully');
     } catch (e) {
       debugPrint('❌ Error submitting complaint: $e');

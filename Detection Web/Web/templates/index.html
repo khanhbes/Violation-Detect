@@ -7,7 +7,7 @@
     <title>Traffic Violation Detection</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="apple-touch-icon" href="/static/app_icon.png">
-    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link rel="stylesheet" href="/static/style.css?v=4">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
         rel="stylesheet">
 </head>
@@ -20,12 +20,13 @@
                     style="width:36px;height:36px;border-radius:8px;vertical-align:middle;margin-right:8px;">Traffic
                 Violation Detect</div>
             <div class="topbar-links">
-                <a href="#" class="nav-link active" data-tab="home">Home</a>
-                <a href="#" class="nav-link" data-tab="image">Image</a>
-                <a href="#" class="nav-link" data-tab="video">Video</a>
-                <a href="#" class="nav-link" data-tab="realtime">Real-Time</a>
-                <a href="#" class="nav-link" data-tab="lookup">Look Up</a>
-                <a href="#" class="nav-link" data-tab="manage">Data Management</a>
+                <a href="#" class="nav-link active" data-tab="home" data-i18n="nav_home">Home</a>
+                <a href="#" class="nav-link" data-tab="image" data-i18n="nav_image">Image</a>
+                <a href="#" class="nav-link" data-tab="video" data-i18n="nav_video">Video</a>
+                <a href="#" class="nav-link" data-tab="realtime" data-i18n="nav_realtime">Real-Time</a>
+                <a href="#" class="nav-link" data-tab="lookup" data-i18n="nav_lookup">Look Up</a>
+                <a href="#" class="nav-link" data-tab="manage" data-i18n="nav_manage">Data Management</a>
+                <a href="#" class="nav-link" data-tab="complaints" data-i18n="nav_complaints">Complaints</a>
             </div>
             <div class="server-ip-badge" id="serverIpBadge" title="Nhập IP này vào app Flutter để kết nối">
                 <span class="server-ip-icon">📡</span>
@@ -508,35 +509,35 @@
                     <div class="manage-stat-icon">👥</div>
                     <div class="manage-stat-info">
                         <span class="manage-stat-value" id="statTotalUsers">0</span>
-                        <span class="manage-stat-label">Người dùng</span>
+                        <span class="manage-stat-label" data-i18n="manage_stat_users">Người dùng</span>
                     </div>
                 </div>
                 <div class="manage-stat-card stat-vehicles">
                     <div class="manage-stat-icon">🚗</div>
                     <div class="manage-stat-info">
                         <span class="manage-stat-value" id="statTotalVehicles">0</span>
-                        <span class="manage-stat-label">Phương tiện</span>
+                        <span class="manage-stat-label" data-i18n="manage_stat_vehicles">Phương tiện</span>
                     </div>
                 </div>
                 <div class="manage-stat-card stat-violations">
                     <div class="manage-stat-icon">🚨</div>
                     <div class="manage-stat-info">
                         <span class="manage-stat-value" id="statTotalViolations">0</span>
-                        <span class="manage-stat-label">Vi phạm</span>
+                        <span class="manage-stat-label" data-i18n="manage_stat_violations">Vi phạm</span>
                     </div>
                 </div>
                 <div class="manage-stat-card stat-pending">
                     <div class="manage-stat-icon">💰</div>
                     <div class="manage-stat-info">
                         <span class="manage-stat-value" id="statPendingFines">0 ₫</span>
-                        <span class="manage-stat-label">Tổng nợ phạt</span>
+                        <span class="manage-stat-label" data-i18n="manage_stat_pending_fines">Tổng nợ phạt</span>
                     </div>
                 </div>
                 <div class="manage-stat-card stat-complaints">
                     <div class="manage-stat-icon">📝</div>
                     <div class="manage-stat-info">
                         <span class="manage-stat-value" id="statTotalComplaints">0</span>
-                        <span class="manage-stat-label">Khiếu nại</span>
+                        <span class="manage-stat-label" data-i18n="manage_stat_complaints">Khiếu nại</span>
                     </div>
                 </div>
             </div>
@@ -545,9 +546,9 @@
             <div id="pendingUpdatesBanner" style="display:none;" class="pending-updates-banner">
                 <div class="pending-updates-inner">
                     <span class="pending-updates-icon">🔔</span>
-                    <span class="pending-updates-text">Có <strong id="pendingUpdatesCount">0</strong> yêu cầu thay đổi thông tin đang chờ duyệt từ người dùng App</span>
+                    <span class="pending-updates-text"><span data-i18n="manage_pending_updates_prefix">Có</span> <strong id="pendingUpdatesCount">0</strong> <span data-i18n="manage_pending_updates_suffix">yêu cầu thay đổi thông tin đang chờ duyệt từ người dùng App</span></span>
                     <button class="btn btn-warning btn-sm" onclick="scrollToPendingUpdates()" style="margin-left:12px; padding: 6px 14px; font-size: 0.85rem;">
-                        Xem ngay
+                        <span data-i18n="manage_pending_updates_cta">Xem ngay</span>
                     </button>
                 </div>
             </div>
@@ -557,14 +558,14 @@
                 <!-- Toolbar -->
                 <div class="manage-toolbar">
                     <div class="manage-toolbar-left">
-                        <span class="manage-toolbar-title">👥 Tổng quan người dùng</span>
+                        <span class="manage-toolbar-title" data-i18n="manage_overview_title">👥 Tổng quan người dùng</span>
                     </div>
                     <div class="manage-toolbar-right">
                         <div class="manage-search-box">
                             <span class="manage-search-icon">🔍</span>
-                            <input type="text" id="manageSearchInput" class="manage-search-input" placeholder="Tìm kiếm theo tên, email, biển số...">
+                            <input type="text" id="manageSearchInput" class="manage-search-input" data-i18n-placeholder="manage_search_placeholder" placeholder="Tìm kiếm theo tên, email, biển số...">
                         </div>
-                        <button class="btn btn-primary manage-refresh-btn" id="refreshManageBtn">🔄 Làm mới</button>
+                        <button type="button" class="auto-sync-toggle is-on" id="manageAutoSyncToggle" aria-pressed="true"></button>
                     </div>
                 </div>
                 <!-- Table -->
@@ -585,7 +586,7 @@
                             <tr>
                                 <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 60px 40px; font-weight: 500;">
                                     <div style="font-size: 2.5rem; margin-bottom: 12px;">📡</div>
-                                    Nhấn <strong>Làm mới</strong> hoặc chuyển sang tab này để tải dữ liệu từ Firebase.
+                                    <span data-i18n="manage_initial_hint">Dữ liệu sẽ tự động đồng bộ khi có thay đổi từ App/Web.</span>
                                 </td>
                             </tr>
                         </tbody>
@@ -593,7 +594,49 @@
                 </div>
                 <!-- Footer -->
                 <div class="manage-table-footer" id="manageTableFooter">
-                    <span id="manageRowCount">0 người dùng</span>
+                    <span id="manageRowCount" data-i18n="manage_row_count_initial">0 người dùng</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== COMPLAINTS TAB ==================== -->
+        <section id="tab-complaints" class="tab-panel">
+            <header class="tab-header" style="margin-bottom: 0;">
+                <h1><span class="icon">📝</span> <span data-i18n="complaints_title">Complaint Management</span></h1>
+                <p class="subtitle" data-i18n="complaints_subtitle">Theo dõi, lọc, duyệt khiếu nại và kiểm tra bằng chứng từ App theo thời gian thực</p>
+            </header>
+
+            <div class="complaint-board-toolbar">
+                <div class="complaint-board-stats" id="complaintBoardStats"></div>
+                <div class="complaint-board-controls">
+                    <div class="manage-search-box complaint-search">
+                        <span class="manage-search-icon">🔎</span>
+                        <input
+                            type="text"
+                            id="complaintSearchInput"
+                            class="manage-search-input"
+                            data-i18n-placeholder="complaints_search_placeholder"
+                            placeholder="Tìm theo người dùng, lý do, mã vi phạm, mô tả...">
+                    </div>
+                    <div class="complaint-filter-wrap">
+                        <span class="complaint-filter-icon">🧭</span>
+                        <select id="complaintStatusFilter" class="complaint-filter-select">
+                            <option value="all" data-i18n="complaints_filter_all">Tất cả trạng thái</option>
+                            <option value="pending" data-i18n="complaints_filter_pending">Đang xử lý</option>
+                            <option value="approved" data-i18n="complaints_filter_approved">Đã duyệt</option>
+                            <option value="rejected" data-i18n="complaints_filter_rejected">Đã từ chối</option>
+                        </select>
+                        <span class="complaint-filter-caret">▾</span>
+                    </div>
+                    <button type="button" class="auto-sync-toggle is-on" id="complaintAutoSyncToggle" aria-pressed="true"></button>
+                </div>
+            </div>
+
+            <div id="complaintBoardList" class="complaint-board-list">
+                <div class="complaint-board-empty">
+                    <div style="font-size: 2.1rem;">🧾</div>
+                    <div style="margin-top: 8px; font-weight: 700;" data-i18n="complaints_empty_title">Chưa có dữ liệu khiếu nại</div>
+                    <div style="margin-top: 4px; color: var(--text-muted); font-size: 0.88rem;" data-i18n="complaints_empty_subtitle">Dữ liệu sẽ xuất hiện khi app gửi khiếu nại.</div>
                 </div>
             </div>
         </section>
@@ -619,6 +662,15 @@
 
     </div><!-- .container -->
 
+    <div id="globalPageLoader" class="page-loader-overlay" aria-hidden="true">
+        <div class="page-loader-card" role="status" aria-live="polite">
+            <div class="page-loader-spinner"></div>
+            <div class="page-loader-title" data-i18n="global_loader_title">Đang xử lý</div>
+            <div class="page-loader-message" id="globalPageLoaderMessage" data-i18n="global_loader_message">Vui lòng chờ trong giây lát...</div>
+            <div class="page-loader-dots"><span></span><span></span><span></span></div>
+        </div>
+    </div>
+
     <div id="toast" class="toast"></div>
 
     <!-- Scroll to top button -->
@@ -635,8 +687,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
 
     <script src="/static/firebase-config.js"></script>
-    <script src="/static/app.js?v=4"></script>
-    <script src="/static/i18n.js"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
 
 </html>

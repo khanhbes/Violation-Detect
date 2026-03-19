@@ -141,7 +141,8 @@ class HelmetDetectorWrapper:
                         violations.append({
                             'type': 'helmet',
                             'id': moto_id,
-                            'label': 'No Helmet'
+                            'label': 'No Helmet',
+                            'vehicleClass': 'motorcycle',
                         })
             
             if state.safe_latched:
@@ -295,7 +296,8 @@ class SidewalkDetectorWrapper:
                             violations.append({
                                 'type': 'sidewalk',
                                 'id': int(track_id),
-                                'label': f'Sidewalk: {zone_type}'
+                                'label': f'Sidewalk: {zone_type}',
+                                'vehicleClass': vclass,
                             })
                         
                         self.vehicle_status[track_id] = "Violation"
@@ -476,7 +478,8 @@ class RedlightDetectorWrapper:
                     violations.append({
                         'type': 'redlight',
                         'id': tid,
-                        'label': 'Red Light Violation'
+                        'label': 'Red Light Violation',
+                        'vehicleClass': vclass,
                     })
                 elif label == "WARNING" and self.tracks[tid].last_event_frame == self.frame_idx:
                     self.warnings += 1
