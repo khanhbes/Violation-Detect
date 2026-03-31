@@ -4,7 +4,8 @@ import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SupportScreen extends StatefulWidget {
-  const SupportScreen({super.key});
+  final String? initialSection; // 'guide' or 'faq'
+  const SupportScreen({super.key, this.initialSection});
 
   @override
   State<SupportScreen> createState() => _SupportScreenState();
@@ -12,6 +13,41 @@ class SupportScreen extends StatefulWidget {
 
 class _SupportScreenState extends State<SupportScreen> {
   final AppSettings _s = AppSettings();
+  final GlobalKey _guideKey = GlobalKey();
+  final GlobalKey _faqKey = GlobalKey();
+
+  final List<Map<String, String>> _guideSteps = [
+    {
+      'title_vi': '1. Đăng nhập bằng CCCD',
+      'desc_vi': 'Mở ứng dụng, nhập số CCCD 12 số và mật khẩu đã đăng ký. Nếu chưa có tài khoản, bấm "Đăng ký ngay".',
+      'title_en': '1. Log in with ID Card',
+      'desc_en': 'Open the app, enter your 12-digit ID number and registered password. If you don\'t have an account yet, tap "Register now".',
+    },
+    {
+      'title_vi': '2. Xem vi phạm giao thông',
+      'desc_vi': 'Vào tab "Vi phạm" để xem danh sách vi phạm đã ghi nhận. Bấm vào từng mục để xem chi tiết hình ảnh, địa điểm, mức phạt.',
+      'title_en': '2. View traffic violations',
+      'desc_en': 'Go to the "Violations" tab to see recorded violations. Tap each item for details including photos, location, and fine amount.',
+    },
+    {
+      'title_vi': '3. Nộp phạt trực tuyến',
+      'desc_vi': 'Bấm "Nộp phạt" trên vi phạm cần thanh toán. Quét mã QR VietQR bằng app ngân hàng để thanh toán an toàn.',
+      'title_en': '3. Pay fines online',
+      'desc_en': 'Tap "Pay fine" on the violation. Scan the VietQR code with your banking app for secure payment.',
+    },
+    {
+      'title_vi': '4. Khiếu nại vi phạm',
+      'desc_vi': 'Nếu phát hiện sai sót, vào "Khiếu nại", chọn vi phạm → bấm "Gửi khiếu nại" → nhập lý do và bằng chứng.',
+      'title_en': '4. Appeal a violation',
+      'desc_en': 'If you find an error, go to "Complaints", select the violation → tap "Submit complaint" → enter reason and evidence.',
+    },
+    {
+      'title_vi': '5. Quản lý phương tiện & GPLX',
+      'desc_vi': 'Vào trang "Cá nhân" để xem thông tin GPLX, điểm giấy phép, và danh sách phương tiện đã đăng ký.',
+      'title_en': '5. Manage vehicles & license',
+      'desc_en': 'Go to "Profile" to view license info, license points, and registered vehicles.',
+    },
+  ];
 
   final List<Map<String, String>> _faqs = [
     {
@@ -62,6 +98,25 @@ class _SupportScreenState extends State<SupportScreen> {
     final uri = Uri.parse('mailto:$email?subject=Hỗ trợ ứng dụng VNETraffic');
     if (!await launchUrl(uri)) {
       // ignore
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialSection != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToSection(widget.initialSection!);
+      });
+    }
+  }
+
+  void _scrollToSection(String section) {
+    final key = section == 'guide' ? _guideKey : _faqKey;
+    final ctx = key.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
     }
   }
 
@@ -160,8 +215,69 @@ class _SupportScreenState extends State<SupportScreen> {
 
                   const SizedBox(height: 32),
 
+                  // ── GUIDE SECTION ──
+                  Text(
+                    key: _guideKey,
+                    _s.tr('Hướng dẫn sử dụng', 'User Guide'),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: isDark ? [] : AppTheme.cardShadow,
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _guideSteps.length,
+                      separatorBuilder: (_, __) => Divider(
+                        color: isDark ? Colors.white12 : Colors.black12,
+                        height: 1,
+                      ),
+                      itemBuilder: (context, index) {
+                        final step = _guideSteps[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _s.isVietnamese
+                                    ? step['title_vi']!
+                                    : step['title_en']!,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 15),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _s.isVietnamese
+                                    ? step['desc_vi']!
+                                    : step['desc_en']!,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? Colors.white70
+                                      : AppTheme.textSecondary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
                   // ── FAQ SECTION ──
                   Text(
+                    key: _faqKey,
                     _s.tr('Câu hỏi thường gặp (FAQ)', 'Frequently Asked Questions'),
                     style: const TextStyle(
                       fontSize: 18,

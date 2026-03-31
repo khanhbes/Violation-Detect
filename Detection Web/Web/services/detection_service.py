@@ -8,12 +8,14 @@ Mỗi detector chạy YOLO riêng, giữ nguyên logic gốc.
 import cv2
 import numpy as np
 import time
+import math
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 from dataclasses import dataclass
 import sys
+import torch
 
 # Add parent directories to path
 BASE_DIR = Path(__file__).parent.parent.parent
@@ -53,6 +55,156 @@ from functions.sidewalk_violation import (
 SNAPSHOT_DIR = config.SNAPSHOT_DIR
 for vtype in ['helmet', 'redlight', 'sidewalk', 'wrong_way', 'wrong_lane']:
     (SNAPSHOT_DIR / vtype).mkdir(exist_ok=True)
+
+
+# =============================================================================
+# STABLE TRACK ID MANAGER
+# =============================================================================
+
+@dataclass
+class _StableTrackMeta:
+    class_id: int
+    bbox: Tuple[float, float, float, float]
+    center: Tuple[float, float]
+    last_seen: float
+
+
+class StableTrackIdManager:
+    """
+    Map short-lived raw tracker IDs to stable IDs.
+    Recovery window keeps identity consistent when a vehicle is briefly lost.
+    """
+
+    def __init__(
+        self,
+        recovery_window_sec: float = 10.0,
+        min_iou: float = 0.15,
+        min_center_dist: float = 40.0,
+        max_center_dist: float = 220.0,
+    ):
+        self.recovery_window_sec = recovery_window_sec
+        self.min_iou = min_iou
+        self.min_center_dist = min_center_dist
+        self.max_center_dist = max_center_dist
+        self._raw_to_stable: Dict[int, int] = {}
+        self._stable_meta: Dict[int, _StableTrackMeta] = {}
+        self._next_stable_id = 1
+
+    def reset(self):
+        self._raw_to_stable.clear()
+        self._stable_meta.clear()
+        self._next_stable_id = 1
+
+    @staticmethod
+    def _center(box: Tuple[float, float, float, float]) -> Tuple[float, float]:
+        x1, y1, x2, y2 = box
+        return ((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+
+    @staticmethod
+    def _bbox_iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> float:
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+
+        ix1 = max(ax1, bx1)
+        iy1 = max(ay1, by1)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+        iw = max(0.0, ix2 - ix1)
+        ih = max(0.0, iy2 - iy1)
+        inter = iw * ih
+        if inter <= 0.0:
+            return 0.0
+
+        area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+        area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        union = area_a + area_b - inter
+        if union <= 0.0:
+            return 0.0
+        return float(inter / union)
+
+    def _cleanup_expired(self, now: float):
+        expired_stable_ids = [
+            stable_id
+            for stable_id, meta in self._stable_meta.items()
+            if (now - meta.last_seen) > self.recovery_window_sec
+        ]
+        if expired_stable_ids:
+            for stable_id in expired_stable_ids:
+                self._stable_meta.pop(stable_id, None)
+
+            for raw_id, stable_id in list(self._raw_to_stable.items()):
+                if stable_id in expired_stable_ids:
+                    self._raw_to_stable.pop(raw_id, None)
+
+    def _distance_threshold(self, bbox: Tuple[float, float, float, float]) -> float:
+        x1, y1, x2, y2 = bbox
+        w = max(1.0, x2 - x1)
+        h = max(1.0, y2 - y1)
+        adaptive = 0.55 * math.sqrt(w * h) + 45.0
+        return float(min(self.max_center_dist, max(self.min_center_dist, adaptive)))
+
+    def resolve(
+        self,
+        raw_track_id: int,
+        class_id: int,
+        bbox: Tuple[float, float, float, float],
+        now: float,
+        taken_stable_ids: Optional[set] = None,
+    ) -> int:
+        self._cleanup_expired(now)
+        taken = taken_stable_ids or set()
+        center = self._center(bbox)
+
+        existing_stable = self._raw_to_stable.get(raw_track_id)
+        if existing_stable is not None:
+            meta = self._stable_meta.get(existing_stable)
+            if meta and (now - meta.last_seen) <= self.recovery_window_sec and existing_stable not in taken:
+                self._stable_meta[existing_stable] = _StableTrackMeta(
+                    class_id=class_id,
+                    bbox=bbox,
+                    center=center,
+                    last_seen=now,
+                )
+                return existing_stable
+            self._raw_to_stable.pop(raw_track_id, None)
+
+        best_stable_id = None
+        best_score = -1.0
+        threshold_dist = self._distance_threshold(bbox)
+
+        for stable_id, meta in self._stable_meta.items():
+            if stable_id in taken:
+                continue
+            if meta.class_id != class_id:
+                continue
+            if (now - meta.last_seen) > self.recovery_window_sec:
+                continue
+
+            iou = self._bbox_iou(bbox, meta.bbox)
+            dx = center[0] - meta.center[0]
+            dy = center[1] - meta.center[1]
+            center_dist = math.hypot(dx, dy)
+
+            if iou < self.min_iou and center_dist > threshold_dist:
+                continue
+
+            score = (iou * 2.0) + max(0.0, 1.0 - (center_dist / max(1.0, threshold_dist)))
+            if score > best_score:
+                best_score = score
+                best_stable_id = stable_id
+
+        if best_stable_id is None:
+            best_stable_id = self._next_stable_id
+            self._next_stable_id += 1
+
+        self._raw_to_stable[raw_track_id] = best_stable_id
+        self._stable_meta[best_stable_id] = _StableTrackMeta(
+            class_id=class_id,
+            bbox=bbox,
+            center=center,
+            last_seen=now,
+        )
+        return best_stable_id
 
 
 # =============================================================================
@@ -135,7 +287,7 @@ class HelmetDetectorWrapper:
                 
                 if rider_cls == CLS_PERSON_NO_HELMET and not state.safe_latched:
                     if (now - state.last_snapshot_time) >= 2.0:
-                        save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox, vehicle_class="motorcycle")
+                        snap = save_violation_snapshot(frame, "no_helmet", moto_id, moto_bbox, vehicle_class="motorcycle")
                         state.last_snapshot_time = now
                         self.total_violations += 1
                         violations.append({
@@ -143,6 +295,7 @@ class HelmetDetectorWrapper:
                             'id': moto_id,
                             'label': 'No Helmet',
                             'vehicleClass': 'motorcycle',
+                            'snapshotPath': snap,
                         })
             
             if state.safe_latched:
@@ -292,12 +445,13 @@ class SidewalkDetectorWrapper:
                         if track_id not in self.violated_ids:
                             self.violated_ids.add(track_id)
                             vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
-                            save_violation_snapshot(frame, "sidewalk", track_id, box, label, vehicle_class=vclass)
+                            snap = save_violation_snapshot(frame, "sidewalk", track_id, box, label, vehicle_class=vclass)
                             violations.append({
                                 'type': 'sidewalk',
                                 'id': int(track_id),
                                 'label': f'Sidewalk: {zone_type}',
                                 'vehicleClass': vclass,
+                                'snapshotPath': snap,
                             })
                         
                         self.vehicle_status[track_id] = "Violation"
@@ -474,12 +628,13 @@ class RedlightDetectorWrapper:
                 if label == "VIOLATION" and self.tracks[tid].last_event_frame == self.frame_idx:
                     self.violations += 1
                     vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
-                    save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
+                    snap = save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                     violations.append({
                         'type': 'redlight',
                         'id': tid,
                         'label': 'Red Light Violation',
                         'vehicleClass': vclass,
+                        'snapshotPath': snap,
                     })
                 elif label == "WARNING" and self.tracks[tid].last_event_frame == self.frame_idx:
                     self.warnings += 1
@@ -543,6 +698,9 @@ class UnifiedDetector:
         # Model riêng cho vật thể cố định (lights, stopline, signs, road markings)
         self.static_model = YOLO(self.model_path)
         print("✅ Model loaded!")
+
+        # Smoke test: chạy 1 frame giả lập để bắt lỗi tracker config sớm
+        self._smoke_test_tracker()
         
         # Sub-detectors
         self.helmet = HelmetDetectorWrapper()
@@ -550,12 +708,31 @@ class UnifiedDetector:
         self.redlight = RedlightDetectorWrapper()
         self.wrong_way = WrongWayDetectorWrapper()
         self.wrong_lane = WrongLaneDetector()
+        self.stable_track_manager = StableTrackIdManager(recovery_window_sec=10.0)
         
         # Tracking
         self.frame_idx = 0
         self.start_time = time.time()
         self.fps = 0.0
         self.prev_time = time.time()
+        self._current_stable_to_raw: Dict[int, int] = {}
+
+    def _smoke_test_tracker(self):
+        """Chạy model.track() trên 1 frame đen nhỏ để phát hiện lỗi tracker config trước khi bấm Start."""
+        dummy = np.zeros((64, 64, 3), dtype=np.uint8)
+        try:
+            self.model.track(dummy, imgsz=64, conf=0.25, persist=True, verbose=False, tracker=config.TRACKER)
+            print(f"✅ Tracker smoke test passed (config: {config.TRACKER})")
+        except AttributeError as e:
+            msg = (
+                f"⚠️ Tracker config không tương thích phiên bản ultralytics! "
+                f"Config: '{config.TRACKER}'. Chi tiết: {e}"
+            )
+            print(msg)
+            raise RuntimeError(msg) from e
+        finally:
+            # Reset tracker state sau smoke test
+            self.model = YOLO(self.model_path)
     
     def reset(self):
         """Reset all detectors"""
@@ -566,10 +743,71 @@ class UnifiedDetector:
         self.wrong_lane.reset()
         self.frame_idx = 0
         self.start_time = time.time()
+        self._current_stable_to_raw = {}
+        self.stable_track_manager.reset()
         # Reset tracker state 
         self.model = YOLO(self.model_path)
         self.static_model = YOLO(self.model_path)
         print("🔄 All detectors reset")
+
+    def _apply_stable_track_ids(self, r0_track):
+        """
+        Rewrite track IDs in r0_track.boxes from raw tracker IDs to stable IDs.
+        Clones boxes.data to escape InferenceMode, then writes to column -3
+        (the track-id column in ultralytics Boxes layout: x1,y1,x2,y2,id,conf,cls).
+        Returns stable->raw mapping for the current frame.
+        """
+        stable_to_raw: Dict[int, int] = {}
+        if (
+            r0_track is None
+            or r0_track.boxes is None
+            or r0_track.boxes.id is None
+            or len(r0_track.boxes) == 0
+        ):
+            return stable_to_raw
+
+        # Guard: boxes.data phải có ít nhất 7 cột (xyxy + id + conf + cls)
+        if r0_track.boxes.data.shape[-1] < 7:
+            print(f"⚠️ Boxes không phải track format (cols={r0_track.boxes.data.shape[-1]}). "
+                  f"Bỏ qua stable-ID cho frame này.")
+            return stable_to_raw
+
+        boxes_id_tensor = r0_track.boxes.id
+        boxes_cls = r0_track.boxes.cls.cpu().numpy().astype(int)
+        boxes_xyxy = r0_track.boxes.xyxy.cpu().numpy().astype(np.float32)
+        raw_ids = boxes_id_tensor.cpu().numpy().astype(int)
+        now = time.time()
+
+        new_ids = np.copy(raw_ids)
+        taken_stable_ids = set()
+        for i in range(len(raw_ids)):
+            raw_id = int(raw_ids[i])
+            class_id = int(boxes_cls[i])
+            bbox = tuple(float(v) for v in boxes_xyxy[i].tolist())
+            stable_id = self.stable_track_manager.resolve(
+                raw_track_id=raw_id,
+                class_id=class_id,
+                bbox=bbox,
+                now=now,
+                taken_stable_ids=taken_stable_ids,
+            )
+            taken_stable_ids.add(stable_id)
+            new_ids[i] = stable_id
+            stable_to_raw[stable_id] = raw_id
+
+        # Clone data tensor để thoát khỏi InferenceMode (inference tensor không cho inplace update)
+        data = r0_track.boxes.data
+        if data.is_inference():
+            data = data.clone()
+            r0_track.boxes.data = data
+
+        # Cột -3 = track_id theo Boxes layout cố định: [x1, y1, x2, y2, track_id, conf, cls]
+        data[:, -3] = torch.as_tensor(
+            new_ids,
+            dtype=data.dtype,
+            device=data.device,
+        )
+        return stable_to_raw
     
     def process_frame(self, frame: np.ndarray, enabled: List[str], conf: float = 0.25, debug: bool = False) -> Tuple[np.ndarray, List[dict]]:
         """
@@ -585,22 +823,33 @@ class UnifiedDetector:
         self.frame_idx += 1
         all_violations = []
         frame_vis = frame.copy()
+        self._current_stable_to_raw = {}
         
         needs_shared_model = bool(set(enabled) & {'helmet', 'sidewalk', 'redlight', 'wrong_lane', 'wrong_way'})
         
         # === Track: vật thể chuyển động (xe, người) ===
         r0_track = None
         if needs_shared_model:
-            results = self.model.track(
-                frame,
-                imgsz=config.IMG_SIZE,
-                conf=conf,
-                iou=config.IOU_THRESHOLD,
-                persist=True,
-                verbose=False,
-                tracker=config.TRACKER
-            )
+            try:
+                results = self.model.track(
+                    frame,
+                    imgsz=config.IMG_SIZE,
+                    conf=conf,
+                    iou=config.IOU_THRESHOLD,
+                    persist=True,
+                    verbose=False,
+                    tracker=config.TRACKER
+                )
+            except AttributeError as e:
+                if "fuse_score" in str(e) or "IterableSimpleNamespace" in str(e):
+                    raise RuntimeError(
+                        f"Tracker config không tương thích phiên bản ultralytics hiện tại. "
+                        f"Kiểm tra '{config.TRACKER}' có đầy đủ key theo schema builtin. "
+                        f"Chi tiết: {e}"
+                    ) from e
+                raise
             r0_track = results[0]
+            self._current_stable_to_raw = self._apply_stable_track_ids(r0_track)
         
         # === Predict: vật thể cố định (đèn, vạch, biển, vỉa hè) ===
         r0_static = None
@@ -655,6 +904,16 @@ class UnifiedDetector:
         dt = max(1e-6, current_time - self.prev_time)
         self.fps = 0.85 * self.fps + 0.15 * (1.0 / dt) if self.fps > 0 else 1.0 / dt
         self.prev_time = current_time
+
+        for violation in all_violations:
+            try:
+                stable_track_id = int(violation.get('id', 0))
+            except Exception:
+                stable_track_id = 0
+            raw_track_id = int(self._current_stable_to_raw.get(stable_track_id, stable_track_id))
+            violation['id'] = stable_track_id
+            violation['stableTrackId'] = stable_track_id
+            violation['rawTrackId'] = raw_track_id
         
         return frame_vis, all_violations
     

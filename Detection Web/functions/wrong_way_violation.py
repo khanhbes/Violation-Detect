@@ -724,13 +724,14 @@ class PrecisionWrongWayDetector:
                 self.violations_by_class[vehicle_class] += 1
                 
                 # Snapshot
-                save_violation_snapshot(frame, "wrong_way", tid, box, vehicle_class=vehicle_class)
+                snap = save_violation_snapshot(frame, "wrong_way", tid, box, vehicle_class=vehicle_class)
                 print(f"🚨 VIOLATION: ID {tid} ({tracker.violation_type})")
                 
                 new_violations.append({
                     'type': 'wrong_way',
                     'id': tid,
-                    'label': tracker.violation_type or violation_type or 'Wrong Way'
+                    'label': tracker.violation_type or violation_type or 'Wrong Way',
+                    'snapshotPath': snap,
                 })
                     
             self._draw_vehicle(frame, tracker, box)

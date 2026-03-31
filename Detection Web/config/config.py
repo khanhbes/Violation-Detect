@@ -5,7 +5,58 @@ Cấu hình tập trung cho toàn bộ hệ thống phát hiện vi phạm giao 
 
 import os
 import cv2
+import logging
 from pathlib import Path
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_tracker_config(custom_path: Path) -> str:
+    """
+    So sánh key trong custom tracker yaml với schema builtin tương ứng.
+    Nếu thiếu key bắt buộc → log cảnh báo + fallback về tracker builtin.
+    Trả về đường dẫn tracker hợp lệ.
+    """
+    if not custom_path.exists():
+        return "bytetrack.yaml"
+
+    try:
+        with open(custom_path, "r", encoding="utf-8") as f:
+            custom_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.warning("Cannot parse %s: %s — falling back to builtin tracker", custom_path, e)
+        return "bytetrack.yaml"
+
+    tracker_type = custom_cfg.get("tracker_type", "bytetrack")
+    builtin_name = f"{tracker_type}.yaml"
+
+    # Tìm schema builtin trong ultralytics package
+    try:
+        import ultralytics
+        builtin_dir = Path(ultralytics.__file__).parent / "cfg" / "trackers"
+        builtin_path = builtin_dir / builtin_name
+        if not builtin_path.exists():
+            logger.warning("Builtin tracker schema not found: %s", builtin_path)
+            return str(custom_path)
+
+        with open(builtin_path, "r", encoding="utf-8") as f:
+            builtin_cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.warning("Cannot read builtin tracker schema: %s", e)
+        return str(custom_path)
+
+    # So sánh key
+    missing = set(builtin_cfg.keys()) - set(custom_cfg.keys())
+    if missing:
+        logger.warning(
+            "Custom tracker config '%s' is missing keys required by %s: %s — falling back to builtin '%s'",
+            custom_path.name, builtin_name, sorted(missing), builtin_name,
+        )
+        return builtin_name
+
+    return str(custom_path)
 
 
 class Config:
@@ -33,7 +84,9 @@ class Config:
     # ========================================
     IMG_SIZE = 1280
     IOU_THRESHOLD = 0.45
-    TRACKER = "bytetrack.yaml"
+    # Custom tracker config: tăng track_buffer lên 150 để giữ ID xe khi bị che khuất
+    _TRACKER_CUSTOM = Path(__file__).parent / "custom_tracker.yaml"
+    TRACKER = _validate_tracker_config(_TRACKER_CUSTOM)
     
     # Confidence thresholds
     CONF_THRESHOLD_LIGHT = 0.25

@@ -65,7 +65,7 @@
                         <div class="hero-stat tilt-card"><span class="hero-stat-value"
                                 data-text="Real-Time">—</span><span class="hero-stat-label"
                                 data-i18n="stat_speed">Detection Speed</span></div>
-                        <div class="hero-stat tilt-card"><span class="hero-stat-value" data-text="YOLOv12">—</span><span
+                        <div class="hero-stat tilt-card"><span class="hero-stat-value" data-text="YOLOv26-seg">—</span><span
                                 class="hero-stat-label">AI Model</span></div>
                     </div>
                     <div class="hero-cta animate-in">
@@ -120,7 +120,7 @@
                 <div class="tech-grid">
                     <div class="tech-card animate-in">
                         <div class="tech-icon">🤖</div>
-                        <h3>YOLOv12-Seg</h3>
+                        <h3>YOLOv26-seg</h3>
                         <p data-i18n="tech_yolo">Object Detection + Instance Segmentation, nhận diện 40 classes bao gồm
                             phương tiện, đèn giao
                             thông, vạch kẻ, biển báo</p>
@@ -210,51 +210,182 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Firestore Quota Monitor -->
+            <div class="home-section">
+                <h2 class="section-title animate-in"><span class="icon">📊</span> <span data-i18n="quota_title">Firestore Quota Monitor</span></h2>
+                <div class="quota-grid" id="quotaGrid">
+                    <div class="quota-card animate-in">
+                        <div class="quota-icon quota-icon-read">📖</div>
+                        <div class="quota-info">
+                            <span class="quota-value" id="quotaReads">0</span>
+                            <span class="quota-label" data-i18n="quota_reads">Reads</span>
+                        </div>
+                        <div class="quota-bar"><div class="quota-bar-fill quota-bar-read" id="quotaBarRead" style="width:0%"></div></div>
+                    </div>
+                    <div class="quota-card animate-in">
+                        <div class="quota-icon quota-icon-write">✏️</div>
+                        <div class="quota-info">
+                            <span class="quota-value" id="quotaWrites">0</span>
+                            <span class="quota-label" data-i18n="quota_writes">Writes</span>
+                        </div>
+                        <div class="quota-bar"><div class="quota-bar-fill quota-bar-write" id="quotaBarWrite" style="width:0%"></div></div>
+                    </div>
+                    <div class="quota-card animate-in">
+                        <div class="quota-icon quota-icon-delete">🗑️</div>
+                        <div class="quota-info">
+                            <span class="quota-value" id="quotaDeletes">0</span>
+                            <span class="quota-label" data-i18n="quota_deletes">Deletes</span>
+                        </div>
+                        <div class="quota-bar"><div class="quota-bar-fill quota-bar-delete" id="quotaBarDelete" style="width:0%"></div></div>
+                    </div>
+                    <div class="quota-card quota-card-uptime animate-in">
+                        <div class="quota-icon quota-icon-uptime">⏱️</div>
+                        <div class="quota-info">
+                            <span class="quota-value" id="quotaUptime">0s</span>
+                            <span class="quota-label" data-i18n="quota_uptime">Uptime</span>
+                        </div>
+                    </div>
+                </div>
+                <p class="quota-note"><span id="quotaDate"></span> — <span data-i18n="quota_note">Realtime, tự động reset 00:00 (GMT+7), persisted across restart.</span></p>
+            </div>
         </section>
 
         <!-- ==================== IMAGE TAB ==================== -->
         <section id="tab-image" class="tab-panel">
             <header class="tab-header">
-                <h1><span class="icon">🖼️</span> Image Detection</h1>
-                <p class="subtitle" data-i18n="image_subtitle" data-i18n="image_subtitle">Tải lên hình ảnh để nhận diện
-                    tất cả các vật thể</p>
+                <h1><span class="icon">📸</span> Image Detection</h1>
+                <p class="subtitle" data-i18n="image_subtitle">Tải lên hình ảnh để nhận diện tất cả các vật thể</p>
             </header>
             <div class="detect-layout">
                 <div class="detect-main">
-                    <div class="card">
+                    <!-- Upload Card -->
+                    <div class="card img-upload-card">
                         <div class="card-title"><span class="icon">📤</span> Upload Image</div>
-                        <div class="upload-area" id="imageUploadArea">
+                        <div class="upload-area img-upload-area" id="imageUploadArea">
                             <input type="file" id="imageInput" accept="image/*" hidden>
                             <div class="upload-content" id="imageUploadContent">
-                                <span class="upload-icon">🖼️</span>
-                                <p>Kéo thả ảnh vào đây hoặc <span class="upload-link">chọn file</span></p>
+                                <div class="upload-icon-wrapper">
+                                    <span class="upload-icon">🖼️</span>
+                                    <div class="upload-icon-ring"></div>
+                                </div>
+                                <p data-i18n="image_drop">Kéo thả ảnh vào đây hoặc <span class="upload-link">chọn file</span></p>
                                 <p class="upload-hint">PNG, JPG, JPEG — Max 50MB</p>
                             </div>
-                            <img id="imagePreview" class="upload-preview" style="display:none">
-                        </div>
-                        <div class="upload-controls">
-                            <div class="form-group" style="flex:1">
-                                <label>🎯 Confidence</label>
-                                <input type="range" id="imageConf" min="5" max="90" step="5" value="25">
-                                <span class="conf-label" id="imageConfLabel">25%</span>
+                            <div id="imagePreviewWrapper" class="img-preview-wrapper" style="display:none">
+                                <img id="imagePreview" class="upload-preview">
+                                <div class="img-file-info" id="imageFileInfo"></div>
+                                <button class="img-clear-btn" id="imageClearBtn" title="Xóa ảnh">✕</button>
                             </div>
-                            <button class="btn btn-primary" id="imageDetectBtn" disabled>🔍 Detect Objects</button>
+                        </div>
+                        <!-- Model select + Display toggles + Confidence -->
+                        <div class="upload-controls img-upload-controls img-controls-grid">
+                            <div class="form-group img-model-group">
+                                <label>🧠 <span data-i18n="image_model_label">Model</span></label>
+                                <div class="select-wrapper"><select id="imageModelSelect">
+                                    <option value="" data-i18n="image_model_default">Mặc định</option>
+                                </select></div>
+                            </div>
+                            <div class="form-group img-conf-group">
+                                <label>🎯 Confidence</label>
+                                <div class="img-conf-slider-wrap">
+                                    <input type="range" id="imageConf" min="5" max="95" step="1" value="25" class="img-conf-range">
+                                    <div class="img-conf-track" id="imageConfTrack"></div>
+                                    <span class="img-conf-bubble" id="imageConfBubble">25%</span>
+                                </div>
+                            </div>
+                            <div class="form-group img-toggle-group">
+                                <label>🎛️ <span data-i18n="image_display_label">Hiển thị</span></label>
+                                <div class="img-toggle-row">
+                                    <label class="img-toggle-chip active" id="toggleMask"><input type="checkbox" checked hidden><span class="img-chip-dot" style="background:#8b5cf6"></span><span data-i18n="image_toggle_mask">Mask</span></label>
+                                    <label class="img-toggle-chip active" id="toggleBoxes"><input type="checkbox" checked hidden><span class="img-chip-dot" style="background:#10b981"></span><span data-i18n="image_toggle_boxes">BBox</span></label>
+                                    <label class="img-toggle-chip active" id="toggleLabels"><input type="checkbox" checked hidden><span class="img-chip-dot" style="background:#f59e0b"></span><span data-i18n="image_toggle_labels">Labels</span></label>
+                                </div>
+                            </div>
+                            <div class="img-action-buttons">
+                                <button class="btn btn-primary img-detect-btn" id="imageDetectBtn" disabled>
+                                    <span class="img-btn-icon">🔍</span>
+                                    <span class="img-btn-text" data-i18n="image_detect_btn">Detect Objects</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
+
+                    <!-- Loading Skeleton -->
+                    <div class="card img-skeleton-card" id="imageSkeletonCard" style="display:none">
+                        <div class="img-skeleton-pulse"></div>
+                        <div class="img-skeleton-text">
+                            <div class="img-skeleton-line w60"></div>
+                            <div class="img-skeleton-line w40"></div>
+                        </div>
+                    </div>
+
                     <!-- Result Image -->
-                    <div class="card" id="imageResultCard" style="display:none">
-                        <div class="card-title"><span class="icon">📸</span> Detection Result</div>
-                        <div class="result-image-container"><img id="imageResult" class="result-image"></div>
+                    <div class="card img-result-card" id="imageResultCard" style="display:none">
+                        <div class="card-title img-result-header">
+                            <span><span class="icon">📸</span> Detection Result</span>
+                            <div class="img-result-actions">
+                                <button class="img-view-toggle" id="imageCompareBtn" title="So sánh trước/sau">
+                                    <span>🔄</span> Compare
+                                </button>
+                                <button class="img-action-btn" id="imageFullscreenBtn" title="Xem toàn màn hình">⛶</button>
+                                <button class="img-action-btn" id="imageDownloadBtn" title="Tải xuống">💾</button>
+                            </div>
+                        </div>
+                        <div class="img-result-container" id="imageResultContainer">
+                            <!-- Single view -->
+                            <div class="img-result-single" id="imageResultSingle">
+                                <img id="imageResult" class="result-image img-result-img">
+                            </div>
+                            <!-- Compare view -->
+                            <div class="img-compare-view" id="imageCompareView" style="display:none">
+                                <div class="img-compare-slider" id="imageCompareSlider">
+                                    <div class="img-compare-before">
+                                        <img id="imageCompareBefore" class="img-compare-img">
+                                        <span class="img-compare-label">Original</span>
+                                    </div>
+                                    <div class="img-compare-after" id="imageCompareAfter">
+                                        <img id="imageCompareAfterImg" class="img-compare-img">
+                                        <span class="img-compare-label">Detected</span>
+                                    </div>
+                                    <div class="img-compare-handle" id="imageCompareHandle">
+                                        <div class="img-compare-handle-line"></div>
+                                        <div class="img-compare-handle-circle">⟷</div>
+                                        <div class="img-compare-handle-line"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
                 <!-- Results Sidebar -->
                 <div class="detect-sidebar">
-                    <div class="card" id="imageStatsCard" style="display:none">
+                    <div class="card img-stats-card" id="imageStatsCard" style="display:none">
                         <div class="card-title"><span class="icon">📊</span> Detection Summary</div>
-                        <div class="summary-total" id="imageTotalCount">0 objects detected</div>
-                        <div id="imageClassList" class="class-list"></div>
+                        <div class="img-total-badge" id="imageTotalCount">
+                            <span class="img-total-number">0</span>
+                            <span class="img-total-label">objects detected</span>
+                        </div>
+                        <div id="imageClassList" class="class-list img-class-list"></div>
+                        <div class="img-detection-meta" id="imageDetectionMeta" style="display:none">
+                            <div class="img-meta-item">
+                                <span class="img-meta-icon">⏱️</span>
+                                <span class="img-meta-text" id="imageDetectionTime">—</span>
+                            </div>
+                            <div class="img-meta-item">
+                                <span class="img-meta-icon">📐</span>
+                                <span class="img-meta-text" id="imageDetectionSize">—</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Fullscreen Overlay -->
+            <div class="img-fullscreen-overlay" id="imageFullscreenOverlay">
+                <button class="img-fullscreen-close" id="imageFullscreenClose">✕</button>
+                <img id="imageFullscreenImg" class="img-fullscreen-img">
             </div>
         </section>
 
@@ -445,14 +576,17 @@
             <section class="gallery-section card">
                 <div class="gallery-header">
                     <h2><span class="icon">📸</span> Recent Violations</h2>
-                    <div class="gallery-tabs">
-                        <button class="gallery-tab active" data-tab="all">All</button>
-                        <button class="gallery-tab" data-tab="helmet">🪖 Helmet</button>
-                        <button class="gallery-tab" data-tab="redlight">🔴 Red Light</button>
-                        <button class="gallery-tab" data-tab="sidewalk">🚶 Sidewalk</button>
-                        <button class="gallery-tab" data-tab="wrong_way">⬅️ Wrong Way</button>
-                        <button class="gallery-tab" data-tab="wrong_lane">🛣️ Wrong Lane</button>
-                        <button class="gallery-tab" data-tab="sign">🚫 Sign</button>
+                    <div class="gallery-actions">
+                        <button id="clearSnapshotsBtn" class="btn btn-secondary gallery-clear-btn" type="button">🧹 Xóa tất cả</button>
+                        <div class="gallery-tabs">
+                            <button class="gallery-tab active" data-tab="all">All</button>
+                            <button class="gallery-tab" data-tab="helmet">🪖 Helmet</button>
+                            <button class="gallery-tab" data-tab="redlight">🔴 Red Light</button>
+                            <button class="gallery-tab" data-tab="sidewalk">🚶 Sidewalk</button>
+                            <button class="gallery-tab" data-tab="wrong_way">⬅️ Wrong Way</button>
+                            <button class="gallery-tab" data-tab="wrong_lane">🛣️ Wrong Lane</button>
+                            <button class="gallery-tab" data-tab="sign">🚫 Sign</button>
+                        </div>
                     </div>
                 </div>
                 <div id="snapshotsGallery" class="gallery-grid">
@@ -574,12 +708,12 @@
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>Họ và tên</th>
-                                <th>Số CCCD</th>
-                                <th>Số điện thoại</th>
-                                <th>Vi phạm / Thanh toán</th>
-                                <th>Khiếu nại / Thông báo</th>
-                                <th>Hành động</th>
+                                <th data-i18n="manage_th_name">Họ và tên</th>
+                                <th data-i18n="manage_th_cccd">Số CCCD</th>
+                                <th data-i18n="manage_th_phone">Số điện thoại</th>
+                                <th data-i18n="manage_th_violations">Vi phạm / Thanh toán</th>
+                                <th data-i18n="manage_th_complaints">Khiếu nại / Thông báo</th>
+                                <th data-i18n="manage_th_actions">Hành động</th>
                             </tr>
                         </thead>
                         <tbody id="adminDataTableBody">
@@ -687,7 +821,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
 
     <script src="/static/firebase-config.js"></script>
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=7"></script>
 </body>
 
 </html>
+

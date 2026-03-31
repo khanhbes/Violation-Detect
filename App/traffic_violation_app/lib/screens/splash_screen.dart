@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
+import 'package:traffic_violation_app/services/push_notification_service.dart';
+import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -194,26 +196,60 @@ class _SplashScreenState extends State<SplashScreen>
     Timer(const Duration(milliseconds: 1800), () async {
       if (!mounted) return;
 
-      try {
-        // Auto-discover server IP from Firebase config
-        final ds = await FirebaseFirestore.instance.collection('server').doc('config').get();
-        if (ds.exists && ds.data() != null) {
-          final ip = ds.data()!['ip'] as String?;
-          if (ip != null && ip.isNotEmpty) {
-            ApiService().setServerAddress(ip);
-            debugPrint('✅ Auto-discovered Server IP from Firebase: $ip');
-          }
-        }
-      } catch (e) {
-        debugPrint('⚠️ Failed to auto-discover Server IP: $e');
-      }
-
       final auth = AuthService();
+
+      // Only read server/config when user is already authenticated
+      // (Firestore rules require auth for server/config)
       if (auth.isLoggedIn) {
+        try {
+          // Auto-discover server IP from Firebase config
+          final ds = await FirebaseFirestore.instance
+              .collection('server')
+              .doc('config')
+              .get();
+          if (ds.exists && ds.data() != null) {
+            final config = ds.data()!;
+            final ip = config['ip'] as String?;
+            final rawPort = config['port'];
+            final port = rawPort is num
+                ? rawPort.toInt()
+                : int.tryParse(rawPort?.toString() ?? '') ??
+                    ApiService.serverPort;
+            if (ip != null && ip.isNotEmpty) {
+              final reachable =
+                  await ApiService().pingServerAddress(ip, port: port);
+              if (reachable) {
+                ApiService().setServerAddress(ip, port: port);
+                debugPrint(
+                    '✅ Auto-discovered Server IP from Firebase: $ip:$port');
+              } else {
+                debugPrint(
+                  '⚠️ Ignored auto-discovered unreachable server: $ip:$port',
+                );
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Failed to auto-discover Server IP: $e');
+        }
+
+        // Log startup diagnostics
+        debugPrint(
+          '🚀 Startup: uid=${auth.currentUser?.uid}, '
+          'serverIp=${ApiService.serverIp}:${ApiService.serverPort}, '
+          'dataMode=${FirestoreService().dataMode}',
+        );
+
         // Load user profile & settings from Firestore before going to home
         await _settings.loadFromFirestore(auth.currentUser!.uid);
+        await PushNotificationService().resyncToken();
+        final wsReady = await ApiService().reconnectWithNewUserAndWait();
+        debugPrint('🔌 Splash auto reconnect result: wsReady=$wsReady');
         if (mounted) Navigator.pushReplacementNamed(context, '/home');
       } else {
+        debugPrint(
+          '🚀 Startup: no authenticated user, skipping server/config read',
+        );
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
       }
     });
@@ -234,11 +270,16 @@ class _SplashScreenState extends State<SplashScreen>
   String get _loadingText {
     final vi = _settings.isVietnamese;
     switch (_loadingStep) {
-      case 0: return vi ? 'Khởi tạo hệ thống...' : 'Initializing system...';
-      case 1: return vi ? 'Đang tải mô hình AI...' : 'Loading AI models...';
-      case 2: return vi ? 'Kết nối server...' : 'Connecting to server...';
-      case 3: return vi ? 'Sắp xong...' : 'Almost ready...';
-      default: return vi ? 'Đang tải...' : 'Loading...';
+      case 0:
+        return vi ? 'Khởi tạo hệ thống...' : 'Initializing system...';
+      case 1:
+        return vi ? 'Đang tải mô hình AI...' : 'Loading AI models...';
+      case 2:
+        return vi ? 'Kết nối server...' : 'Connecting to server...';
+      case 3:
+        return vi ? 'Sắp xong...' : 'Almost ready...';
+      default:
+        return vi ? 'Đang tải...' : 'Loading...';
     }
   }
 
@@ -309,7 +350,7 @@ class _SplashScreenState extends State<SplashScreen>
                       _buildRing(_ring2Scale, 0.18, 160),
                       // Ring 1 (innermost)
                       _buildRing(_ring1Scale, 0.25, 160),
-                      
+
                       // Shimmer border around logo
                       AnimatedBuilder(
                         animation: _shimmerController,
@@ -360,7 +401,8 @@ class _SplashScreenState extends State<SplashScreen>
                                     offset: const Offset(0, 12),
                                   ),
                                   BoxShadow(
-                                    color: const Color(0xFFFF6F00).withValues(alpha: 0.2),
+                                    color: const Color(0xFFFF6F00)
+                                        .withValues(alpha: 0.2),
                                     blurRadius: 40,
                                     spreadRadius: 5,
                                   ),
@@ -483,7 +525,8 @@ class _SplashScreenState extends State<SplashScreen>
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.white.withValues(alpha: 0.5),
+                                          color: Colors.white
+                                              .withValues(alpha: 0.5),
                                           blurRadius: 8,
                                         ),
                                       ],
@@ -578,13 +621,14 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 
-  Widget _buildRing(Animation<double> scaleAnim, double maxOpacity, double size) {
+  Widget _buildRing(
+      Animation<double> scaleAnim, double maxOpacity, double size) {
     return AnimatedBuilder(
       animation: _ringController,
       builder: (context, child) {
         final scale = scaleAnim.value;
-        final normalized = (scale - 1.0) / (scaleAnim.status == AnimationStatus.forward 
-            ? 1.6 : 0.8);
+        final normalized = (scale - 1.0) /
+            (scaleAnim.status == AnimationStatus.forward ? 1.6 : 0.8);
         final opacity = (maxOpacity * (1.0 - normalized.clamp(0.0, 1.0)));
         return Transform.scale(
           scale: scale,
@@ -633,7 +677,8 @@ class _ParticlePainter extends CustomPainter {
     for (final p in particles) {
       final prog = ((progress + p.delay) % 1.0);
       final y = size.height * (1.0 - prog * p.speed * 3).clamp(0.0, 1.0);
-      final x = size.width * p.x + math.sin(prog * math.pi * 4 + p.delay * 10) * 20;
+      final x =
+          size.width * p.x + math.sin(prog * math.pi * 4 + p.delay * 10) * 20;
       final fade = (math.sin(prog * math.pi) * p.opacity).clamp(0.0, 1.0);
 
       final paint = Paint()

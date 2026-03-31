@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/models/notification.dart';
 import 'package:traffic_violation_app/models/violation.dart';
+import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/update_service.dart';
@@ -16,6 +18,7 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  final ApiService _api = ApiService();
   final AppSettings _settings = AppSettings();
 
   List<AppNotification> _notifications = [];
@@ -24,60 +27,185 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   AppNotification? _updateAvailableNotification;
   AppNotification? _updateDoneNotification;
   final Set<String> _dismissedLocalNotificationIds = <String>{};
+  final Set<String> _deletingNotificationIds = <String>{};
 
   bool _isLoading = true;
+  bool _isMarkingAllRead = false;
+  bool _violationFallbackLoading = false;
+  Timer? _loadingGuardTimer;
   StreamSubscription? _notifSub;
   StreamSubscription? _violationSub;
+  String? _boundUid;
 
   @override
   void initState() {
     super.initState();
-    _loadNotifications();
-    _listenViolationBasedNotifications();
-    _loadDismissedLocalNotificationIds();
-    _loadUpdateNotifications();
+    _settings.addListener(_onSettingsChanged);
+    _bindUserStreams(force: true);
   }
 
-  void _loadNotifications() {
-    final uid = _settings.uid;
+  void _onSettingsChanged() {
+    _bindUserStreams();
+  }
+
+  String? _resolveUid() {
+    final settingsUid = _settings.uid?.trim();
+    if (settingsUid != null && settingsUid.isNotEmpty) return settingsUid;
+    final authUid = fb.FirebaseAuth.instance.currentUser?.uid.trim();
+    if (authUid == null || authUid.isEmpty) return null;
+    return authUid;
+  }
+
+  void _bindUserStreams({bool force = false}) {
+    final uid = _resolveUid();
     if (uid == null) {
+      _boundUid = null;
+      _notifSub?.cancel();
+      _notifSub = null;
+      _violationSub?.cancel();
+      _violationSub = null;
+      _dismissedLocalNotificationIds.clear();
+      _deletingNotificationIds.clear();
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _notifications = <AppNotification>[];
+          _firestoreNotifications = <AppNotification>[];
+          _derivedNotifications = <AppNotification>[];
+          _updateAvailableNotification = null;
+          _updateDoneNotification = null;
+        });
       }
+      _settings.setNotificationCount(0);
       return;
     }
 
-    _notifSub = FirestoreService().notificationsStream(uid).listen((notifs) {
-      if (!mounted) return;
+    if (!force &&
+        _boundUid == uid &&
+        _notifSub != null &&
+        _violationSub != null) {
+      return;
+    }
+    if (_boundUid != uid) {
+      _dismissedLocalNotificationIds.clear();
+      _deletingNotificationIds.clear();
+      _notifications = <AppNotification>[];
+      _firestoreNotifications = <AppNotification>[];
+      _derivedNotifications = <AppNotification>[];
+      _updateAvailableNotification = null;
+      _updateDoneNotification = null;
+    }
+    _boundUid = uid;
+    _notifSub?.cancel();
+    _violationSub?.cancel();
+    _loadingGuardTimer?.cancel();
+    if (mounted) {
+      setState(() => _isLoading = true);
+    } else {
+      _isLoading = true;
+    }
+    _startLoadingGuard(uid);
+    _loadNotifications(uid);
+    _listenViolationBasedNotifications(uid);
+    unawaited(_loadDismissedLocalNotificationIds(uid));
+    unawaited(_loadUpdateNotifications(uid));
+  }
 
-      _firestoreNotifications = notifs;
-      _isLoading = false;
-      _rebuildMergedNotifications();
-
-      final unreadCount =
-          _firestoreNotifications.where((n) => !n.isRead).length;
-      _settings.setNotificationCount(unreadCount);
+  void _startLoadingGuard(String uid) {
+    _loadingGuardTimer?.cancel();
+    _loadingGuardTimer = Timer(const Duration(seconds: 7), () async {
+      if (!mounted || _boundUid != uid || !_isLoading) return;
+      debugPrint('⏱️ Notifications loading guard fired for uid=$uid');
+      await _loadNotificationsOneShotFallback(uid);
+      await _loadViolationFallback(uid, reason: 'loading_guard_timeout');
+      if (!mounted || _boundUid != uid) return;
+      setState(() => _isLoading = false);
     });
   }
 
-  void _listenViolationBasedNotifications() {
-    final uid = _settings.uid;
-    if (uid == null) return;
-
-    _violationSub =
-        FirestoreService().violationsStream(userId: uid).listen((violations) {
-      if (!mounted) return;
-      _derivedNotifications = _buildDerivedNotifications(violations);
-      _rebuildMergedNotifications();
-    });
+  Future<void> _loadNotificationsOneShotFallback(String uid) async {
+    try {
+      final oneShot = await FirestoreService().getNotificationsOnce(uid);
+      if (!mounted || _boundUid != uid) return;
+      if (oneShot.isNotEmpty) {
+        _firestoreNotifications = oneShot;
+        _rebuildMergedNotifications();
+        final unread = oneShot.where((n) => !n.isRead).length;
+        _settings.setNotificationCount(unread);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Notifications one-shot fallback failed: $e');
+    }
   }
 
-  Future<void> _loadDismissedLocalNotificationIds() async {
-    final uid = _settings.uid;
+  Future<void> _retryLoad() async {
+    final uid = _resolveUid();
     if (uid == null) return;
+    _bindUserStreams(force: true);
+  }
 
+  void _loadNotifications(String uid) {
+    _notifSub = FirestoreService().notificationsStream(uid).listen(
+      (notifs) {
+        if (!mounted) return;
+
+        debugPrint(
+            '📱 NotificationsScreen firestore_notifications uid=$uid count=${notifs.length}');
+        _firestoreNotifications = notifs;
+        _isLoading = false;
+        _rebuildMergedNotifications();
+
+        final unreadCount =
+            _firestoreNotifications.where((n) => !n.isRead).length;
+        _settings.setNotificationCount(unreadCount);
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Notifications stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+        if (!mounted) return;
+        _firestoreNotifications = <AppNotification>[];
+        _isLoading = false;
+        _rebuildMergedNotifications();
+        _settings.setNotificationCount(0);
+        if (isDenied) {
+          unawaited(_loadNotificationsOneShotFallback(uid));
+        }
+      },
+    );
+  }
+
+  void _listenViolationBasedNotifications(String uid) {
+    _violationSub = FirestoreService().violationsStream(userId: uid).listen(
+      (violations) {
+        if (!mounted) return;
+        debugPrint(
+            '📱 NotificationsScreen firestore_violations uid=$uid count=${violations.length}');
+        _derivedNotifications = _buildDerivedNotifications(violations, uid);
+        _isLoading = false;
+        _rebuildMergedNotifications();
+        if (violations.isEmpty) {
+          unawaited(_loadViolationFallback(uid, reason: 'firestore_empty'));
+        }
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Derived notifications stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+        if (!mounted) return;
+        _derivedNotifications = <AppNotification>[];
+        _isLoading = false;
+        _rebuildMergedNotifications();
+        unawaited(_loadViolationFallback(
+            uid, reason: isDenied ? 'permission_denied' : 'firestore_error'));
+      },
+    );
+  }
+
+  Future<void> _loadDismissedLocalNotificationIds(String uid) async {
     try {
       final settings = await FirestoreService().getUserSettings(uid);
+      if (_boundUid != uid) return;
       final rawIds = settings?['dismissedLocalNotificationIds'];
       if (rawIds is List) {
         _dismissedLocalNotificationIds
@@ -90,65 +218,89 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  Future<void> _persistDismissedLocalNotificationIds() async {
-    final uid = _settings.uid;
-    if (uid == null) return;
+  Future<void> _persistDismissedLocalNotificationIds([String? uid]) async {
+    final resolvedUid = uid ?? _resolveUid();
+    if (resolvedUid == null) return;
 
     try {
-      final settings = await FirestoreService().getUserSettings(uid) ?? {};
+      final settings =
+          await FirestoreService().getUserSettings(resolvedUid) ?? {};
       settings['dismissedLocalNotificationIds'] =
           _dismissedLocalNotificationIds.toList();
-      await FirestoreService().saveUserSettings(uid, settings);
+      await FirestoreService().saveUserSettings(resolvedUid, settings);
     } catch (_) {
       // Ignore persistence failure for local dismiss state.
     }
   }
 
-  Future<void> _loadUpdateNotifications() async {
+  Future<void> _loadUpdateNotifications(String uid) async {
     try {
       await UpdateService().init();
+      if (_boundUid != uid) return;
 
       final currentVersion = UpdateService().currentVersion;
       final currentBuild = UpdateService().currentBuildNumber.toString();
-      final uid = _settings.uid;
-
-      if (uid != null) {
-        final settings = await FirestoreService().getUserSettings(uid) ?? {};
-        final lastVersion = settings['lastOpenedAppVersion']?.toString() ?? '';
-        final lastBuild = settings['lastOpenedAppBuild']?.toString() ?? '';
-        final isFirstOpen = lastVersion.isEmpty && lastBuild.isEmpty;
-
-        if (!isFirstOpen &&
-            (lastVersion != currentVersion || lastBuild != currentBuild)) {
-          final previousVersion = lastVersion.isEmpty ? '?' : lastVersion;
-          _updateDoneNotification = AppNotification(
-            id: 'local_updated_${currentVersion}_$currentBuild',
-            userId: uid,
-            title: '🎉 Ứng dụng đã cập nhật',
-            titleEn: '🎉 App updated',
-            subtitle: 'Đã cập nhật từ v$previousVersion lên v$currentVersion',
-            subtitleEn: 'Updated from v$previousVersion to v$currentVersion',
-            detail:
-                'Ứng dụng đã được cập nhật thành công lên phiên bản v$currentVersion (build $currentBuild).',
-            detailEn:
-                'The app has been updated successfully to version v$currentVersion (build $currentBuild).',
-            type: 'update_done',
-            timestamp: DateTime.now(),
-            isRead: true,
+      final settings = await FirestoreService().getUserSettings(uid) ?? {};
+      if (_boundUid != uid) return;
+      final keepSuffix = '_${currentVersion}_$currentBuild';
+      final dismissedRaw = settings['dismissedLocalNotificationIds'];
+      if (dismissedRaw is List) {
+        final cleaned = dismissedRaw
+            .map((e) => e.toString())
+            .where((id) {
+              final isUpdateLocal = id.startsWith('local_update_') ||
+                  id.startsWith('local_updated_');
+              if (!isUpdateLocal) return true;
+              return id.endsWith(keepSuffix);
+            })
+            .toSet()
+            .toList();
+        if (cleaned.length != dismissedRaw.length) {
+          settings['dismissedLocalNotificationIds'] = cleaned;
+          _dismissedLocalNotificationIds
+            ..clear()
+            ..addAll(cleaned);
+          debugPrint(
+            '🧹 Notifications cleanup: removed stale local update cache keys '
+            '(before=${dismissedRaw.length}, after=${cleaned.length})',
           );
-        } else {
-          _updateDoneNotification = null;
         }
-
-        settings['lastOpenedAppVersion'] = currentVersion;
-        settings['lastOpenedAppBuild'] = currentBuild;
-        await FirestoreService().saveUserSettings(uid, settings);
       }
+
+      final lastVersion = settings['lastOpenedAppVersion']?.toString() ?? '';
+      final lastBuild = settings['lastOpenedAppBuild']?.toString() ?? '';
+      final isFirstOpen = lastVersion.isEmpty && lastBuild.isEmpty;
+
+      if (!isFirstOpen &&
+          (lastVersion != currentVersion || lastBuild != currentBuild)) {
+        final previousVersion = lastVersion.isEmpty ? '?' : lastVersion;
+        _updateDoneNotification = AppNotification(
+          id: 'local_updated_${currentVersion}_$currentBuild',
+          userId: uid,
+          title: '🎉 Ứng dụng đã cập nhật',
+          titleEn: '🎉 App updated',
+          subtitle: 'Đã cập nhật từ v$previousVersion lên v$currentVersion',
+          subtitleEn: 'Updated from v$previousVersion to v$currentVersion',
+          detail:
+              'Ứng dụng đã được cập nhật thành công lên phiên bản v$currentVersion (build $currentBuild).',
+          detailEn:
+              'The app has been updated successfully to version v$currentVersion (build $currentBuild).',
+          type: 'update_done',
+          timestamp: DateTime.now(),
+          isRead: true,
+        );
+      } else {
+        _updateDoneNotification = null;
+      }
+
+      settings['lastOpenedAppVersion'] = currentVersion;
+      settings['lastOpenedAppBuild'] = currentBuild;
+      await FirestoreService().saveUserSettings(uid, settings);
 
       _rebuildMergedNotifications();
 
       final info = await UpdateService().checkForUpdate();
-      if (!mounted) return;
+      if (!mounted || _boundUid != uid) return;
 
       if (info == null) {
         _updateAvailableNotification = null;
@@ -162,7 +314,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
       _updateAvailableNotification = AppNotification(
         id: 'local_update_${version}_$build',
-        userId: _settings.uid ?? '',
+        userId: uid,
         title: '📲 Cập nhật ứng dụng',
         titleEn: '📲 App update available',
         subtitle: 'Phiên bản $version đã sẵn sàng',
@@ -183,11 +335,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  List<AppNotification> _buildDerivedNotifications(List<Violation> violations) {
+  List<AppNotification> _buildDerivedNotifications(
+    List<Violation> violations,
+    String uid,
+  ) {
     final now = DateTime.now();
     final result = <AppNotification>[];
 
     for (final v in violations) {
+      result.add(
+        AppNotification(
+          id: 'local_violation_${v.id}',
+          userId: uid,
+          title: '🚨 Vi phạm giao thông',
+          titleEn: '🚨 Traffic violation',
+          subtitle: '${v.violationType} • ${v.licensePlate}',
+          subtitleEn: '${v.violationType} • ${v.licensePlate}',
+          detail:
+              'Phát hiện lỗi "${v.violationType}" tại ${DateFormat('dd/MM/yyyy HH:mm').format(v.timestamp)}. Mức phạt dự kiến ${_money(v.fineAmount)}.',
+          detailEn:
+              'Detected "${v.violationType}" at ${DateFormat('dd/MM/yyyy HH:mm').format(v.timestamp)}. Estimated fine ${_money(v.fineAmount)}.',
+          type: 'violation',
+          violationId: v.id,
+          timestamp: v.timestamp,
+          isRead: true,
+        ),
+      );
+
       if (v.isPending) {
         final dueDate =
             v.paymentDueDate ?? v.timestamp.add(const Duration(days: 7));
@@ -197,7 +371,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         result.add(
           AppNotification(
             id: 'local_due_${v.id}',
-            userId: _settings.uid ?? '',
+            userId: uid,
             title: '⏳ Hạn đóng phạt',
             titleEn: '⏳ Fine payment deadline',
             subtitle: isOverdue
@@ -226,7 +400,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         result.add(
           AppNotification(
             id: 'local_paid_${v.id}',
-            userId: _settings.uid ?? '',
+            userId: uid,
             title: '✅ Đã đóng phạt',
             titleEn: '✅ Fine paid',
             subtitle: '${v.violationType} đã được thanh toán',
@@ -245,6 +419,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     return result;
+  }
+
+  List<Violation> _mergeViolationsById(
+    List<Violation> primary,
+    List<Violation> secondary,
+  ) {
+    final byId = <String, Violation>{};
+
+    void addList(List<Violation> source) {
+      for (final v in source) {
+        final key = v.id.trim();
+        if (key.isEmpty) continue;
+        byId[key] = v;
+      }
+    }
+
+    addList(secondary);
+    addList(primary);
+
+    final merged = byId.values.toList()
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return merged;
+  }
+
+  Future<void> _loadViolationFallback(
+    String uid, {
+    required String reason,
+  }) async {
+    if (_violationFallbackLoading) return;
+    _violationFallbackLoading = true;
+    try {
+      final apiList = await _api.fetchViolations();
+      if (!mounted || _boundUid != uid) return;
+      final mergedViolations =
+          _mergeViolationsById(apiList, const <Violation>[]);
+      debugPrint(
+        '📱 NotificationsScreen api_fallback reason=$reason uid=$uid api=${apiList.length}',
+      );
+      _derivedNotifications = _buildDerivedNotifications(mergedViolations, uid);
+      _rebuildMergedNotifications();
+    } catch (e) {
+      debugPrint('❌ NotificationsScreen fallback failed ($reason): $e');
+    } finally {
+      _violationFallbackLoading = false;
+    }
   }
 
   String _money(double value) {
@@ -304,6 +523,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (t == 'violation' || t == 'danger' || t == 'warning') {
       return 'violation';
     }
+    if (t == 'complaint_rejected' ||
+        t == 'rejected_complaint' ||
+        t == 'appeal_rejected' ||
+        t == 'rejected') {
+      return 'complaint_rejected';
+    }
+    if (t == 'complaint_success' ||
+        t == 'complaint_approved' ||
+        t == 'appeal_approved') {
+      return 'complaint_success';
+    }
     if (t == 'paid' || t == 'payment_paid' || t == 'success') {
       return 'payment_paid';
     }
@@ -332,6 +562,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void dispose() {
     _notifSub?.cancel();
     _violationSub?.cancel();
+    _loadingGuardTimer?.cancel();
+    _settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
@@ -339,6 +571,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     switch (_normalizeType(type)) {
       case 'violation':
         return Colors.deepOrange;
+      case 'complaint_rejected':
+        return AppTheme.dangerColor;
+      case 'complaint_success':
+        return AppTheme.successColor;
       case 'payment_paid':
         return Colors.green;
       case 'payment_due':
@@ -356,6 +592,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     switch (_normalizeType(type)) {
       case 'violation':
         return Icons.warning_amber_rounded;
+      case 'complaint_rejected':
+        return Icons.gpp_bad_rounded;
+      case 'complaint_success':
+        return Icons.task_alt_rounded;
       case 'payment_paid':
         return Icons.check_circle_outline_rounded;
       case 'payment_due':
@@ -404,11 +644,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         elevation: 0,
         scrolledUnderElevation: 1,
         actions: [
-          if (_firestoreNotifications.isNotEmpty)
+          if (_notifications.isNotEmpty)
             TextButton.icon(
-              onPressed: _clearAll,
-              icon: const Icon(Icons.checklist_rounded,
-                  color: AppTheme.primaryColor, size: 20),
+              onPressed: _isMarkingAllRead ? null : _clearAll,
+              icon: _isMarkingAllRead
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: AppTheme.primaryColor,
+                      ),
+                    )
+                  : const Icon(Icons.checklist_rounded,
+                      color: AppTheme.primaryColor, size: 20),
               label: Text(
                 s.tr('Đã đọc tất cả', 'Mark all read'),
                 style: const TextStyle(
@@ -450,6 +699,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           color: textSecondary.withOpacity(0.6),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _retryLoad,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: Text(s.tr('Thử lại', 'Retry')),
+                      ),
                     ],
                   ),
                 )
@@ -458,8 +713,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   itemCount: _notifications.length,
                   itemBuilder: (context, index) {
                     final item = _notifications[index];
-                    return _buildNotifCard(item, index, isDark, cardBg,
-                        textPrimary, textSecondary);
+                    return KeyedSubtree(
+                      key: ValueKey<String>(item.id),
+                      child: _buildNotifCard(item, index, isDark, cardBg,
+                          textPrimary, textSecondary),
+                    );
                   },
                 ),
     );
@@ -473,6 +731,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final timeStr = _formatTime(item.timestamp);
     final color = _getIconColor(item.type);
     final icon = _getIconData(item.type);
+    final isDeleting = _deletingNotificationIds.contains(item.id);
 
     return GestureDetector(
       onTap: () => _openNotificationDetail(
@@ -524,6 +783,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         Expanded(
                           child: Text(
                             title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontWeight: item.isRead
                                   ? FontWeight.w500
@@ -533,13 +794,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => _deleteNotification(item),
-                          icon: Icon(Icons.delete_outline_rounded,
-                              size: 18, color: textSecondary),
-                          splashRadius: 18,
-                          tooltip: s.tr('Xóa thông báo', 'Delete notification'),
-                        ),
+                        isDeleting
+                            ? Padding(
+                                padding:
+                                    const EdgeInsets.only(right: 12, left: 4),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: textSecondary,
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                onPressed: () => _deleteNotification(item),
+                                icon: Icon(Icons.delete_outline_rounded,
+                                    size: 18, color: textSecondary),
+                                splashRadius: 18,
+                                tooltip: s.tr(
+                                    'Xóa thông báo', 'Delete notification'),
+                              ),
                         if (!item.isRead)
                           Container(
                             width: 8,
@@ -552,8 +827,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: TextStyle(fontSize: 12, color: textSecondary)),
+                    Text(
+                      subtitle,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: textSecondary),
+                    ),
                     const SizedBox(height: 6),
                     Text(
                       timeStr,
@@ -580,7 +859,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     String timeStr,
   ) async {
     if (!item.isRead && !_isLocalNotification(item)) {
-      await FirestoreService().markNotificationRead(item.id);
+      _markSingleNotificationRead(item.id);
+      unawaited(FirestoreService().markNotificationRead(item.id));
+    }
+
+    if (_normalizeType(item.type) == 'update') {
+      await _triggerAutoUpdateFromNotification();
+      return;
     }
 
     Violation? violation;
@@ -602,29 +887,252 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Future<void> _deleteNotification(AppNotification item) async {
-    if (_isLocalNotification(item)) {
-      _dismissedLocalNotificationIds.add(item.id);
-      await _persistDismissedLocalNotificationIds();
-      _rebuildMergedNotifications();
-    } else {
-      await FirestoreService().deleteNotification(item.id);
-    }
-
+  Future<void> _triggerAutoUpdateFromNotification() async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _settings.tr('Đã xóa thông báo', 'Notification deleted'),
+
+    final s = _settings;
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    bool loadingShown = false;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                color: AppTheme.primaryColor,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                s.tr(
+                  'Đang kiểm tra bản cập nhật...',
+                  'Checking for updates...',
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+    loadingShown = true;
+
+    Map<String, dynamic>? updateInfo;
+    try {
+      updateInfo = await UpdateService().checkForUpdate();
+    } catch (_) {
+      updateInfo = null;
+    }
+
+    if (loadingShown) {
+      try {
+        rootNavigator.pop();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+
+    if (updateInfo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            s.tr(
+              'Hiện chưa có bản cập nhật mới.',
+              'No new update is available right now.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    await UpdateService.showUpdateDialog(
+      context,
+      updateInfo: updateInfo,
+      autoStart: true,
+    );
   }
 
-  void _clearAll() {
-    final uid = _settings.uid;
-    if (uid != null) {
-      FirestoreService().markAllNotificationsRead(uid);
+  Future<void> _deleteNotification(AppNotification item) async {
+    if (_deletingNotificationIds.contains(item.id)) return;
+
+    final previousMerged = List<AppNotification>.from(_notifications);
+    final previousFirestore =
+        List<AppNotification>.from(_firestoreNotifications);
+    final previousDismissed = Set<String>.from(_dismissedLocalNotificationIds);
+
+    if (mounted) {
+      setState(() {
+        _deletingNotificationIds.add(item.id);
+        _notifications.removeWhere((n) => n.id == item.id);
+        _firestoreNotifications.removeWhere((n) => n.id == item.id);
+      });
+    }
+    _settings.setNotificationCount(
+      _firestoreNotifications.where((n) => !n.isRead).length,
+    );
+
+    try {
+      if (_isLocalNotification(item)) {
+        _dismissedLocalNotificationIds.add(item.id);
+        await _persistDismissedLocalNotificationIds();
+      } else {
+        final companions = _companionLocalNotificationIds(item);
+        if (companions.isNotEmpty) {
+          _dismissedLocalNotificationIds.addAll(companions);
+          await _persistDismissedLocalNotificationIds();
+        }
+        await FirestoreService()
+            .deleteNotification(item.id, throwOnError: true);
+      }
+
+      _rebuildMergedNotifications();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _settings.tr('Đã xóa thông báo', 'Notification deleted'),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _notifications = previousMerged;
+        _firestoreNotifications = previousFirestore;
+        _dismissedLocalNotificationIds
+          ..clear()
+          ..addAll(previousDismissed);
+      });
+      await _persistDismissedLocalNotificationIds();
+      if (!mounted) return;
+      _settings.setNotificationCount(
+        _firestoreNotifications.where((n) => !n.isRead).length,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _settings.tr('Xóa thất bại, vui lòng thử lại',
+                'Delete failed, please try again'),
+          ),
+          backgroundColor: AppTheme.dangerColor,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingNotificationIds.remove(item.id);
+        });
+      }
+    }
+  }
+
+  Future<void> _clearAll() async {
+    if (_isMarkingAllRead) return;
+    final uid = _resolveUid();
+    if (uid == null) return;
+
+    final hasUnread = _firestoreNotifications.any((n) => !n.isRead);
+    if (!hasUnread) return;
+
+    final previousMerged = List<AppNotification>.from(_notifications);
+    final previousFirestore =
+        List<AppNotification>.from(_firestoreNotifications);
+
+    if (mounted) {
+      setState(() {
+        _isMarkingAllRead = true;
+        _notifications = _notifications
+            .map((n) => _copyNotification(n, isRead: true))
+            .toList();
+        _firestoreNotifications = _firestoreNotifications
+            .map((n) => _copyNotification(n, isRead: true))
+            .toList();
+      });
+    }
+    _settings.setNotificationCount(0);
+
+    try {
+      await FirestoreService()
+          .markAllNotificationsRead(uid, throwOnError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _notifications = previousMerged;
+        _firestoreNotifications = previousFirestore;
+      });
+      _settings.setNotificationCount(
+        _firestoreNotifications.where((n) => !n.isRead).length,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _settings.tr('Không thể đánh dấu đã đọc tất cả',
+                'Unable to mark all as read'),
+          ),
+          backgroundColor: AppTheme.dangerColor,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMarkingAllRead = false);
+      }
+    }
+  }
+
+  AppNotification _copyNotification(
+    AppNotification source, {
+    bool? isRead,
+  }) {
+    return AppNotification(
+      id: source.id,
+      userId: source.userId,
+      title: source.title,
+      titleEn: source.titleEn,
+      subtitle: source.subtitle,
+      subtitleEn: source.subtitleEn,
+      detail: source.detail,
+      detailEn: source.detailEn,
+      type: source.type,
+      violationId: source.violationId,
+      timestamp: source.timestamp,
+      isRead: isRead ?? source.isRead,
+    );
+  }
+
+  void _markSingleNotificationRead(String id) {
+    if (mounted) {
+      setState(() {
+        _notifications = _notifications
+            .map((n) => n.id == id ? _copyNotification(n, isRead: true) : n)
+            .toList();
+        _firestoreNotifications = _firestoreNotifications
+            .map((n) => n.id == id ? _copyNotification(n, isRead: true) : n)
+            .toList();
+      });
+    }
+    _settings.setNotificationCount(
+      _firestoreNotifications.where((n) => !n.isRead).length,
+    );
+  }
+
+  List<String> _companionLocalNotificationIds(AppNotification item) {
+    final violationId = item.violationId?.trim() ?? '';
+    final normalizedType = _normalizeType(item.type);
+    if (violationId.isEmpty) return const <String>[];
+
+    switch (normalizedType) {
+      case 'payment_due':
+        return <String>['local_due_$violationId'];
+      case 'payment_paid':
+        return <String>['local_paid_$violationId'];
+      default:
+        return const <String>[];
     }
   }
 
@@ -632,6 +1140,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       Color textSecondary, Color color, IconData icon, String timeStr,
       {Violation? violation}) {
     final s = _settings;
+    final normalizedType = _normalizeType(item.type);
     final title = s.isVietnamese ? item.title : item.titleEn;
     final detail = s.isVietnamese ? item.detail : item.detailEn;
     final hasViolation =
@@ -639,6 +1148,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final isPaidFromType = _normalizeType(item.type) == 'payment_paid';
     final isPaidViolation = violation?.isPaid ?? false;
     final isPaid = isPaidFromType || isPaidViolation;
+    final isComplaintPending = violation?.isComplaintPending ?? false;
+    final canReappeal = normalizedType == 'complaint_rejected' &&
+        hasViolation &&
+        !isPaid &&
+        !isComplaintPending;
 
     showModalBottomSheet(
       context: context,
@@ -743,7 +1257,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               child: SizedBox(
                                 height: 48,
                                 child: TextButton(
-                                  onPressed: () => Navigator.pop(ctx),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    if (canReappeal) {
+                                      Navigator.pushNamed(
+                                          context, '/complaint');
+                                    }
+                                  },
                                   style: TextButton.styleFrom(
                                     foregroundColor: textSecondary,
                                     shape: RoundedRectangleBorder(
@@ -751,7 +1271,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    s.tr('Đóng', 'Close'),
+                                    canReappeal
+                                        ? s.tr('Khiếu nại lại', 'Re-appeal')
+                                        : s.tr('Đóng', 'Close'),
                                     style: const TextStyle(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w600),
@@ -767,6 +1289,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                 child: ElevatedButton(
                                   onPressed: () {
                                     Navigator.pop(ctx);
+                                    if (isComplaintPending) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            s.tr(
+                                              'Lỗi này đang chờ phản hồi khiếu nại, tạm thời không thể nộp phạt.',
+                                              'This violation is awaiting complaint response, payment is temporarily disabled.',
+                                            ),
+                                          ),
+                                          backgroundColor:
+                                              AppTheme.warningColor,
+                                        ),
+                                      );
+                                      return;
+                                    }
                                     if (isPaid) {
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
@@ -814,9 +1352,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     elevation: 0,
                                   ),
                                   child: Text(
-                                    isPaid
-                                        ? s.tr('Xem', 'View')
-                                        : s.tr('Nộp phạt', 'Pay fine'),
+                                    isComplaintPending
+                                        ? s.tr(
+                                            'Chờ phản hồi', 'Awaiting response')
+                                        : (isPaid
+                                            ? s.tr('Xem', 'View')
+                                            : s.tr('Nộp phạt', 'Pay fine')),
                                     style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w700,

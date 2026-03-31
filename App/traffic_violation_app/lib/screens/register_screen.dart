@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/push_notification_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -45,7 +48,8 @@ class _RegisterScreenState extends State<RegisterScreen>
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.1),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
+    ).animate(
+        CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
 
     _staggerController = AnimationController(
       vsync: this,
@@ -82,6 +86,39 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
+  Future<void> _refreshServerAddressFromFirestore() async {
+    try {
+      final ds = await FirebaseFirestore.instance
+          .collection('server')
+          .doc('config')
+          .get();
+      final data = ds.data();
+      if (data == null) return;
+
+      final ip = (data['ip'] ?? '').toString().trim();
+      if (ip.isEmpty) return;
+
+      final portRaw = data['port'];
+      final port = portRaw is num ? portRaw.toInt() : ApiService.serverPort;
+      final shouldUpdate =
+          ApiService.serverIp != ip || ApiService.serverPort != port;
+      if (shouldUpdate) {
+        final reachable = await ApiService().pingServerAddress(ip, port: port);
+        if (!reachable) {
+          debugPrint(
+            '⚠️ RegisterScreen skipped server switch (unreachable): $ip:$port',
+          );
+          return;
+        }
+        ApiService().setServerAddress(ip, port: port);
+        debugPrint(
+            '✅ RegisterScreen auto-updated server IP from Firestore: $ip:$port');
+      }
+    } catch (e) {
+      debugPrint('⚠️ RegisterScreen could not auto-refresh server IP: $e');
+    }
+  }
+
   Future<void> _handleRegister() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
@@ -90,11 +127,11 @@ class _RegisterScreenState extends State<RegisterScreen>
       });
 
       try {
+        await _refreshServerAddressFromFirestore();
         final cccd = _cccdController.text.trim();
-        final email = '$cccd@vnetraffic.vn';
 
         final credential = await _auth.register(
-          email: email,
+          idCard: cccd,
           password: _passwordController.text,
           fullName: _fullNameController.text.trim(),
           phone: _phoneController.text.trim(),
@@ -103,7 +140,12 @@ class _RegisterScreenState extends State<RegisterScreen>
         // Load the newly created profile from Firestore
         if (credential.user != null) {
           await _settings.loadFromFirestore(credential.user!.uid);
-          await PushNotificationService().resyncToken();
+          // FCM + WebSocket reconnect run in the background so register
+          // navigation is instant – home screen handles connection state.
+          unawaited(PushNotificationService().resyncToken());
+          unawaited(ApiService().reconnectWithNewUserAndWait().then(
+            (ws) => debugPrint('🔌 Register reconnect result: wsReady=$ws'),
+          ));
         }
 
         if (mounted) {
@@ -111,14 +153,45 @@ class _RegisterScreenState extends State<RegisterScreen>
           Navigator.pushReplacementNamed(context, '/home');
         }
       } catch (e) {
+        final message = _formatRegisterError(e);
         if (mounted) {
           setState(() {
             _isLoading = false;
-            _errorMessage = e.toString();
+            _errorMessage = message;
           });
         }
       }
     }
+  }
+
+  String _formatRegisterError(Object error) {
+    final raw = error.toString().trim();
+    if (raw.isEmpty) {
+      return _settings.tr('Đăng ký thất bại. Vui lòng thử lại',
+          'Registration failed. Please try again');
+    }
+
+    if (raw.contains('cloud_firestore/permission-denied') ||
+        raw.contains('permission-denied')) {
+      return _settings.tr(
+        'Hệ thống chưa cấp quyền tạo hồ sơ người dùng. Vui lòng liên hệ quản trị viên để cập nhật quyền Firestore.',
+        'Permission is missing to create user profile. Please contact administrator to update Firestore rules.',
+      );
+    }
+
+    if (raw.startsWith('Exception: ')) {
+      return raw.substring('Exception: '.length).trim();
+    }
+
+    if (raw.startsWith('[')) {
+      final endBracket = raw.indexOf(']');
+      if (endBracket >= 0 && endBracket + 1 < raw.length) {
+        final cleaned = raw.substring(endBracket + 1).trim();
+        if (cleaned.isNotEmpty) return cleaned;
+      }
+    }
+
+    return raw;
   }
 
   // Password strength check
@@ -168,12 +241,14 @@ class _RegisterScreenState extends State<RegisterScreen>
               FadeTransition(
                 opacity: _fadeAnim,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   child: Row(
                     children: [
                       IconButton(
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                        icon: const Icon(Icons.arrow_back_rounded,
+                            color: Colors.white),
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -198,7 +273,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                       width: double.infinity,
                       decoration: const BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(28)),
                         boxShadow: [
                           BoxShadow(
                             color: Color(0x33000000),
@@ -217,27 +293,38 @@ class _RegisterScreenState extends State<RegisterScreen>
                               // Error message
                               if (_errorMessage != null) ...[
                                 _buildAnimatedWidget(
-                                  0.0, 0.15,
+                                  0.0,
+                                  0.15,
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: AppTheme.dangerColor.withValues(alpha: 0.06),
+                                      color: AppTheme.dangerColor
+                                          .withValues(alpha: 0.06),
                                       borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: AppTheme.dangerColor.withValues(alpha: 0.2)),
+                                      border: Border.all(
+                                          color: AppTheme.dangerColor
+                                              .withValues(alpha: 0.2)),
                                     ),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.error_outline, color: AppTheme.dangerColor, size: 20),
+                                        const Icon(Icons.error_outline,
+                                            color: AppTheme.dangerColor,
+                                            size: 20),
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: Text(
                                             _errorMessage!,
-                                            style: const TextStyle(color: AppTheme.dangerColor, fontSize: 13),
+                                            style: const TextStyle(
+                                                color: AppTheme.dangerColor,
+                                                fontSize: 13),
                                           ),
                                         ),
                                         GestureDetector(
-                                          onTap: () => setState(() => _errorMessage = null),
-                                          child: const Icon(Icons.close, color: AppTheme.dangerColor, size: 18),
+                                          onTap: () => setState(
+                                              () => _errorMessage = null),
+                                          child: const Icon(Icons.close,
+                                              color: AppTheme.dangerColor,
+                                              size: 18),
                                         ),
                                       ],
                                     ),
@@ -247,112 +334,184 @@ class _RegisterScreenState extends State<RegisterScreen>
                               ],
 
                               // Full Name
-                              _buildAnimatedWidget(0.0, 0.2, child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildFieldLabel(_settings.tr('Họ và tên', 'Full name'), true),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _fullNameController,
-                                    textCapitalization: TextCapitalization.words,
-                                    decoration: _buildInputDecoration(
-                                      hint: _settings.tr('Nguyễn Văn A', 'John Doe'),
-                                      icon: Icons.person_outline,
-                                    ),
-                                    validator: (value) {
-                                      if (value == null || value.trim().isEmpty) {
-                                        return _settings.tr('Vui lòng nhập họ tên', 'Please enter your name');
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ],
-                              )),
+                              _buildAnimatedWidget(0.0, 0.2,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildFieldLabel(
+                                          _settings.tr(
+                                              'Họ và tên', 'Full name'),
+                                          true),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _fullNameController,
+                                        textCapitalization:
+                                            TextCapitalization.words,
+                                        decoration: _buildInputDecoration(
+                                          hint: _settings.tr(
+                                              'Nguyễn Văn A', 'John Doe'),
+                                          icon: Icons.person_outline,
+                                        ),
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return _settings.tr(
+                                                'Vui lòng nhập họ tên',
+                                                'Please enter your name');
+                                          }
+                                          return null;
+                                        },
+                                      ),
+                                    ],
+                                  )),
                               const SizedBox(height: 18),
 
                               // CCCD
-                              _buildAnimatedWidget(0.1, 0.3, child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildFieldLabel(_settings.tr('Số căn cước công dân', 'Citizen ID Number'), true),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _cccdController,
-                                    keyboardType: TextInputType.number,
-                                    maxLength: 12,
-                                    style: const TextStyle(letterSpacing: 1),
-                                    decoration: _buildInputDecoration(
-                                      hint: _settings.tr('Nhập 12 số CCCD', 'Enter 12-digit ID'),
-                                      icon: Icons.credit_card_rounded,
-                                    ).copyWith(counterText: ''),
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) return _settings.tr('Vui lòng nhập số CCCD', 'Please enter your ID number');
-                                      if (value.length != 12) return _settings.tr('Số CCCD phải gồm 12 chữ số', 'ID must be 12 digits');
-                                      if (!RegExp(r'^[0-9]{12}$').hasMatch(value)) return _settings.tr('CCCD chỉ bao gồm chữ số', 'ID must contain only digits');
-                                      return null;
-                                    },
-                                  ),
-                                ],
-                              )),
+                              _buildAnimatedWidget(0.1, 0.3,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildFieldLabel(
+                                          _settings.tr('Số căn cước công dân',
+                                              'Citizen ID Number'),
+                                          true),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _cccdController,
+                                        keyboardType: TextInputType.number,
+                                        maxLength: 12,
+                                        style:
+                                            const TextStyle(letterSpacing: 1),
+                                        decoration: _buildInputDecoration(
+                                          hint: _settings.tr('Nhập 12 số CCCD',
+                                              'Enter 12-digit ID'),
+                                          icon: Icons.credit_card_rounded,
+                                        ).copyWith(counterText: ''),
+                                        validator: (value) {
+                                          if (value == null || value.isEmpty)
+                                            return _settings.tr(
+                                                'Vui lòng nhập số CCCD',
+                                                'Please enter your ID number');
+                                          if (value.length != 12)
+                                            return _settings.tr(
+                                                'Số CCCD phải gồm 12 chữ số',
+                                                'ID must be 12 digits');
+                                          if (!RegExp(r'^[0-9]{12}$')
+                                              .hasMatch(value))
+                                            return _settings.tr(
+                                                'CCCD chỉ bao gồm chữ số',
+                                                'ID must contain only digits');
+                                          return null;
+                                        },
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        _settings.tr(
+                                          'Số CCCD này sẽ được dùng làm tên đăng nhập. Email riêng có thể cập nhật sau trong mục Hồ sơ.',
+                                          'This ID number will be used as your login username. You can update your personal email later in Profile.',
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppTheme.textSecondary,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ],
+                                  )),
                               const SizedBox(height: 18),
 
                               // Phone
-                              _buildAnimatedWidget(0.2, 0.4, child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildFieldLabel(_settings.tr('Số điện thoại', 'Phone number'), false),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _phoneController,
-                                    keyboardType: TextInputType.phone,
-                                    decoration: _buildInputDecoration(
-                                      hint: '0901234567',
-                                      icon: Icons.phone_outlined,
-                                    ),
-                                  ),
-                                ],
-                              )),
+                              _buildAnimatedWidget(0.2, 0.4,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildFieldLabel(
+                                          _settings.tr(
+                                              'Số điện thoại', 'Phone number'),
+                                          false),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _phoneController,
+                                        keyboardType: TextInputType.phone,
+                                        decoration: _buildInputDecoration(
+                                          hint: '0901234567',
+                                          icon: Icons.phone_outlined,
+                                        ),
+                                      ),
+                                    ],
+                                  )),
                               const SizedBox(height: 18),
 
                               // Password
-                              _buildAnimatedWidget(0.3, 0.5, child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildFieldLabel(_settings.tr('Mật khẩu', 'Password'), true),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _passwordController,
-                                    obscureText: !_isPasswordVisible,
-                                    onChanged: (v) => setState(() {}),
-                                    decoration: _buildInputDecoration(
-                                      hint: _settings.tr('Tối thiểu 8 ký tự', 'Minimum 8 characters'),
-                                      icon: Icons.lock_outline,
-                                    ).copyWith(
-                                      suffixIcon: IconButton(
-                                        icon: Icon(
-                                          _isPasswordVisible
-                                              ? Icons.visibility_outlined
-                                              : Icons.visibility_off_outlined,
-                                          color: AppTheme.textSecondary,
-                                          size: 20,
+                              _buildAnimatedWidget(0.3, 0.5,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildFieldLabel(
+                                          _settings.tr('Mật khẩu', 'Password'),
+                                          true),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _passwordController,
+                                        obscureText: !_isPasswordVisible,
+                                        onChanged: (v) => setState(() {}),
+                                        decoration: _buildInputDecoration(
+                                          hint: _settings.tr(
+                                              'Tối thiểu 8 ký tự',
+                                              'Minimum 8 characters'),
+                                          icon: Icons.lock_outline,
+                                        ).copyWith(
+                                          suffixIcon: IconButton(
+                                            icon: Icon(
+                                              _isPasswordVisible
+                                                  ? Icons.visibility_outlined
+                                                  : Icons
+                                                      .visibility_off_outlined,
+                                              color: AppTheme.textSecondary,
+                                              size: 20,
+                                            ),
+                                            onPressed: () {
+                                              setState(() =>
+                                                  _isPasswordVisible =
+                                                      !_isPasswordVisible);
+                                            },
+                                          ),
                                         ),
-                                        onPressed: () {
-                                          setState(() => _isPasswordVisible = !_isPasswordVisible);
+                                        validator: (value) {
+                                          if (value == null || value.isEmpty)
+                                            return _settings.tr(
+                                                'Vui lòng nhập mật khẩu',
+                                                'Please enter password');
+                                          if (value.length < 8)
+                                            return _settings.tr(
+                                                'Mật khẩu phải có ít nhất 8 ký tự',
+                                                'Password must be at least 8 characters');
+                                          if (!RegExp(r'[A-Z]').hasMatch(value))
+                                            return _settings.tr(
+                                                'Phải có ít nhất 1 chữ hoa',
+                                                'Must contain at least 1 uppercase letter');
+                                          if (!RegExp(r'[a-z]').hasMatch(value))
+                                            return _settings.tr(
+                                                'Phải có ít nhất 1 chữ thường',
+                                                'Must contain at least 1 lowercase letter');
+                                          if (!RegExp(r'[0-9]').hasMatch(value))
+                                            return _settings.tr(
+                                                'Phải có ít nhất 1 chữ số',
+                                                'Must contain at least 1 digit');
+                                          if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]')
+                                              .hasMatch(value))
+                                            return _settings.tr(
+                                                'Phải có ít nhất 1 ký tự đặc biệt',
+                                                'Must contain at least 1 special character');
+                                          return null;
                                         },
                                       ),
-                                    ),
-                                    validator: (value) {
-                                      if (value == null || value.isEmpty) return _settings.tr('Vui lòng nhập mật khẩu', 'Please enter password');
-                                      if (value.length < 8) return _settings.tr('Mật khẩu phải có ít nhất 8 ký tự', 'Password must be at least 8 characters');
-                                      if (!RegExp(r'[A-Z]').hasMatch(value)) return _settings.tr('Phải có ít nhất 1 chữ hoa', 'Must contain at least 1 uppercase letter');
-                                      if (!RegExp(r'[a-z]').hasMatch(value)) return _settings.tr('Phải có ít nhất 1 chữ thường', 'Must contain at least 1 lowercase letter');
-                                      if (!RegExp(r'[0-9]').hasMatch(value)) return _settings.tr('Phải có ít nhất 1 chữ số', 'Must contain at least 1 digit');
-                                      if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) return _settings.tr('Phải có ít nhất 1 ký tự đặc biệt', 'Must contain at least 1 special character');
-                                      return null;
-                                    },
-                                  ),
-                                ],
-                              )),
+                                    ],
+                                  )),
                               const SizedBox(height: 8),
                               // Password Strength Indicator
                               if (_passwordController.text.isNotEmpty) ...[
@@ -364,101 +523,124 @@ class _RegisterScreenState extends State<RegisterScreen>
                                 const SizedBox(height: 18),
 
                               // Confirm Password
-                              _buildAnimatedWidget(0.4, 0.6, child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildFieldLabel(_settings.tr('Xác nhận mật khẩu', 'Confirm password'), true),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _confirmPasswordController,
-                                    obscureText: !_isConfirmVisible,
-                                    decoration: _buildInputDecoration(
-                                      hint: _settings.tr('Nhập lại mật khẩu', 'Re-enter password'),
-                                      icon: Icons.lock_outline,
-                                    ).copyWith(
-                                      suffixIcon: IconButton(
-                                        icon: Icon(
-                                          _isConfirmVisible
-                                              ? Icons.visibility_outlined
-                                              : Icons.visibility_off_outlined,
-                                          color: AppTheme.textSecondary,
-                                          size: 20,
+                              _buildAnimatedWidget(0.4, 0.6,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildFieldLabel(
+                                          _settings.tr('Xác nhận mật khẩu',
+                                              'Confirm password'),
+                                          true),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _confirmPasswordController,
+                                        obscureText: !_isConfirmVisible,
+                                        decoration: _buildInputDecoration(
+                                          hint: _settings.tr(
+                                              'Nhập lại mật khẩu',
+                                              'Re-enter password'),
+                                          icon: Icons.lock_outline,
+                                        ).copyWith(
+                                          suffixIcon: IconButton(
+                                            icon: Icon(
+                                              _isConfirmVisible
+                                                  ? Icons.visibility_outlined
+                                                  : Icons
+                                                      .visibility_off_outlined,
+                                              color: AppTheme.textSecondary,
+                                              size: 20,
+                                            ),
+                                            onPressed: () {
+                                              setState(() => _isConfirmVisible =
+                                                  !_isConfirmVisible);
+                                            },
+                                          ),
                                         ),
-                                        onPressed: () {
-                                          setState(() => _isConfirmVisible = !_isConfirmVisible);
+                                        validator: (value) {
+                                          if (value !=
+                                              _passwordController.text) {
+                                            return _settings.tr(
+                                                'Mật khẩu không khớp',
+                                                'Passwords do not match');
+                                          }
+                                          return null;
                                         },
                                       ),
-                                    ),
-                                    validator: (value) {
-                                      if (value != _passwordController.text) {
-                                        return _settings.tr('Mật khẩu không khớp', 'Passwords do not match');
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ],
-                              )),
+                                    ],
+                                  )),
                               const SizedBox(height: 28),
 
                               // Register Button
-                              _buildAnimatedWidget(0.5, 0.7, child: Container(
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  gradient: AppTheme.primaryGradient,
-                                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                  boxShadow: AppTheme.redShadow,
-                                ),
-                                child: ElevatedButton(
-                                  onPressed: _isLoading ? null : _handleRegister,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.transparent,
-                                    shadowColor: Colors.transparent,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                              _buildAnimatedWidget(0.5, 0.7,
+                                  child: Container(
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      gradient: AppTheme.primaryGradient,
+                                      borderRadius: BorderRadius.circular(
+                                          AppTheme.radiusM),
+                                      boxShadow: AppTheme.redShadow,
                                     ),
-                                  ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          height: 24,
-                                          width: 24,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2.5,
-                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                          ),
-                                        )
-                                      : Text(
-                                          _settings.tr('Đăng ký', 'Register'),
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                          ),
+                                    child: ElevatedButton(
+                                      onPressed:
+                                          _isLoading ? null : _handleRegister,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.transparent,
+                                        shadowColor: Colors.transparent,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                              AppTheme.radiusM),
                                         ),
-                                ),
-                              )),
+                                      ),
+                                      child: _isLoading
+                                          ? const SizedBox(
+                                              height: 24,
+                                              width: 24,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2.5,
+                                                valueColor:
+                                                    AlwaysStoppedAnimation<
+                                                        Color>(Colors.white),
+                                              ),
+                                            )
+                                          : Text(
+                                              _settings.tr(
+                                                  'Đăng ký', 'Register'),
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                    ),
+                                  )),
                               const SizedBox(height: 20),
 
                               // Already have account
-                              _buildAnimatedWidget(0.6, 0.8, child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    _settings.tr('Đã có tài khoản? ', 'Already have an account? '),
-                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => Navigator.pop(context),
-                                    child: Text(
-                                      _settings.tr('Đăng nhập', 'Sign In'),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.primaryColor,
-                                        fontSize: 14,
+                              _buildAnimatedWidget(0.6, 0.8,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        _settings.tr('Đã có tài khoản? ',
+                                            'Already have an account? '),
+                                        style: const TextStyle(
+                                            color: AppTheme.textSecondary,
+                                            fontSize: 13),
                                       ),
-                                    ),
-                                  ),
-                                ],
-                              )),
+                                      GestureDetector(
+                                        onTap: () => Navigator.pop(context),
+                                        child: Text(
+                                          _settings.tr('Đăng nhập', 'Sign In'),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.primaryColor,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )),
                               const SizedBox(height: 16),
                             ],
                           ),
@@ -476,7 +658,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   // ── Animated field wrapper ─────────────────────────────────────
-  Widget _buildAnimatedWidget(double start, double end, {required Widget child}) {
+  Widget _buildAnimatedWidget(double start, double end,
+      {required Widget child}) {
     final anim = _staggeredFade(start, end);
     return FadeTransition(
       opacity: anim,
@@ -537,10 +720,14 @@ class _RegisterScreenState extends State<RegisterScreen>
       runSpacing: 4,
       children: [
         _buildReqChip(_settings.tr('≥ 8 ký tự', '≥ 8 chars'), pwd.length >= 8),
-        _buildReqChip(_settings.tr('Chữ hoa', 'Uppercase'), RegExp(r'[A-Z]').hasMatch(pwd)),
-        _buildReqChip(_settings.tr('Chữ thường', 'Lowercase'), RegExp(r'[a-z]').hasMatch(pwd)),
-        _buildReqChip(_settings.tr('Chữ số', 'Digit'), RegExp(r'[0-9]').hasMatch(pwd)),
-        _buildReqChip(_settings.tr('Ký tự ĐB', 'Special'), RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(pwd)),
+        _buildReqChip(_settings.tr('Chữ hoa', 'Uppercase'),
+            RegExp(r'[A-Z]').hasMatch(pwd)),
+        _buildReqChip(_settings.tr('Chữ thường', 'Lowercase'),
+            RegExp(r'[a-z]').hasMatch(pwd)),
+        _buildReqChip(
+            _settings.tr('Chữ số', 'Digit'), RegExp(r'[0-9]').hasMatch(pwd)),
+        _buildReqChip(_settings.tr('Ký tự ĐB', 'Special'),
+            RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(pwd)),
       ],
     );
   }
@@ -587,7 +774,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   // ── Helper: Input Decoration ────────────────────────────────────
-  InputDecoration _buildInputDecoration({required String hint, required IconData icon}) {
+  InputDecoration _buildInputDecoration(
+      {required String hint, required IconData icon}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: AppTheme.textHint, fontSize: 14),

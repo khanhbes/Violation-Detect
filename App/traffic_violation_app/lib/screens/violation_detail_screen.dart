@@ -4,6 +4,8 @@ import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
 import 'package:traffic_violation_app/screens/payment_screen.dart';
+import 'package:traffic_violation_app/screens/zoom_image_viewer_screen.dart';
+import 'package:traffic_violation_app/widgets/violation_image.dart';
 
 class ViolationDetailScreen extends StatefulWidget {
   const ViolationDetailScreen({super.key});
@@ -30,7 +32,8 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.12),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
+    ).animate(
+        CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
 
     _animController.forward();
   }
@@ -62,12 +65,15 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                   color: AppTheme.textHint.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.error_outline, size: 36, color: AppTheme.textSecondary),
+                child: const Icon(Icons.error_outline,
+                    size: 36, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 16),
               Text(
-                _settings.tr('Không tìm thấy thông tin vi phạm', 'Violation info not found'),
-                style: const TextStyle(fontSize: 16, color: AppTheme.textSecondary),
+                _settings.tr('Không tìm thấy thông tin vi phạm',
+                    'Violation info not found'),
+                style: const TextStyle(
+                    fontSize: 16, color: AppTheme.textSecondary),
               ),
             ],
           ),
@@ -90,65 +96,80 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
             backgroundColor: AppTheme.primaryColor,
             foregroundColor: Colors.white,
             flexibleSpace: FlexibleSpaceBar(
-              background: Hero(
-                tag: 'violation_image_${violation.id}',
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.network(
-                      violation.imageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.image_not_supported, size: 64, color: Colors.grey),
+              background: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ZoomImageViewerScreen(
+                        imageUrl: violation.imageUrl,
+                        heroTag: 'violation_image_${violation.id}',
                       ),
                     ),
-                    // Gradient overlay
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withOpacity(0.7),
+                  );
+                },
+                child: Hero(
+                  tag: 'violation_image_${violation.id}',
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ViolationImage(
+                        imageUrl: violation.imageUrl,
+                        fit: BoxFit.cover,
+                      ),
+                      // Gradient overlay
+                      Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withOpacity(0.7),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Bottom info
+                      Positioned(
+                        bottom: 16,
+                        left: 16,
+                        right: 16,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildStatusBadge(violation),
+                            const SizedBox(height: 8),
+                            Text(
+                              violation.violationType,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.access_time_rounded,
+                                    color: Colors.white70, size: 14),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    df.format(violation.timestamp),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white70, fontSize: 13),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
-                    ),
-                    // Bottom info
-                    Positioned(
-                      bottom: 16,
-                      left: 16,
-                      right: 16,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildStatusBadge(violation),
-                          const SizedBox(height: 8),
-                          Text(
-                            violation.violationType,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(Icons.access_time_rounded, color: Colors.white70, size: 14),
-                              const SizedBox(width: 4),
-                              Text(
-                                df.format(violation.timestamp),
-                                style: const TextStyle(color: Colors.white70, fontSize: 13),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -175,7 +196,8 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
-                          borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusXL),
                           boxShadow: AppTheme.redShadow,
                         ),
                         child: Row(
@@ -190,14 +212,21 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                         padding: const EdgeInsets.all(6),
                                         decoration: BoxDecoration(
                                           color: Colors.white.withOpacity(0.15),
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
                                         ),
-                                        child: const Icon(Icons.monetization_on_rounded, color: Colors.white, size: 18),
+                                        child: const Icon(
+                                            Icons.monetization_on_rounded,
+                                            color: Colors.white,
+                                            size: 18),
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        _settings.tr('Mức tiền phạt', 'Fine amount'),
-                                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                        _settings.tr(
+                                            'Mức tiền phạt', 'Fine amount'),
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 13),
                                       ),
                                     ],
                                   ),
@@ -214,14 +243,25 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                 ],
                               ),
                             ),
-                            if (violation.isPending)
+                            if (violation.canPay)
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: const Icon(Icons.payment_rounded, color: Colors.white, size: 28),
+                                child: const Icon(Icons.payment_rounded,
+                                    color: Colors.white, size: 28),
+                              ),
+                            if (violation.isComplaintPending)
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.hourglass_top_rounded,
+                                    color: Colors.white, size: 28),
                               ),
                           ],
                         ),
@@ -260,7 +300,8 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                               _settings.tr('Địa điểm', 'Location'),
                               violation.location.isNotEmpty
                                   ? violation.location
-                                  : _settings.tr('Camera giám sát giao thông', 'Traffic surveillance camera'),
+                                  : _settings.tr('Camera giám sát giao thông',
+                                      'Traffic surveillance camera'),
                             ),
                             _divider(),
                             _buildInfoRow(
@@ -298,8 +339,10 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: AppTheme.infoColor.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(AppTheme.radiusL),
-                            border: Border.all(color: AppTheme.infoColor.withOpacity(0.15)),
+                            borderRadius:
+                                BorderRadius.circular(AppTheme.radiusL),
+                            border: Border.all(
+                                color: AppTheme.infoColor.withOpacity(0.15)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,14 +352,17 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                                   Container(
                                     padding: const EdgeInsets.all(6),
                                     decoration: BoxDecoration(
-                                      color: AppTheme.infoColor.withOpacity(0.1),
+                                      color:
+                                          AppTheme.infoColor.withOpacity(0.1),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: const Icon(Icons.description_rounded, size: 16, color: AppTheme.infoColor),
+                                    child: const Icon(Icons.description_rounded,
+                                        size: 16, color: AppTheme.infoColor),
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    _settings.tr('Mô tả vi phạm', 'Violation description'),
+                                    _settings.tr('Mô tả vi phạm',
+                                        'Violation description'),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                       color: AppTheme.infoColor,
@@ -347,7 +393,41 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                       const SizedBox(height: 24),
 
                       // ── Action Buttons ──────────────────────────
-                      if (violation.isPending) ...[
+                      if (violation.isComplaintPending) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warningColor.withOpacity(0.12),
+                            borderRadius:
+                                BorderRadius.circular(AppTheme.radiusL),
+                            border: Border.all(
+                                color: AppTheme.warningColor.withOpacity(0.28)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.hourglass_top_rounded,
+                                  color: AppTheme.warningColor, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _settings.tr(
+                                    'Trạng thái: Chờ phản hồi khiếu nại. Tạm thời không thể nộp phạt hoặc gửi khiếu nại lại cho lỗi này.',
+                                    'Status: Awaiting complaint response. Payment and re-complaint are temporarily disabled for this violation.',
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: AppTheme.warningColor,
+                                    height: 1.45,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (violation.canPay) ...[
                         // Pay button
                         SizedBox(
                           width: double.infinity,
@@ -355,28 +435,35 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: AppTheme.primaryGradient,
-                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusM),
                               boxShadow: AppTheme.redShadow,
                             ),
                             child: ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.pushNamed(context, '/payment', arguments: violation).then((_) {
-                                    if (mounted) setState(() {});
-                                  });
-                                },
-                                icon: const Icon(Icons.payment_rounded),
-                                label: Text(
-                                  PaymentScreen.isProcessing(violation.id) 
-                                      ? _settings.tr('Tiếp tục nộp phạt', 'Continue payment')
-                                      : _settings.tr('Nộp phạt ngay', 'Pay fine now'),
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                ),
+                              onPressed: () {
+                                Navigator.pushNamed(context, '/payment',
+                                        arguments: violation)
+                                    .then((_) {
+                                  if (mounted) setState(() {});
+                                });
+                              },
+                              icon: const Icon(Icons.payment_rounded),
+                              label: Text(
+                                PaymentScreen.isProcessing(violation.id)
+                                    ? _settings.tr(
+                                        'Tiếp tục nộp phạt', 'Continue payment')
+                                    : _settings.tr(
+                                        'Nộp phạt ngay', 'Pay fine now'),
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.transparent,
                                 foregroundColor: Colors.white,
                                 shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                  borderRadius:
+                                      BorderRadius.circular(AppTheme.radiusM),
                                 ),
                               ),
                             ),
@@ -393,14 +480,18 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                             },
                             icon: const Icon(Icons.rate_review_rounded),
                             label: Text(
-                              _settings.tr('Khiếu nại vi phạm', 'File complaint'),
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                              _settings.tr(
+                                  'Khiếu nại vi phạm', 'File complaint'),
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w600),
                             ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppTheme.primaryColor,
-                              side: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
+                              side: const BorderSide(
+                                  color: AppTheme.primaryColor, width: 1.5),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                borderRadius:
+                                    BorderRadius.circular(AppTheme.radiusM),
                               ),
                             ),
                           ),
@@ -413,8 +504,10 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: AppTheme.successColor.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(AppTheme.radiusL),
-                            border: Border.all(color: AppTheme.successColor.withOpacity(0.25)),
+                            borderRadius:
+                                BorderRadius.circular(AppTheme.radiusL),
+                            border: Border.all(
+                                color: AppTheme.successColor.withOpacity(0.25)),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -422,10 +515,12 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                               Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.successColor.withOpacity(0.15),
+                                  color:
+                                      AppTheme.successColor.withOpacity(0.15),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.check_rounded, color: AppTheme.successColor, size: 20),
+                                child: const Icon(Icons.check_rounded,
+                                    color: AppTheme.successColor, size: 20),
                               ),
                               const SizedBox(width: 10),
                               Text(
@@ -453,12 +548,52 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
   }
 
   Widget _buildStatusBadge(Violation v) {
+    if (v.isComplaintPending) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTheme.warningColor,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.hourglass_top_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                _settings.tr('Chờ phản hồi', 'Awaiting response'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final bool isProcessing = PaymentScreen.isProcessing(v.id);
-    final Color bgColor = v.isPaid ? AppTheme.successColor : (isProcessing ? AppTheme.infoColor : AppTheme.dangerColor);
-    final IconData iconData = v.isPaid ? Icons.check_circle_rounded : (isProcessing ? Icons.hourglass_top_rounded : Icons.warning_rounded);
-    final String actText = v.isPaid 
-        ? _settings.tr('Đã nộp phạt', 'Paid') 
-        : (isProcessing ? _settings.tr('Đang nộp', 'Processing') : _settings.tr('Chưa nộp phạt', 'Unpaid'));
+    final Color bgColor = v.isPaid
+        ? AppTheme.successColor
+        : (isProcessing ? AppTheme.infoColor : AppTheme.dangerColor);
+    final IconData iconData = v.isPaid
+        ? Icons.check_circle_rounded
+        : (isProcessing ? Icons.hourglass_top_rounded : Icons.warning_rounded);
+    final String actText = v.isPaid
+        ? _settings.tr('Đã nộp phạt', 'Paid')
+        : (isProcessing
+            ? _settings.tr('Đang nộp', 'Processing')
+            : _settings.tr('Chưa nộp phạt', 'Unpaid'));
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -475,12 +610,17 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
             size: 14,
           ),
           const SizedBox(width: 4),
-          Text(
-            actText,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+          Flexible(
+            child: Text(
+              actText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -559,7 +699,8 @@ class _ViolationDetailScreenState extends State<ViolationDetailScreen>
                   color: AppTheme.warningColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.gavel_rounded, size: 16, color: AppTheme.warningColor),
+                child: const Icon(Icons.gavel_rounded,
+                    size: 16, color: AppTheme.warningColor),
               ),
               const SizedBox(width: 8),
               Text(

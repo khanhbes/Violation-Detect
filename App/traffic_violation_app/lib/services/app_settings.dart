@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 
 /// Global app settings singleton — manages theme, locale, notifications, user profile.
@@ -11,6 +13,24 @@ class AppSettings extends ChangeNotifier {
   AppSettings._internal();
 
   final FirestoreService _firestore = FirestoreService();
+
+  String _sanitizeDisplayEmail(String? rawEmail) {
+    final email = (rawEmail ?? '').trim();
+    if (email.isEmpty) return '';
+    if (AuthService.isTechnicalLoginEmail(email)) return '';
+    return email;
+  }
+
+  String _extractIdCardFromAuthEmail(String? rawEmail) {
+    final fromTechnical = AuthService.extractIdCardFromLoginEmail(rawEmail);
+    if (fromTechnical.isNotEmpty) return fromTechnical;
+
+    final email = (rawEmail ?? '').trim();
+    if (!email.contains('@')) return '';
+    final prefix = email.split('@').first;
+    if (RegExp(r'^[0-9]{12}$').hasMatch(prefix)) return prefix;
+    return '';
+  }
 
   // ── Auth UID (set after login) ─────────────────────────────────
   String? _uid;
@@ -124,7 +144,15 @@ class AppSettings extends ChangeNotifier {
   String get userEmail => _userEmail;
   String get userPhone => _userPhone;
   String get userAddress => _userAddress;
-  String get userAvatar => _userAvatar;
+  String get userAvatar {
+    // Auto-clear stale local cache paths (e.g. scaled_*.webp deleted by OS)
+    if (_userAvatar.isNotEmpty &&
+        !_userAvatar.startsWith('http') &&
+        !File(_userAvatar).existsSync()) {
+      _userAvatar = '';
+    }
+    return _userAvatar;
+  }
   String get userIdCardIssueDate => _userIdCardIssueDate;
   String get userIdCardExpiryDate => _userIdCardExpiryDate;
   String get userGender => _userGender;
@@ -140,15 +168,12 @@ class AppSettings extends ChangeNotifier {
   int get userPoints => _userPoints;
   String get userIdCard {
     if (_userIdCard.isNotEmpty) return _userIdCard;
-    if (_userEmail.isNotEmpty && _userEmail.contains('@')) {
-      final prefix = _userEmail.split('@').first;
-      if (RegExp(r'^[0-9]+$').hasMatch(prefix)) return prefix;
-    }
-    // Fallback: lay truc tiep tu email dang nhap cua Firebase (la CCCD)
+    final fromProfileEmail = _extractIdCardFromAuthEmail(_userEmail);
+    if (fromProfileEmail.isNotEmpty) return fromProfileEmail;
     final authUser = fb.FirebaseAuth.instance.currentUser;
     if (authUser != null && authUser.email != null) {
-      final prefix = authUser.email!.split('@').first;
-      if (RegExp(r'^[0-9]+$').hasMatch(prefix)) return prefix;
+      final fromAuthEmail = _extractIdCardFromAuthEmail(authUser.email);
+      if (fromAuthEmail.isNotEmpty) return fromAuthEmail;
     }
     return '';
   }
@@ -201,6 +226,9 @@ class AppSettings extends ChangeNotifier {
     if (_driverLicenses.any(_isCarLicense)) return true;
     return false;
   }
+
+  bool get hasMotoLicense => _hasMotoLicense;
+  bool get hasCarLicense => _hasCarLicense;
 
   int _readLicensePoints(
     Map<String, dynamic> data, {
@@ -281,8 +309,7 @@ class AppSettings extends ChangeNotifier {
     final normalizedExpiry = (licenseExpiryDate ?? '').trim();
     final normalizedIssuedBy = (licenseIssuedBy ?? '').trim();
 
-    if ((carLicenseClass ?? '').trim().isNotEmpty ||
-        normalizedNumber.isNotEmpty) {
+    if ((carLicenseClass ?? '').trim().isNotEmpty) {
       result.add({
         'class': (carLicenseClass ?? '').trim(),
         'vehicleType': 'Ô tô',
@@ -327,7 +354,7 @@ class AppSettings extends ChangeNotifier {
   }) {
     if (!_profileInitialized) {
       _userName = name;
-      _userEmail = email;
+      _userEmail = _sanitizeDisplayEmail(email);
       _userPhone = phone;
       _userAddress = address;
       _userAvatar = avatar;
@@ -363,7 +390,7 @@ class AppSettings extends ChangeNotifier {
     List<Map<String, String>>? driverLicenses,
   }) {
     if (name != null) _userName = name;
-    if (email != null) _userEmail = email;
+    if (email != null) _userEmail = _sanitizeDisplayEmail(email);
     if (phone != null) _userPhone = phone;
     if (address != null) _userAddress = address;
     if (avatar != null) _userAvatar = avatar;
@@ -402,7 +429,7 @@ class AppSettings extends ChangeNotifier {
       final user = await _firestore.getUserProfile(uid);
       if (user != null) {
         _userName = user.fullName;
-        _userEmail = user.email;
+        _userEmail = _sanitizeDisplayEmail(user.email);
         _userPhone = user.phone;
         _userAddress = user.address;
         _userAvatar = user.avatar ?? '';
@@ -438,45 +465,48 @@ class AppSettings extends ChangeNotifier {
         try {
           final auth = _getFirebaseAuthUser();
           if (auth != null) {
+            final authEmail = (auth['email'] ?? '').trim();
+            final authIdCard = _extractIdCardFromAuthEmail(authEmail);
             _userName = auth['displayName'] ?? '';
-            _userEmail = auth['email'] ?? '';
-            _userIdCard = _userEmail.split('@').first;
+            _userEmail = _sanitizeDisplayEmail(authEmail);
+            if (authIdCard.isNotEmpty) {
+              _userIdCard = authIdCard;
+            }
             _profileInitialized = true;
             final bootstrapLicenses = _driverLicenses.isNotEmpty
                 ? _driverLicenses
-                : _licensesFromLegacy(
-                    licenseNumber: '079201001234',
-                    carLicenseClass: 'B2',
-                    motoLicenseClass: 'A1',
-                    licenseIssueDate: '15/03/2020',
-                    licenseExpiryDate: '15/03/2030',
-                    licenseIssuedBy: _userLicenseIssuedBy,
-                  );
+                : <Map<String, String>>[];
             _driverLicenses = bootstrapLicenses;
 
             // Auto-create profile in Firestore so next time it loads properly
-            await _firestore.createOrUpdateUserProfile(uid, {
-              'fullName': _userName,
-              'email': _userEmail,
-              'phone': _userPhone,
-              'address': _userAddress,
-              'avatar': _userAvatar,
-              'idCard': _userIdCard,
-              'idCardIssueDate': _userIdCardIssueDate,
-              'idCardExpiryDate': _userIdCardExpiryDate,
-              'gender': _userGender,
-              'nationality': _userNationality,
-              'placeOfOrigin': _userPlaceOfOrigin,
-              'licenseIssuedBy': _userLicenseIssuedBy,
-              'occupation': _userOccupation,
-              'dateOfBirth': _userDateOfBirth,
-              'driverLicenses': bootstrapLicenses,
-              ..._legacyLicenseFields(bootstrapLicenses),
-              'motoPoints': _motoLicensePoints,
-              'carPoints': _carLicensePoints,
-              'points': _userPoints,
-            });
-            debugPrint('✅ Profile auto-created in Firestore from Auth data');
+            try {
+              await _firestore.createOrUpdateUserProfile(uid, {
+                'fullName': _userName,
+                'email': _userEmail,
+                'phone': _userPhone,
+                'address': _userAddress,
+                'avatar': _userAvatar,
+                'idCard': _userIdCard,
+                'idCardIssueDate': _userIdCardIssueDate,
+                'idCardExpiryDate': _userIdCardExpiryDate,
+                'gender': _userGender,
+                'nationality': _userNationality,
+                'placeOfOrigin': _userPlaceOfOrigin,
+                'licenseIssuedBy': _userLicenseIssuedBy,
+                'occupation': _userOccupation,
+                'dateOfBirth': _userDateOfBirth,
+                'driverLicenses': bootstrapLicenses,
+                ..._legacyLicenseFields(bootstrapLicenses),
+                'motoPoints': _motoLicensePoints,
+                'carPoints': _carLicensePoints,
+                'points': _userPoints,
+              });
+              // Only log success after Firestore write actually completes without error
+              debugPrint('✅ Profile auto-created in Firestore from Auth data');
+            } catch (profileErr) {
+              debugPrint('❌ Profile auto-create failed for $uid: $profileErr');
+              // Do NOT mark profileInitialized as failed — profile data is still in memory
+            }
           }
         } catch (authErr) {
           debugPrint('❌ Fallback auth data also failed: $authErr');
@@ -568,7 +598,9 @@ class AppSettings extends ChangeNotifier {
     if (data.isEmpty) return;
 
     _userName = data['fullName']?.toString() ?? _userName;
-    _userEmail = data['email']?.toString() ?? _userEmail;
+    if (data['email'] != null) {
+      _userEmail = _sanitizeDisplayEmail(data['email']?.toString());
+    }
     _userPhone = data['phone']?.toString() ?? _userPhone;
     _userAddress = data['address']?.toString() ?? _userAddress;
     _userAvatar = data['avatar']?.toString() ?? _userAvatar;
@@ -586,7 +618,7 @@ class AppSettings extends ChangeNotifier {
     _userOccupation = data['occupation']?.toString() ?? _userOccupation;
     _userDateOfBirth = data['dateOfBirth']?.toString() ?? _userDateOfBirth;
     final incomingLicenses = _normalizeDriverLicenses(data['driverLicenses']);
-    if (incomingLicenses.isNotEmpty) {
+    if (data.containsKey('driverLicenses')) {
       _driverLicenses = incomingLicenses;
     } else {
       final legacyLicenses = _licensesFromLegacy(

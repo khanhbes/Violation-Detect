@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
@@ -89,8 +90,7 @@ class PushNotificationService {
         criticalAlert: false,
       );
 
-      debugPrint(
-          '📱 Notification permission: ${settings.authorizationStatus}');
+      debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
 
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
         debugPrint('⚠️ User denied notification permission');
@@ -147,11 +147,7 @@ class PushNotificationService {
       // For web, you need to pass vapidKey (from Firebase Console)
       String? token;
       if (kIsWeb) {
-        // Replace with your VAPID key from Firebase Console
-        // Project Settings → Cloud Messaging → Web Push certificates
-        token = await _messaging.getToken(
-          // vapidKey: 'YOUR_VAPID_KEY_HERE',
-        );
+        token = await _messaging.getToken();
       } else {
         token = await _messaging.getToken();
       }
@@ -159,8 +155,14 @@ class PushNotificationService {
       if (token != null) {
         _currentToken = token;
         debugPrint('📱 FCM Token: ${token.substring(0, 20)}...');
-        // Don't await — sync in background so it doesn't block initialization
-        _syncTokenWithBackend(token);
+        // Only sync if a real user is currently logged in.
+        // If not logged in yet, we skip — resyncToken() will be called after login.
+        final authUid = fb_auth.FirebaseAuth.instance.currentUser?.uid.trim();
+        if (authUid != null && authUid.isNotEmpty) {
+          _syncTokenWithBackend(token);
+        } else {
+          debugPrint('⏭️ FCM token sync skipped — no user logged in yet');
+        }
       } else {
         debugPrint('⚠️ FCM token is null');
       }
@@ -180,22 +182,37 @@ class PushNotificationService {
         platform = 'ios';
       }
 
-      final apiService = ApiService();
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/api/fcm/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'user_id': AppSettings().uid ?? 'default_user',
-          'fcm_token': token,
-          'platform': platform,
-          'device_info': platform == 'web'
-              ? 'Web Browser'
-              : '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
-        }),
-      ).timeout(const Duration(seconds: 5));
+      final settingsUid = AppSettings().uid?.trim();
+      final authUid = fb_auth.FirebaseAuth.instance.currentUser?.uid.trim();
+      final resolvedUid = (settingsUid != null && settingsUid.isNotEmpty)
+          ? settingsUid
+          : ((authUid != null && authUid.isNotEmpty) ? authUid : null);
+
+      // CRITICAL: Never register a token without a real user ID.
+      // Registering with 'default_user' causes backend to route violations
+      // to no valid user, making notification bell & violations list appear empty.
+      if (resolvedUid == null) {
+        debugPrint('⏭️ FCM sync skipped — no authenticated user');
+        return;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('${ApiService.baseUrl}/api/fcm/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'user_id': resolvedUid,
+              'fcm_token': token,
+              'platform': platform,
+              'device_info': platform == 'web'
+                  ? 'Web Browser'
+                  : '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
-        debugPrint('✅ FCM token synced with backend');
+        debugPrint('✅ FCM token synced with backend (user: $resolvedUid)');
       } else {
         debugPrint('⚠️ FCM token sync failed: ${response.statusCode}');
       }
@@ -203,6 +220,7 @@ class PushNotificationService {
       debugPrint('⚠️ FCM token sync error (backend may be offline): $e');
     }
   }
+
 
   // ── Message Handlers (3 States) ───────────────────────────────────
 
@@ -276,8 +294,7 @@ class PushNotificationService {
   /// STATE 3: TERMINATED → User taps notification → App cold starts
   Future<void> _handleInitialMessage() async {
     try {
-      RemoteMessage? initialMessage =
-          await _messaging.getInitialMessage();
+      RemoteMessage? initialMessage = await _messaging.getInitialMessage();
 
       if (initialMessage != null) {
         debugPrint('📩 Terminated tap FCM: ${initialMessage.data}');
@@ -340,11 +357,13 @@ class PushNotificationService {
     if (_currentToken == null) return;
 
     try {
-      await http.delete(
-        Uri.parse('${ApiService.baseUrl}/api/fcm/unregister'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'fcm_token': _currentToken}),
-      ).timeout(const Duration(seconds: 5));
+      await http
+          .delete(
+            Uri.parse('${ApiService.baseUrl}/api/fcm/unregister'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'fcm_token': _currentToken}),
+          )
+          .timeout(const Duration(seconds: 5));
       debugPrint('✅ FCM token cleared from backend');
     } catch (e) {
       debugPrint('⚠️ FCM token clear error: $e');

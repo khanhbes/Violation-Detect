@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/vehicle.dart';
@@ -17,32 +18,69 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
   List<Vehicle> _vehicles = [];
   bool _isLoading = true;
   StreamSubscription? _vehicleSub;
+  String? _boundUid;
 
   @override
   void initState() {
     super.initState();
+    _s.addListener(_onSettingsChanged);
     _loadVehicles();
   }
 
   void _loadVehicles() {
-    final uid = _s.uid;
-    if (uid != null) {
-      _vehicleSub = FirestoreService().vehiclesStream(uid).listen((vehicles) {
+    final uidFromSettings = _s.uid?.trim();
+    final uid = (uidFromSettings != null && uidFromSettings.isNotEmpty)
+        ? uidFromSettings
+        : fb.FirebaseAuth.instance.currentUser?.uid.trim();
+    if (uid == null || uid.isEmpty) {
+      _boundUid = null;
+      _vehicleSub?.cancel();
+      _vehicleSub = null;
+      if (mounted) {
+        setState(() {
+          _vehicles = [];
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
+    if (_boundUid == uid && _vehicleSub != null) return;
+    _boundUid = uid;
+    _vehicleSub?.cancel();
+    if (mounted) setState(() => _isLoading = true);
+
+    _vehicleSub = FirestoreService().vehiclesStream(uid).listen(
+      (vehicles) {
         if (mounted) {
           setState(() {
             _vehicles = vehicles;
             _isLoading = false;
           });
         }
-      });
-    } else {
-      setState(() => _isLoading = false);
-    }
+      },
+      onError: (error, stackTrace) {
+        debugPrint('❌ Vehicles stream error: $error');
+        if (mounted) {
+          setState(() {
+            _vehicles = [];
+            _isLoading = false;
+          });
+        }
+      },
+    );
+  }
+
+  void _onSettingsChanged() {
+    _loadVehicles();
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _vehicleSub?.cancel();
+    _boundUid = null;
+    _s.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
@@ -69,7 +107,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                   children: [
                     if (Navigator.canPop(context))
                       IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                        icon: const Icon(Icons.arrow_back_rounded,
+                            color: Colors.white),
                         onPressed: () => Navigator.pop(context),
                       ),
                     Expanded(
@@ -88,7 +127,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: IconButton(
-                        icon: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
+                        icon: const Icon(Icons.add_rounded,
+                            color: Colors.white, size: 22),
                         onPressed: () {
                           _showAddVehicleDialog();
                         },
@@ -103,7 +143,9 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
           // ── Vehicle List ────────────────────────────────
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
+                ? const Center(
+                    child:
+                        CircularProgressIndicator(color: AppTheme.primaryColor))
                 : _vehicles.isEmpty
                     ? Center(
                         child: Column(
@@ -116,11 +158,13 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                                 color: AppTheme.primaryColor.withOpacity(0.08),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.directions_car_outlined, size: 36, color: AppTheme.primaryColor),
+                              child: const Icon(Icons.directions_car_outlined,
+                                  size: 36, color: AppTheme.primaryColor),
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              _s.tr('Chưa có phương tiện nào', 'No vehicles yet'),
+                              _s.tr(
+                                  'Chưa có phương tiện nào', 'No vehicles yet'),
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
@@ -129,7 +173,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              _s.tr('Thêm phương tiện để tra cứu vi phạm', 'Add vehicles to look up violations'),
+                              _s.tr('Thêm phương tiện để tra cứu vi phạm',
+                                  'Add vehicles to look up violations'),
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: AppTheme.textSecondary,
@@ -141,7 +186,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                                 _showAddVehicleDialog();
                               },
                               icon: const Icon(Icons.add_rounded, size: 18),
-                              label: Text(_s.tr('Thêm phương tiện', 'Add vehicle')),
+                              label: Text(
+                                  _s.tr('Thêm phương tiện', 'Add vehicle')),
                             ),
                           ],
                         ),
@@ -149,7 +195,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                     : ListView.builder(
                         padding: const EdgeInsets.all(16),
                         itemCount: _vehicles.length,
-                        itemBuilder: (context, index) => _buildVehicleCard(_vehicles[index], index),
+                        itemBuilder: (context, index) =>
+                            _buildVehicleCard(_vehicles[index], index),
                       ),
           ),
         ],
@@ -192,7 +239,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
               ),
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -205,7 +253,9 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Icon(
-                      isMotorcycle ? Icons.two_wheeler_rounded : Icons.directions_car_rounded,
+                      isMotorcycle
+                          ? Icons.two_wheeler_rounded
+                          : Icons.directions_car_rounded,
                       color: Colors.white,
                       size: 30,
                     ),
@@ -225,7 +275,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                         ),
                         const SizedBox(height: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
@@ -251,11 +302,14 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildDetailRow(Icons.branding_watermark_rounded, _s.tr('Hãng xe', 'Brand'), vehicle.brand),
+                  _buildDetailRow(Icons.branding_watermark_rounded,
+                      _s.tr('Hãng xe', 'Brand'), vehicle.brand),
                   const SizedBox(height: 10),
-                  _buildDetailRow(Icons.directions_car_filled_rounded, _s.tr('Dòng xe', 'Model'), vehicle.model),
+                  _buildDetailRow(Icons.directions_car_filled_rounded,
+                      _s.tr('Dòng xe', 'Model'), vehicle.model),
                   const SizedBox(height: 10),
-                  _buildDetailRow(Icons.palette_rounded, _s.tr('Màu sắc', 'Color'), vehicle.color),
+                  _buildDetailRow(Icons.palette_rounded,
+                      _s.tr('Màu sắc', 'Color'), vehicle.color),
                   const SizedBox(height: 10),
                   _buildDetailRow(
                     Icons.person_rounded,
@@ -268,7 +322,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
             // Action buttons
             Container(
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.1))),
+                border: Border(
+                    top: BorderSide(color: Colors.grey.withOpacity(0.1))),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
@@ -276,10 +331,14 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                   Expanded(
                     child: TextButton.icon(
                       onPressed: () {},
-                      icon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.infoColor),
+                      icon: const Icon(Icons.search_rounded,
+                          size: 16, color: AppTheme.infoColor),
                       label: Text(
                         _s.tr('Tra cứu vi phạm', 'Look up violations'),
-                        style: const TextStyle(color: AppTheme.infoColor, fontWeight: FontWeight.w600, fontSize: 13),
+                        style: const TextStyle(
+                            color: AppTheme.infoColor,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
                       ),
                     ),
                   ),
@@ -287,10 +346,14 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                   Expanded(
                     child: TextButton.icon(
                       onPressed: () {},
-                      icon: const Icon(Icons.edit_outlined, size: 16, color: AppTheme.textSecondary),
+                      icon: const Icon(Icons.edit_outlined,
+                          size: 16, color: AppTheme.textSecondary),
                       label: Text(
                         _s.tr('Chỉnh sửa', 'Edit'),
-                        style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
+                        style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
                       ),
                     ),
                   ),
@@ -400,7 +463,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
               TextField(
                 controller: typeController,
                 decoration: InputDecoration(
-                  labelText: _s.tr('Loại xe (Xe máy/Ô tô)', 'Vehicle Type (Motorcycle/Car)'),
+                  labelText: _s.tr(
+                      'Loại xe (Xe máy/Ô tô)', 'Vehicle Type (Motorcycle/Car)'),
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -440,7 +504,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                     if (plateController.text.trim().isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(_s.tr('Vui lòng nhập biển số xe', 'Please enter license plate')),
+                          content: Text(_s.tr('Vui lòng nhập biển số xe',
+                              'Please enter license plate')),
                           backgroundColor: AppTheme.dangerColor,
                         ),
                       );
@@ -453,7 +518,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                     showDialog(
                       context: context,
                       barrierDismissible: false,
-                      builder: (context) => const Center(child: CircularProgressIndicator()),
+                      builder: (context) =>
+                          const Center(child: CircularProgressIndicator()),
                     );
 
                     try {
@@ -464,7 +530,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                         brand: brandController.text.trim(),
                         model: modelController.text.trim(),
                         color: colorController.text.trim(),
-                        ownerName: _s.userName.isNotEmpty ? _s.userName : 'Người dùng',
+                        ownerName:
+                            _s.userName.isNotEmpty ? _s.userName : 'Người dùng',
                         ownerId: uid,
                         registrationDate: DateTime.now(),
                       );
@@ -478,9 +545,11 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                           SnackBar(
                             content: Row(
                               children: [
-                                const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                const Icon(Icons.check_circle,
+                                    color: Colors.white, size: 18),
                                 const SizedBox(width: 8),
-                                Text(_s.tr('Đã thêm phương tiện thành công', 'Vehicle added successfully')),
+                                Text(_s.tr('Đã thêm phương tiện thành công',
+                                    'Vehicle added successfully')),
                               ],
                             ),
                             backgroundColor: AppTheme.successColor,
@@ -493,7 +562,8 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
                         Navigator.pop(context); // loading
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text(_s.tr('Lỗi thêm phương tiện', 'Error adding vehicle')),
+                            content: Text(_s.tr('Lỗi thêm phương tiện',
+                                'Error adding vehicle')),
                             backgroundColor: AppTheme.dangerColor,
                           ),
                         );

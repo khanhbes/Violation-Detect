@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, create, update: if isSelf(uid);
+      allow delete: if false;
+    }
+
+    match /vehicles/{docId} {
+      allow read, delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    match /violations/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create, delete: if false;
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'status',
+          'complaintStatus',
+          'paymentLocked',
+          'complaintLocked',
+          'complaintSubmittedAt',
+          'updatedAt'
+        ]);
+    }
+
+    match /notifications/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if false;
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /complaints/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'reason',
+          'description',
+          'evidence',
+          'evidenceUrl',
+          'evidencePath',
+          'updatedAt'
+        ]);
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'approved';
+    }
+
+    match /profile_update_requests/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid) && request.resource.data.userId == request.auth.uid;
+      allow update: if isSelf(uid)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.reviewedAt == resource.data.reviewedAt
+        && request.resource.data.reviewedBy == resource.data.reviewedBy;
+      allow delete: if false;
+    }
+
+    match /app_config/latest_version {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /server/config {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /app_active_sessions/{docId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

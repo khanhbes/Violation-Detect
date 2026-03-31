@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/push_notification_service.dart';
+import 'package:traffic_violation_app/screens/support_screen.dart';
+import 'package:traffic_violation_app/screens/forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -24,6 +29,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLoading = false;
   bool _isKeyboardVisible = false;
   String? _errorMessage;
+  String _versionText = '';
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
@@ -54,7 +60,8 @@ class _LoginScreenState extends State<LoginScreen>
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.12),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
+    ).animate(
+        CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
 
     _staggerController = AnimationController(
       vsync: this,
@@ -85,6 +92,8 @@ class _LoginScreenState extends State<LoginScreen>
     Future.delayed(const Duration(milliseconds: 400), () {
       if (mounted) _staggerController.forward();
     });
+
+    _loadVersion();
   }
 
   @override
@@ -113,6 +122,19 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _versionText = '${info.version} (${info.buildNumber})';
+        });
+      }
+    } catch (_) {
+      // Fallback if package info unavailable
+    }
+  }
+
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -123,13 +145,18 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final cccd = _cccdController.text.trim();
-      final email = '$cccd@vnetraffic.vn';
-      final credential = await _auth.signIn(email, _passwordController.text);
+      final credential =
+          await _auth.signInByIdCard(cccd, _passwordController.text);
 
       // Load user profile & settings from Firestore
       if (credential.user != null) {
         await _settings.loadFromFirestore(credential.user!.uid);
-        await PushNotificationService().resyncToken();
+        // FCM + WebSocket reconnect run in the background so login
+        // navigation is instant – home screen handles connection state.
+        unawaited(PushNotificationService().resyncToken());
+        unawaited(ApiService().reconnectWithNewUserAndWait().then(
+          (ws) => debugPrint('🔌 Login reconnect result: wsReady=$ws'),
+        ));
       }
 
       if (mounted) {
@@ -147,56 +174,11 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleForgotPassword() async {
-    final cccd = _cccdController.text.trim();
-    if (cccd.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.info_outline, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text(_settings.tr('Vui lòng nhập số CCCD trước', 'Please enter your ID number first')),
-            ],
-          ),
-          backgroundColor: AppTheme.infoColor,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-      return;
-    }
-
-    try {
-      final email = '$cccd@vnetraffic.vn';
-      await _auth.resetPassword(email);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text(_settings.tr('Đã gửi email đặt lại mật khẩu', 'Password reset email sent')),
-              ],
-            ),
-            backgroundColor: AppTheme.successColor,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: AppTheme.dangerColor,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => const ForgotPasswordScreen()),
+    );
   }
 
   @override
@@ -277,7 +259,8 @@ class _LoginScreenState extends State<LoginScreen>
                       width: double.infinity,
                       decoration: const BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(28)),
                         boxShadow: [
                           BoxShadow(
                             color: Color(0x33000000),
@@ -321,10 +304,12 @@ class _LoginScreenState extends State<LoginScreen>
                                     end: Offset.zero,
                                   ).animate(_field1Anim),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       _buildFieldLabel(
-                                        _settings.tr('Số căn cước công dân', 'Citizen ID Number'),
+                                        _settings.tr('Số căn cước công dân',
+                                            'Citizen ID Number'),
                                         true,
                                       ),
                                       const SizedBox(height: 8),
@@ -333,9 +318,12 @@ class _LoginScreenState extends State<LoginScreen>
                                         focusNode: _cccdFocus,
                                         keyboardType: TextInputType.number,
                                         maxLength: 12,
-                                        style: const TextStyle(fontSize: 15, letterSpacing: 1),
+                                        style: const TextStyle(
+                                            fontSize: 15, letterSpacing: 1),
                                         decoration: InputDecoration(
-                                          hintText: _settings.tr('Nhập 12 số CCCD', 'Enter 12-digit ID'),
+                                          hintText: _settings.tr(
+                                              'Nhập 12 số CCCD',
+                                              'Enter 12-digit ID'),
                                           hintStyle: const TextStyle(
                                             color: AppTheme.textHint,
                                             fontSize: 14,
@@ -344,41 +332,69 @@ class _LoginScreenState extends State<LoginScreen>
                                           counterText: '',
                                           prefixIcon: const Padding(
                                             padding: EdgeInsets.all(12),
-                                            child: Icon(Icons.credit_card_rounded, size: 20, color: AppTheme.textSecondary),
+                                            child: Icon(
+                                                Icons.credit_card_rounded,
+                                                size: 20,
+                                                color: AppTheme.textSecondary),
                                           ),
                                           filled: true,
                                           fillColor: Colors.white,
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                  horizontal: 16, vertical: 16),
                                           border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 1.5),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 1.5),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.primaryColor,
+                                                width: 2),
                                           ),
                                           errorBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 1.5),
                                           ),
-                                          focusedErrorBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 2),
+                                          focusedErrorBorder:
+                                              OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 2),
                                           ),
                                         ),
                                         validator: (value) {
                                           if (value == null || value.isEmpty) {
-                                            return _settings.tr('Vui lòng nhập số CCCD', 'Please enter your ID number');
+                                            return _settings.tr(
+                                                'Vui lòng nhập số CCCD',
+                                                'Please enter your ID number');
                                           }
                                           if (value.length != 12) {
-                                            return _settings.tr('Số CCCD phải gồm 12 chữ số', 'ID must be 12 digits');
+                                            return _settings.tr(
+                                                'Số CCCD phải gồm 12 chữ số',
+                                                'ID must be 12 digits');
                                           }
-                                          if (!RegExp(r'^[0-9]{12}$').hasMatch(value)) {
-                                            return _settings.tr('CCCD chỉ bao gồm chữ số', 'ID must contain only digits');
+                                          if (!RegExp(r'^[0-9]{12}$')
+                                              .hasMatch(value)) {
+                                            return _settings.tr(
+                                                'CCCD chỉ bao gồm chữ số',
+                                                'ID must contain only digits');
                                           }
                                           return null;
                                         },
@@ -398,7 +414,8 @@ class _LoginScreenState extends State<LoginScreen>
                                     end: Offset.zero,
                                   ).animate(_field2Anim),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       _buildFieldLabel(
                                         _settings.tr('Mật khẩu', 'Password'),
@@ -411,54 +428,81 @@ class _LoginScreenState extends State<LoginScreen>
                                         obscureText: !_isPasswordVisible,
                                         style: const TextStyle(fontSize: 15),
                                         decoration: InputDecoration(
-                                          hintText: _settings.tr('Nhập mật khẩu', 'Enter password'),
+                                          hintText: _settings.tr(
+                                              'Nhập mật khẩu',
+                                              'Enter password'),
                                           hintStyle: const TextStyle(
                                             color: AppTheme.textHint,
                                             fontSize: 14,
                                           ),
                                           prefixIcon: const Padding(
                                             padding: EdgeInsets.all(12),
-                                            child: Icon(Icons.lock_outline_rounded, size: 20, color: AppTheme.textSecondary),
+                                            child: Icon(
+                                                Icons.lock_outline_rounded,
+                                                size: 20,
+                                                color: AppTheme.textSecondary),
                                           ),
                                           suffixIcon: IconButton(
                                             icon: Icon(
                                               _isPasswordVisible
                                                   ? Icons.visibility_outlined
-                                                  : Icons.visibility_off_outlined,
+                                                  : Icons
+                                                      .visibility_off_outlined,
                                               size: 20,
                                               color: AppTheme.textSecondary,
                                             ),
                                             onPressed: () => setState(
-                                              () => _isPasswordVisible = !_isPasswordVisible,
+                                              () => _isPasswordVisible =
+                                                  !_isPasswordVisible,
                                             ),
                                           ),
                                           filled: true,
                                           fillColor: Colors.white,
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                  horizontal: 16, vertical: 16),
                                           border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dividerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dividerColor,
+                                                width: 1.5),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dividerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dividerColor,
+                                                width: 1.5),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.primaryColor,
+                                                width: 2),
                                           ),
                                           errorBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 1.5),
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 1.5),
                                           ),
-                                          focusedErrorBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                            borderSide: const BorderSide(color: AppTheme.dangerColor, width: 2),
+                                          focusedErrorBorder:
+                                              OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                                AppTheme.radiusM),
+                                            borderSide: const BorderSide(
+                                                color: AppTheme.dangerColor,
+                                                width: 2),
                                           ),
                                         ),
                                         validator: (value) {
                                           if (value == null || value.isEmpty) {
-                                            return _settings.tr('Vui lòng nhập mật khẩu', 'Please enter password');
+                                            return _settings.tr(
+                                                'Vui lòng nhập mật khẩu',
+                                                'Please enter password');
                                           }
                                           return null;
                                         },
@@ -479,10 +523,12 @@ class _LoginScreenState extends State<LoginScreen>
                                     style: TextButton.styleFrom(
                                       padding: EdgeInsets.zero,
                                       minimumSize: const Size(0, 36),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     child: Text(
-                                      _settings.tr('Quên mật khẩu ?', 'Forgot password?'),
+                                      _settings.tr('Quên mật khẩu ?',
+                                          'Forgot password?'),
                                       style: const TextStyle(
                                         color: AppTheme.primaryColor,
                                         fontWeight: FontWeight.w600,
@@ -509,33 +555,47 @@ class _LoginScreenState extends State<LoginScreen>
                                           height: 52,
                                           child: Container(
                                             decoration: BoxDecoration(
-                                              gradient: AppTheme.primaryGradient,
-                                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                              gradient:
+                                                  AppTheme.primaryGradient,
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppTheme.radiusM),
                                               boxShadow: AppTheme.redShadow,
                                             ),
                                             child: ElevatedButton(
-                                              onPressed: _isLoading ? null : _handleLogin,
+                                              onPressed: _isLoading
+                                                  ? null
+                                                  : _handleLogin,
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.transparent,
+                                                backgroundColor:
+                                                    Colors.transparent,
                                                 shadowColor: Colors.transparent,
                                                 shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          AppTheme.radiusM),
                                                 ),
                                               ),
                                               child: _isLoading
                                                   ? const SizedBox(
                                                       height: 22,
                                                       width: 22,
-                                                      child: CircularProgressIndicator(
+                                                      child:
+                                                          CircularProgressIndicator(
                                                         strokeWidth: 2.5,
-                                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                                        valueColor:
+                                                            AlwaysStoppedAnimation<
+                                                                    Color>(
+                                                                Colors.white),
                                                       ),
                                                     )
                                                   : Text(
-                                                      _settings.tr('Đăng nhập', 'Sign In'),
+                                                      _settings.tr('Đăng nhập',
+                                                          'Sign In'),
                                                       style: const TextStyle(
                                                         fontSize: 16,
-                                                        fontWeight: FontWeight.w700,
+                                                        fontWeight:
+                                                            FontWeight.w700,
                                                         color: Colors.white,
                                                       ),
                                                     ),
@@ -553,17 +613,27 @@ class _LoginScreenState extends State<LoginScreen>
                                           child: Container(
                                             decoration: BoxDecoration(
                                               color: AppTheme.surfaceColor,
-                                              borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                                              border: Border.all(color: AppTheme.dividerColor),
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppTheme.radiusM),
+                                              border: Border.all(
+                                                  color: AppTheme.dividerColor),
                                             ),
                                             child: IconButton(
                                               onPressed: () {
-                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
                                                   SnackBar(
-                                                    content: Text(_settings.tr('Tính năng đang phát triển', 'Feature in development')),
-                                                    behavior: SnackBarBehavior.floating,
-                                                    shape: RoundedRectangleBorder(
-                                                      borderRadius: BorderRadius.circular(12),
+                                                    content: Text(_settings.tr(
+                                                        'Tính năng đang phát triển',
+                                                        'Feature in development')),
+                                                    behavior: SnackBarBehavior
+                                                        .floating,
+                                                    shape:
+                                                        RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              12),
                                                     ),
                                                   ),
                                                 );
@@ -588,18 +658,26 @@ class _LoginScreenState extends State<LoginScreen>
                                 opacity: _buttonAnim,
                                 child: Row(
                                   children: [
-                                    Expanded(child: Container(height: 1, color: AppTheme.dividerColor)),
+                                    Expanded(
+                                        child: Container(
+                                            height: 1,
+                                            color: AppTheme.dividerColor)),
                                     Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14),
                                       child: Text(
-                                        _settings.tr('Hoặc đăng nhập bằng', 'Or sign in with'),
+                                        _settings.tr('Hoặc đăng nhập bằng',
+                                            'Or sign in with'),
                                         style: const TextStyle(
                                           color: AppTheme.textSecondary,
                                           fontSize: 13,
                                         ),
                                       ),
                                     ),
-                                    Expanded(child: Container(height: 1, color: AppTheme.dividerColor)),
+                                    Expanded(
+                                        child: Container(
+                                            height: 1,
+                                            color: AppTheme.dividerColor)),
                                   ],
                                 ),
                               ),
@@ -612,28 +690,37 @@ class _LoginScreenState extends State<LoginScreen>
                                   height: 50,
                                   child: OutlinedButton(
                                     onPressed: () {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         SnackBar(
-                                          content: Text(_settings.tr('Tính năng đang phát triển', 'Feature in development')),
+                                          content: Text(_settings.tr(
+                                              'Tính năng đang phát triển',
+                                              'Feature in development')),
                                           behavior: SnackBarBehavior.floating,
                                           shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(12),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
                                           ),
                                         ),
                                       );
                                     },
                                     style: OutlinedButton.styleFrom(
                                       backgroundColor: const Color(0xFFFFF3E0),
-                                      side: const BorderSide(color: Color(0xFFFF8F00), width: 1.5),
+                                      side: const BorderSide(
+                                          color: Color(0xFFFF8F00), width: 1.5),
                                       shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(AppTheme.radiusRound),
+                                        borderRadius: BorderRadius.circular(
+                                            AppTheme.radiusRound),
                                       ),
                                     ),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Text(
-                                          _settings.tr('Tài khoản định danh điện tử', 'Electronic ID account'),
+                                          _settings.tr(
+                                              'Tài khoản định danh điện tử',
+                                              'Electronic ID account'),
                                           style: const TextStyle(
                                             color: Color(0xFFE65100),
                                             fontWeight: FontWeight.w700,
@@ -646,7 +733,8 @@ class _LoginScreenState extends State<LoginScreen>
                                           height: 30,
                                           decoration: BoxDecoration(
                                             color: const Color(0xFF2E7D32),
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                           ),
                                           child: const Icon(
                                             Icons.verified_user_rounded,
@@ -664,7 +752,9 @@ class _LoginScreenState extends State<LoginScreen>
                               // ── Version ──
                               Center(
                                 child: Text(
-                                  _settings.tr('Phiên bản: 1.0.0 (1)', 'Version: 1.0.0 (1)'),
+                                  _versionText.isNotEmpty
+                                      ? '${_settings.tr('Phiên bản', 'Version')}: $_versionText'
+                                      : _settings.tr('Phiên bản: ---', 'Version: ---'),
                                   style: const TextStyle(
                                     color: AppTheme.textHint,
                                     fontSize: 12,
@@ -678,16 +768,19 @@ class _LoginScreenState extends State<LoginScreen>
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Text(
-                                    _settings.tr('Chưa có tài khoản? ', "Don't have an account? "),
+                                    _settings.tr('Chưa có tài khoản? ',
+                                        "Don't have an account? "),
                                     style: const TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 13,
                                     ),
                                   ),
                                   GestureDetector(
-                                    onTap: () => Navigator.pushNamed(context, '/register'),
+                                    onTap: () => Navigator.pushNamed(
+                                        context, '/register'),
                                     child: Text(
-                                      _settings.tr('Đăng ký ngay', 'Register now'),
+                                      _settings.tr(
+                                          'Đăng ký ngay', 'Register now'),
                                       style: const TextStyle(
                                         color: AppTheme.primaryColor,
                                         fontWeight: FontWeight.w700,
@@ -718,13 +811,26 @@ class _LoginScreenState extends State<LoginScreen>
                         Icons.menu_book_rounded,
                         _settings.tr('Hướng dẫn\nsử dụng', 'User\nGuide'),
                         AppTheme.primaryColor,
-                        () {},
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const SupportScreen(initialSection: 'guide'),
+                          ),
+                        ),
                       ),
                       _buildBottomAction(
                         Icons.help_outline_rounded,
-                        _settings.tr('Câu hỏi\nthường gặp', 'Frequently\nAsked'),
+                        _settings.tr(
+                            'Câu hỏi\nthường gặp', 'Frequently\nAsked'),
                         AppTheme.secondaryColor,
-                        () {},
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const SupportScreen(initialSection: 'faq'),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -778,7 +884,8 @@ class _LoginScreenState extends State<LoginScreen>
               color: AppTheme.dangerColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.error_outline_rounded, color: AppTheme.dangerColor, size: 18),
+            child: const Icon(Icons.error_outline_rounded,
+                color: AppTheme.dangerColor, size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -793,7 +900,8 @@ class _LoginScreenState extends State<LoginScreen>
           ),
           GestureDetector(
             onTap: () => setState(() => _errorMessage = null),
-            child: const Icon(Icons.close, color: AppTheme.dangerColor, size: 18),
+            child:
+                const Icon(Icons.close, color: AppTheme.dangerColor, size: 18),
           ),
         ],
       ),

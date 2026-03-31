@@ -6,7 +6,6 @@ import 'package:traffic_violation_app/models/violation.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PaymentScreen extends StatefulWidget {
@@ -31,7 +30,6 @@ class PaymentScreen extends StatefulWidget {
 
 class _PaymentScreenState extends State<PaymentScreen>
     with SingleTickerProviderStateMixin {
-  bool _isProcessing = false;
   bool _paymentDone = false;
   final AppSettings _s = AppSettings();
 
@@ -57,17 +55,17 @@ class _PaymentScreenState extends State<PaymentScreen>
     if (!PaymentScreen.paymentStarts.containsKey(violationId)) {
       PaymentScreen.paymentStarts[violationId] = DateTime.now();
     }
-    
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      
+
       final start = PaymentScreen.paymentStarts[violationId]!;
       final elapsed = DateTime.now().difference(start).inSeconds;
       final remaining = 300 - elapsed;
-      
+
       if (remaining <= 0) {
         timer.cancel();
         PaymentScreen.paymentStarts.remove(violationId);
@@ -75,7 +73,8 @@ class _PaymentScreenState extends State<PaymentScreen>
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(_s.tr('Phiên thanh toán đã hết hạn (5 phút)', 'Payment session expired')),
+              content: Text(_s.tr('Phiên thanh toán đã hết hạn (5 phút)',
+                  'Payment session expired')),
               backgroundColor: AppTheme.dangerColor,
             ),
           );
@@ -154,6 +153,10 @@ class _PaymentScreenState extends State<PaymentScreen>
     final violation = args;
     final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
 
+    if (violation.isComplaintPending && !_paymentDone) {
+      return _buildComplaintPendingBlockedPage(violation);
+    }
+
     if (_paymentDone) return _buildSuccessPage(violation, formatter);
 
     return Scaffold(
@@ -215,11 +218,19 @@ class _PaymentScreenState extends State<PaymentScreen>
                     // ── Pay Button (Auto Verification) ─
                     // ── Auto Verification Listener ─
                     StreamBuilder<DocumentSnapshot>(
-                      stream: FirebaseFirestore.instance.collection('violations').doc(violation.id).snapshots(),
+                      stream: FirebaseFirestore.instance
+                          .collection('violations')
+                          .doc(violation.id)
+                          .snapshots(),
                       builder: (context, snapshot) {
-                        if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
-                          final data = snapshot.data!.data() as Map<String, dynamic>?;
-                          if (data != null && data['status'] == 'paid' && !_paymentDone) {
+                        if (snapshot.hasData &&
+                            snapshot.data != null &&
+                            snapshot.data!.exists) {
+                          final data =
+                              snapshot.data!.data() as Map<String, dynamic>?;
+                          if (data != null &&
+                              data['status'] == 'paid' &&
+                              !_paymentDone) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               if (mounted) {
                                 setState(() {
@@ -232,50 +243,62 @@ class _PaymentScreenState extends State<PaymentScreen>
 
                         return Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 20, horizontal: 16),
                           decoration: BoxDecoration(
                             color: AppTheme.infoColor.withOpacity(0.08),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppTheme.infoColor.withOpacity(0.3)),
+                            border: Border.all(
+                                color: AppTheme.infoColor.withOpacity(0.3)),
                           ),
                           child: Column(
                             children: [
                               const SizedBox(
                                 width: 28,
                                 height: 28,
-                                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.infoColor),
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: AppTheme.infoColor),
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                _s.tr('Hệ thống đang kiểm tra giao dịch...', 'Waiting for money transfer...'),
-                                style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.infoColor, fontSize: 16),
+                                _s.tr('Hệ thống đang kiểm tra giao dịch...',
+                                    'Waiting for money transfer...'),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.infoColor,
+                                    fontSize: 16),
                               ),
                               const SizedBox(height: 6),
-                                Text(
-                                  _s.tr('Trang này sẽ tự động chuyển hướng khi hệ thống ghi nhận bạn đã thanh toán thành công (thường mất 10-30 giây).', 'This page will auto redirect upon successful transfer.'),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.textSecondary.withOpacity(0.8),
+                              Text(
+                                _s.tr(
+                                    'Trang này sẽ tự động chuyển hướng khi hệ thống ghi nhận bạn đã thanh toán thành công (thường mất 10-30 giây).',
+                                    'This page will auto redirect upon successful transfer.'),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      AppTheme.textSecondary.withOpacity(0.8),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.dangerColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '⏳ Hủy giao dịch trong: $_formattedTime',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.dangerColor,
                                   ),
                                 ),
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.dangerColor.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '⏳ Hủy giao dịch trong: $_formattedTime',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppTheme.dangerColor,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -293,9 +316,100 @@ class _PaymentScreenState extends State<PaymentScreen>
     );
   }
 
+  Widget _buildComplaintPendingBlockedPage(Violation violation) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_s.tr('Nộp phạt', 'Payment')),
+        backgroundColor: AppTheme.primaryColor,
+        foregroundColor: Colors.white,
+      ),
+      backgroundColor: AppTheme.surfaceColor,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.warningColor.withOpacity(0.3)),
+              boxShadow: AppTheme.cardShadow,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.hourglass_top_rounded,
+                  color: AppTheme.warningColor,
+                  size: 48,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _s.tr(
+                      'Chờ phản hồi khiếu nại', 'Awaiting complaint response'),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _s.tr(
+                    'Vi phạm này đang chờ xử lý khiếu nại nên tạm thời chưa thể nộp phạt.',
+                    'This violation is under complaint review, so payment is temporarily disabled.',
+                  ),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    height: 1.45,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  violation.violationType,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      _s.tr('Quay lại', 'Go back'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String _removeDiacritics(String str) {
-    const withDia = 'áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ';
-    const withoutDia = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyydAAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYD';
+    const withDia =
+        'áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ';
+    const withoutDia =
+        'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyydAAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYD';
     for (int i = 0; i < withDia.length; i++) {
       str = str.replaceAll(withDia[i], withoutDia[i]);
     }
@@ -304,7 +418,8 @@ class _PaymentScreenState extends State<PaymentScreen>
 
   Widget _buildProfessionalQR(Violation v, NumberFormat fmt) {
     // Determine a safe string for the name
-    final String rawName = _s.userName.trim().isNotEmpty ? _s.userName : 'VNETRAFFIC_USER';
+    final String rawName =
+        _s.userName.trim().isNotEmpty ? _s.userName : 'VNETRAFFIC_USER';
     final String cleanName = _removeDiacritics(rawName);
     final safeNameRegex = cleanName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
     final String contentMsg = 'NP${v.id}$safeNameRegex'.toUpperCase();
@@ -341,8 +456,8 @@ class _PaymentScreenState extends State<PaymentScreen>
             child: Column(
               children: [
                 Text(
-                  _s.tr('Quét mã qua Ứng dụng Ngân hàng',
-                      'Scan via Banking App'),
+                  _s.tr(
+                      'Quét mã qua Ứng dụng Ngân hàng', 'Scan via Banking App'),
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -495,8 +610,6 @@ class _PaymentScreenState extends State<PaymentScreen>
       ),
     );
   }
-
-
 
   Widget _buildSuccessPage(Violation v, NumberFormat fmt) {
     return Scaffold(

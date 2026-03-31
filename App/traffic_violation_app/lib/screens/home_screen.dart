@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 // mock_data import removed — all user data now comes from Firestore via AppSettings
@@ -9,12 +10,12 @@ import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/notification_service.dart';
 import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:traffic_violation_app/screens/violations_screen.dart';
 import 'package:traffic_violation_app/screens/profile_screen.dart';
 import 'package:traffic_violation_app/screens/vehicles_screen.dart'
     as home_vehicles;
 import 'package:traffic_violation_app/widgets/app_info_dialogs.dart';
+import 'package:traffic_violation_app/widgets/violation_image.dart';
 import 'dart:async';
 
 class HomeScreen extends StatefulWidget {
@@ -32,11 +33,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final AppSettings _settings = AppSettings();
   List<Violation> _violations = [];
   bool _isLoading = true;
+  bool _isRefreshingCore = false;
   StreamSubscription? _newViolationSub;
   StreamSubscription? _connectionSub;
   StreamSubscription? _firestoreSub;
   StreamSubscription? _notifCountSub; // realtime unread notification count
   StreamSubscription? _userPointsSub; // realtime GPLX points from Firestore
+  String? _boundRealtimeUid;
 
   late AnimationController _fadeController;
   late AnimationController _slideController;
@@ -44,6 +47,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // Document wallet state
   int _walletPage = 0;
   final PageController _walletPageController = PageController();
+  static const List<String> _licenseClassOptions = <String>[
+    'A1',
+    'A2',
+    'A',
+    'B1',
+    'B2',
+    'C',
+    'D',
+    'E',
+    'F',
+  ];
+  static const List<String> _licenseVehicleOptions = <String>[
+    'Xe máy',
+    'Ô tô',
+    'Ô tô tải',
+    'Ô tô khách',
+    'Xe đầu kéo',
+    'Xe máy chuyên dùng',
+  ];
 
   @override
   void initState() {
@@ -67,11 +89,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     NotificationService.onNotificationTap = (payload) {
       if (payload != null && mounted) {
-        Navigator.pushNamed(context, '/violation_detail', arguments: payload);
+        Navigator.pushNamed(context, '/violation-detail', arguments: payload);
       }
     };
 
     _newViolationSub = _api.newViolationStream.listen((violation) {
+      final activeUid = _resolveUid();
+      final violationUid = violation.userId.trim();
+      if (violationUid.isNotEmpty &&
+          (activeUid == null || activeUid != violationUid)) {
+        debugPrint(
+          'Skip popup for other user: violation user=$violationUid, active=$activeUid',
+        );
+        return;
+      }
+      // Merge into local list (dedupe by id) so stats update immediately
+      if (mounted) {
+        setState(() {
+          final exists = _violations.any((v) => v.id == violation.id);
+          if (!exists) _violations = [violation, ..._violations];
+        });
+      }
       _notif.showViolationNotification(violation);
       _settings.addNotification();
       _showNewViolationDialog(violation);
@@ -83,58 +121,193 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) setState(() {});
     });
 
-    final uid = _settings.uid;
-    _firestoreSub =
-        FirestoreService().violationsStream(userId: uid).listen((violations) {
+    _bindUserRealtimeStreams(force: true);
+
+    _api.testConnection();
+
+    _fadeController.forward();
+    _slideController.forward();
+  }
+
+  String? _resolveUid() {
+    final settingsUid = _settings.uid?.trim();
+    if (settingsUid != null && settingsUid.isNotEmpty) return settingsUid;
+    final authUid = fb.FirebaseAuth.instance.currentUser?.uid.trim();
+    if (authUid == null || authUid.isEmpty) return null;
+    return authUid;
+  }
+
+  void _bindUserRealtimeStreams({bool force = false}) {
+    final uid = _resolveUid();
+
+    if (uid == null) {
+      _boundRealtimeUid = null;
+      _firestoreSub?.cancel();
+      _firestoreSub = null;
+      _notifCountSub?.cancel();
+      _notifCountSub = null;
+      _userPointsSub?.cancel();
+      _userPointsSub = null;
+      if (_settings.unreadNotifications != 0) {
+        _settings.setNotificationCount(0);
+      }
       if (mounted) {
+        setState(() {
+          _violations = [];
+          _isLoading = false;
+        });
+      } else {
+        _violations = [];
+        _isLoading = false;
+      }
+      return;
+    }
+
+    if (!force &&
+        _boundRealtimeUid == uid &&
+        _firestoreSub != null &&
+        _notifCountSub != null &&
+        _userPointsSub != null) {
+      return;
+    }
+
+    _boundRealtimeUid = uid;
+    _firestoreSub?.cancel();
+    _notifCountSub?.cancel();
+    _userPointsSub?.cancel();
+
+    if (mounted) {
+      setState(() => _isLoading = true);
+    } else {
+      _isLoading = true;
+    }
+
+    _firestoreSub = FirestoreService().violationsStream(userId: uid).listen(
+      (violations) {
+        if (!mounted) return;
         setState(() {
           _violations = violations;
           _isLoading = false;
         });
-      }
-    });
+        if (violations.isEmpty) {
+          _syncFromApiFallback(uid);
+        }
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Home violations stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+        if (!mounted) return;
+        setState(() {
+          _violations = [];
+          _isLoading = false;
+        });
+        if (isDenied) _syncFromApiFallback(uid);
+      },
+    );
 
-    // ── Realtime notification badge from Firestore ──
-    if (uid != null) {
-      _notifCountSub =
-          FirestoreService().notificationsStream(uid).listen((notifs) {
+    _notifCountSub = FirestoreService().notificationsStream(uid).listen(
+      (notifs) {
         final unread = notifs.where((n) => !n.isRead).length;
         _settings.setNotificationCount(unread);
-      });
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Home notifications stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+        if (_settings.unreadNotifications != 0) {
+          _settings.setNotificationCount(0);
+        }
+      },
+    );
 
-      // ── Realtime user profile + GPLX data from Firestore ──
-      _userPointsSub = FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .snapshots()
-          .listen((doc) {
+    _userPointsSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen(
+      (doc) {
         if (doc.exists && mounted) {
           final data = doc.data();
           if (data != null) {
             _settings.applyRemoteProfileData(data);
           }
         }
-      });
-    }
-
-    _api.testConnection();
-
-    _fadeController.forward();
-    _slideController.forward();
-
-    // ── OTA Update Check (after 2s delay to let UI settle) ──
-    Future.delayed(const Duration(seconds: 2), () => _checkForAppUpdate());
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Home user profile stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+      },
+    );
   }
 
-  /// Check Firestore for a newer app version and show update dialog if available.
-  Future<void> _checkForAppUpdate() async {
+  /// Fallback: fetch violations from backend API when Firestore stream is empty.
+  /// Merges results into [_violations] by id (deduplication).
+  Future<void> _syncFromApiFallback(String uid) async {
     try {
-      final updateInfo = await UpdateService().checkForUpdate();
-      if (updateInfo != null && mounted) {
-        await UpdateService.showUpdateDialog(context, updateInfo: updateInfo);
-      }
+      final apiViolations = await _api.fetchViolations();
+      if (!mounted || apiViolations.isEmpty) return;
+      setState(() {
+        final ids = _violations.map((v) => v.id).toSet();
+        final newOnes = apiViolations.where((v) => !ids.contains(v.id)).toList();
+        if (newOnes.isNotEmpty) {
+          _violations = [..._violations, ...newOnes]
+            ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        }
+      });
+      debugPrint('🔄 Home fallback fetch: ${apiViolations.length} violations from API');
     } catch (e) {
-      debugPrint('📱 Update check skipped: $e');
+      debugPrint('⚠️ Home fallback fetch failed: $e');
+    }
+  }
+
+  Future<void> _refreshCoreData() async {
+    if (_isRefreshingCore) return;
+    _isRefreshingCore = true;
+    try {
+      final uid = _resolveUid();
+      if (uid == null) {
+        return;
+      }
+
+      final report = await _api.refreshCoreData(
+        uid,
+        taskTimeout: const Duration(seconds: 7),
+        hardTimeout: const Duration(seconds: 14),
+      );
+
+      await _syncFromApiFallback(uid);
+      _bindUserRealtimeStreams(force: true);
+      if (mounted) setState(() {});
+
+      if (mounted) {
+        final failedTasks = report.taskStatus.entries
+            .where((entry) => entry.value != 'success')
+            .map((entry) => entry.key)
+            .toList();
+        if (failedTasks.isNotEmpty) {
+          final statusText = report.timedOut
+              ? _settings.tr(
+                  'Làm mới một phần (hết thời gian chờ)',
+                  'Partial refresh (timeout)',
+                )
+              : _settings.tr(
+                  'Làm mới một phần',
+                  'Partial refresh',
+                );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$statusText: ${failedTasks.join(', ')}'),
+              backgroundColor: AppTheme.warningColor,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } finally {
+      _isRefreshingCore = false;
     }
   }
 
@@ -176,39 +349,42 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                violation.violationType,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${_settings.tr('Mức phạt', 'Fine')}: ${formatter.format(violation.fineAmount)}',
-                style: const TextStyle(
-                    color: AppTheme.dangerColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
-              ),
-              const SizedBox(height: 12),
-              if (violation.imageUrl.isNotEmpty &&
-                  violation.imageUrl.startsWith('http'))
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    violation.imageUrl,
-                    height: 140,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  violation.violationType,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : AppTheme.textPrimary,
                   ),
                 ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  '${_settings.tr('Mức phạt', 'Fine')}: ${formatter.format(violation.fineAmount)}',
+                  style: const TextStyle(
+                      color: AppTheme.dangerColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                if (violation.imageUrl.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: double.maxFinite,
+                      child: ViolationImage(
+                        imageUrl: violation.imageUrl,
+                        height: 140,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -224,7 +400,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Navigator.pop(ctx);
                 // Also switch to 'Violations' tab just in case
                 setState(() => _selectedIndex = 1);
-                Navigator.pushNamed(context, '/violation_detail',
+                Navigator.pushNamed(context, '/violation-detail',
                     arguments: violation.id);
               },
               style: ElevatedButton.styleFrom(
@@ -253,10 +429,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _firestoreSub?.cancel();
     _notifCountSub?.cancel();
     _userPointsSub?.cancel();
+    _boundRealtimeUid = null;
     super.dispose();
   }
 
   void _onSettingsChanged() {
+    _bindUserRealtimeStreams();
     if (mounted) setState(() {});
   }
 
@@ -282,7 +460,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  Trang chủ | Vi phạm | [+ FAB] | Ví giấy tờ | Cá nhân
   // ═══════════════════════════════════════════════════════════════
   Widget _buildBottomNav() {
-    final pendingCount = _violations.where((v) => v.isPending).length;
+    final pendingCount = _violations.where((v) => v.canPay).length;
 
     return Container(
       decoration: BoxDecoration(
@@ -417,186 +595,249 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  void _openNotifications() {
+    _settings.clearNotifications();
+    Navigator.pushNamed(context, '/notifications');
+  }
+
   /// Bottom sheet when tapping the + FAB
   void _showFunctionsSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(28),
-            topRight: Radius.circular(28),
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        final sheetBg = isDark ? const Color(0xFF121A28) : Colors.white;
+        final dividerColor =
+            isDark ? const Color(0xFF2B3650) : AppTheme.dividerColor;
+        final titleColor =
+            isDark ? const Color(0xFFE8EEFB) : AppTheme.textPrimary;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: sheetBg,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+            border: Border(
+              top: BorderSide(color: dividerColor.withOpacity(0.9)),
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Drag handle
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(top: 12),
-              decoration: BoxDecoration(
-                color: AppTheme.dividerColor,
-                borderRadius: BorderRadius.circular(2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12),
+                decoration: BoxDecoration(
+                  color: dividerColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFE53935), Color(0xFFD32F2F)],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFE53935), Color(0xFFD32F2F)],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      borderRadius: BorderRadius.circular(10),
+                      child: const Icon(Icons.apps_rounded,
+                          color: Colors.white, size: 20),
                     ),
-                    child: const Icon(Icons.apps_rounded,
-                        color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _settings.tr('Chức năng', 'Functions'),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
+                    const SizedBox(width: 12),
+                    Text(
+                      _settings.tr('Chức năng', 'Functions'),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: titleColor,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const Divider(color: AppTheme.dividerColor),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: GridView.count(
-                crossAxisCount: 4,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 12,
-                childAspectRatio: 0.85,
-                children: [
-                  _buildSheetItem(
-                      Icons.search_rounded,
-                      _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'),
-                      const Color(0xFFE53935), () {
-                    Navigator.pop(ctx);
-                    _showViolationLookup();
-                  }),
-                  _buildSheetItem(
-                      Icons.payment_rounded,
-                      _settings.tr('Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
-                      const Color(0xFFF57C00), () {
-                    Navigator.pop(ctx);
-                    _showPaymentList();
-                  }),
-                  _buildSheetItem(
-                      Icons.history_rounded,
-                      _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'),
-                      const Color(0xFF1565C0), () {
-                    Navigator.pop(ctx);
-                    setState(() => _selectedIndex = 1);
-                  }),
-                  _buildSheetItem(
-                      Icons.rate_review_rounded,
-                      _settings.tr('Khiếu nại\nvi phạm', 'File\nComplaint'),
-                      const Color(0xFF2E7D32), () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/complaint');
-                  }),
-                  _buildSheetItem(
-                      Icons.gavel_rounded,
-                      _settings.tr('Luật\nGTĐB', 'Traffic\nLaws'),
-                      AppTheme.warningColor, () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/traffic-laws');
-                  }),
-                  _buildSheetItem(
-                      Icons.qr_code_scanner_rounded,
-                      _settings.tr('Quét\nQR Code', 'Scan\nQR Code'),
-                      AppTheme.infoColor, () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/qr-scan');
-                  }),
-                  _buildSheetItem(
-                      Icons.directions_car_rounded,
-                      _settings.tr('Phương\ntiện', 'My\nVehicles'),
-                      const Color(0xFF5C6BC0), () {
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const home_vehicles.VehiclesScreen()),
-                    );
-                  }),
-                  _buildSheetItem(
-                      Icons.support_agent_rounded,
-                      _settings.tr('Hỗ trợ\ntrực tuyến', 'Online\nSupport'),
-                      AppTheme.successColor, () {
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Hotline: 1900.xxxx')),
-                    );
-                  }),
-                  _buildSheetItem(
+              Divider(color: dividerColor),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: GridView.count(
+                  crossAxisCount: 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 0.85,
+                  children: [
+                    _buildSheetItem(
+                        Icons.search_rounded,
+                        _settings.tr('Tra cứu\nvi phạm', 'Search\nViolations'),
+                        const Color(0xFFE53935), () {
+                      Navigator.pop(ctx);
+                      _showViolationLookup();
+                    }),
+                    _buildSheetItem(
+                        Icons.payment_rounded,
+                        _settings.tr(
+                            'Nộp phạt\ntrực tuyến', 'Pay Fines\nOnline'),
+                        const Color(0xFFF57C00), () {
+                      Navigator.pop(ctx);
+                      _showPaymentList();
+                    }),
+                    _buildSheetItem(
+                        Icons.history_rounded,
+                        _settings.tr('Lịch sử\nvi phạm', 'Violation\nHistory'),
+                        const Color(0xFF1565C0), () {
+                      Navigator.pop(ctx);
+                      setState(() => _selectedIndex = 1);
+                    }),
+                    _buildSheetItem(
+                        Icons.rate_review_rounded,
+                        _settings.tr('Khiếu nại\nvi phạm', 'File\nComplaint'),
+                        const Color(0xFF2E7D32), () {
+                      Navigator.pop(ctx);
+                      Navigator.pushNamed(context, '/complaint');
+                    }),
+                    _buildSheetItem(
+                        Icons.gavel_rounded,
+                        _settings.tr('Luật\nGTĐB', 'Traffic\nLaws'),
+                        AppTheme.warningColor, () {
+                      Navigator.pop(ctx);
+                      Navigator.pushNamed(context, '/traffic-laws');
+                    }),
+                    _buildSheetItem(
+                        Icons.qr_code_scanner_rounded,
+                        _settings.tr('Quét\nQR Code', 'Scan\nQR Code'),
+                        AppTheme.infoColor, () {
+                      Navigator.pop(ctx);
+                      Navigator.pushNamed(context, '/qr-scan');
+                    }),
+                    _buildSheetItem(
+                        Icons.directions_car_rounded,
+                        _settings.tr('Phương\ntiện', 'My\nVehicles'),
+                        const Color(0xFF5C6BC0), () {
+                      Navigator.pop(ctx);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const home_vehicles.VehiclesScreen()),
+                      );
+                    }),
+                    _buildSheetItem(
+                        Icons.support_agent_rounded,
+                        _settings.tr('Hỗ trợ\ntrực tuyến', 'Online\nSupport'),
+                        AppTheme.successColor, () {
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Hotline: 1900.xxxx')),
+                      );
+                    }),
+                    _buildSheetItem(
                       Icons.notifications_outlined,
                       _settings.tr('Thông\nbáo', 'Notifi-\ncations'),
-                      Colors.deepOrange, () {
-                    Navigator.pop(ctx);
-                    Navigator.pushNamed(context, '/notifications');
-                  }),
-                  _buildSheetItem(
-                      Icons.badge_rounded,
-                      _settings.tr('Ví\ngiấy tờ', 'Doc\nWallet'),
-                      const Color(0xFF1A237E), () {
-                    Navigator.pop(ctx);
-                    setState(() => _selectedIndex = 2);
-                  }),
-                  _buildSheetItem(
-                      Icons.router_rounded,
-                      _settings.tr('Chỉnh\nIP Server', 'Server\nIP'),
-                      AppTheme.primaryColor, () {
-                    Navigator.pop(ctx);
-                    setState(() => _selectedIndex = 3);
-                  }),
-                  _buildSheetItem(
-                      Icons.info_outline_rounded,
-                      _settings.tr('Về\nứng dụng', 'About\nApp'),
-                      AppTheme.textSecondary, () {
-                    Navigator.pop(ctx);
-                    AppInfoDialogs.showAboutDialog(context, _settings);
-                  }),
-                ],
+                      Colors.deepOrange,
+                      () {
+                        Navigator.pop(ctx);
+                        _openNotifications();
+                      },
+                      badgeCount: _settings.unreadNotifications,
+                    ),
+                    _buildSheetItem(
+                        Icons.badge_rounded,
+                        _settings.tr('Ví\ngiấy tờ', 'Doc\nWallet'),
+                        const Color(0xFF1A237E), () {
+                      Navigator.pop(ctx);
+                      setState(() => _selectedIndex = 2);
+                    }),
+                    _buildSheetItem(
+                        Icons.router_rounded,
+                        _settings.tr('Chỉnh\nIP Server', 'Server\nIP'),
+                        AppTheme.primaryColor, () {
+                      Navigator.pop(ctx);
+                      setState(() => _selectedIndex = 3);
+                    }),
+                    _buildSheetItem(
+                        Icons.info_outline_rounded,
+                        _settings.tr('Về\nứng dụng', 'About\nApp'),
+                        AppTheme.textSecondary, () {
+                      Navigator.pop(ctx);
+                      AppInfoDialogs.showAboutDialog(context, _settings);
+                    }),
+                  ],
+                ),
               ),
-            ),
-            SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
-          ],
-        ),
-      ),
+              SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildSheetItem(
-      IconData icon, String label, Color color, VoidCallback onTap) {
+      IconData icon, String label, Color color, VoidCallback onTap,
+      {int badgeCount = 0}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tileTextColor =
+        isDark ? const Color(0xFFDCE5F7) : AppTheme.textPrimary;
+    final tileBorderColor = color.withOpacity(isDark ? 0.32 : 0.16);
+    final tileBg = color.withOpacity(isDark ? 0.22 : 0.1);
+
     return GestureDetector(
       onTap: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: color, size: 24),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: tileBg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: tileBorderColor),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              if (badgeCount > 0)
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppTheme.dangerColor,
+                      borderRadius: BorderRadius.circular(99),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF121A28) : Colors.white,
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Text(
+                      badgeCount > 99 ? '99+' : '$badgeCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
@@ -604,10 +845,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textPrimary,
+              color: tileTextColor,
               height: 1.2,
             ),
           ),
@@ -621,15 +862,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ═══════════════════════════════════════════════════════════════
   Widget _buildHomePage() {
     return RefreshIndicator(
-      onRefresh: () async {
-        if (_settings.uid != null) {
-          await _settings.loadFromFirestore(_settings.uid!);
-          final _ = await FirestoreService()
-              .violationsStream(userId: _settings.uid!)
-              .first;
-        }
-        setState(() {});
-      },
+      onRefresh: _refreshCoreData,
       color: AppTheme.primaryColor,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -670,15 +903,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: AppTheme.surfaceColor,
       body: RefreshIndicator(
-        onRefresh: () async {
-          if (_settings.uid != null) {
-            await _settings.loadFromFirestore(_settings.uid!);
-            final _ = await FirestoreService()
-                .violationsStream(userId: _settings.uid!)
-                .first;
-          }
-          setState(() {});
-        },
+        onRefresh: _refreshCoreData,
         color: AppTheme.primaryColor,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -778,6 +1003,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                     );
                   }),
+                  if (licenses.isEmpty) ...[
+                    _buildAddLicensePromptCard(),
+                    const SizedBox(height: 12),
+                  ],
                   const SizedBox(height: 100),
                 ]),
               ),
@@ -904,10 +1133,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           child: const Icon(Icons.notifications_outlined,
                               color: Colors.white),
                         ),
-                        onPressed: () {
-                          _settings.clearNotifications();
-                          Navigator.pushNamed(context, '/notifications');
-                        },
+                        onPressed: _openNotifications,
                       ),
                     ),
                   ],
@@ -966,27 +1192,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  CONNECTION BANNER
   // ═══════════════════════════════════════════════════════════════
   Widget _buildConnectionBanner() {
-    final isConnected = _api.isConnected;
-    final isRealtime = _api.isWebSocketConnected;
+    final status = _api.connectionStatus;
+
+    final MaterialColor color;
+    final IconData icon;
+    final String label;
+    final String badge;
+
+    switch (status) {
+      case ConnectionStatus.connected:
+        color = Colors.green;
+        icon = Icons.bolt_rounded;
+        label = _settings.tr('Đã kết nối', 'Connected');
+        badge = 'LIVE';
+      case ConnectionStatus.connecting:
+        color = Colors.orange;
+        icon = Icons.sync_rounded;
+        label = _settings.tr('Đang kết nối...', 'Connecting...');
+        badge = '';
+      case ConnectionStatus.disconnected:
+        color = Colors.red;
+        icon = Icons.wifi_off_rounded;
+        label = _settings.tr('Mất kết nối máy chủ', 'Server disconnected');
+        badge = '';
+    }
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 500),
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isConnected
-            ? (isRealtime
-                ? Colors.green.withOpacity(0.08)
-                : Colors.blue.withOpacity(0.08))
-            : Colors.red.withOpacity(0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(AppTheme.radiusM),
-        border: Border.all(
-          color: isConnected
-              ? (isRealtime
-                  ? Colors.green.withOpacity(0.25)
-                  : Colors.blue.withOpacity(0.25))
-              : Colors.red.withOpacity(0.25),
-        ),
+        border: Border.all(color: color.withOpacity(0.25)),
       ),
       child: Row(
         children: [
@@ -994,60 +1232,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: (isConnected
-                      ? (isRealtime ? Colors.green : Colors.blue)
-                      : Colors.red)
-                  .withOpacity(0.12),
+              color: color.withOpacity(0.12),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
-              isConnected
-                  ? (isRealtime ? Icons.bolt_rounded : Icons.sync_rounded)
-                  : Icons.wifi_off_rounded,
-              color: isConnected
-                  ? (isRealtime ? Colors.green : Colors.blue)
-                  : Colors.red,
-              size: 18,
-            ),
+            child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              isConnected
-                  ? (isRealtime
-                      ? _settings.tr(
-                          'Đã kết nối (Real-time)', 'Connected (Real-time)')
-                      : _settings.tr(
-                          'Đã kết nối (Polling)', 'Connected (Polling)'))
-                  : _settings.tr('Mất kết nối máy chủ', 'Server disconnected'),
+              label,
               style: TextStyle(
-                color: isConnected
-                    ? (isRealtime ? Colors.green[700] : Colors.blue[700])
-                    : Colors.red[700],
+                color: color[700],
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
               ),
             ),
           ),
-          if (isConnected)
+          if (badge.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color:
-                    (isRealtime ? Colors.green : Colors.blue).withOpacity(0.15),
+                color: color.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                isRealtime ? 'LIVE' : 'SYNC',
+                badge,
                 style: TextStyle(
-                  color: isRealtime ? Colors.green[800] : Colors.blue[800],
+                  color: color[800],
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.5,
                 ),
               ),
             ),
-          if (!isConnected)
+          if (status == ConnectionStatus.disconnected)
             GestureDetector(
               onTap: () {
                 _api.reconnect();
@@ -1137,33 +1355,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  DOCUMENT WALLET (Ví giấy tờ — CCCD + GPLX + Điểm)
   // ═══════════════════════════════════════════════════════════════
   List<Map<String, String>> _walletLicenses() {
-    final fromProfile = _settings.driverLicenses
+    return _settings.driverLicenses
         .where((l) =>
-            (l['class'] ?? '').isNotEmpty ||
+            (l['class'] ?? '').isNotEmpty &&
             (l['licenseNumber'] ?? '').isNotEmpty)
         .map((l) => Map<String, String>.from(l))
         .toList();
-    if (fromProfile.isNotEmpty) return fromProfile;
-
-    return [
-      {
-        'class': 'B2',
-        'vehicleType': _settings.tr('Ô tô dưới 9 chỗ', 'Car under 9 seats'),
-        'issueDate': '15/03/2020',
-        'expiryDate': '15/03/2030',
-        'licenseNumber': '079201001234',
-        'issuedBy': _settings.userLicenseIssuedBy,
-      },
-      {
-        'class': 'A2',
-        'vehicleType':
-            _settings.tr('Xe máy dưới 175cc', 'Motorcycle under 175cc'),
-        'issueDate': '20/06/2018',
-        'expiryDate': _settings.tr('Không thời hạn', 'No expiry'),
-        'licenseNumber': '079201001234',
-        'issuedBy': _settings.userLicenseIssuedBy,
-      },
-    ];
   }
 
   String _resolveLicenseType(Map<String, String> license) {
@@ -1185,6 +1382,59 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return 'car';
     }
     return 'motorcycle';
+  }
+
+  bool _isMotorcycleLicenseClass(String licenseClass) {
+    return licenseClass.toUpperCase().trim().startsWith('A');
+  }
+
+  String _defaultVehicleTypeForLicenseClass(String licenseClass) {
+    return _isMotorcycleLicenseClass(licenseClass) ? 'Xe máy' : 'Ô tô';
+  }
+
+  DateTime? _tryParseLicenseDate(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    final direct = DateTime.tryParse(value);
+    if (direct != null) return direct;
+
+    final slash = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
+    final dash = RegExp(r'^(\d{2})-(\d{2})-(\d{4})$');
+    final slashMatch = slash.firstMatch(value);
+    if (slashMatch != null) {
+      final day = int.tryParse(slashMatch.group(1)!);
+      final month = int.tryParse(slashMatch.group(2)!);
+      final year = int.tryParse(slashMatch.group(3)!);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    final dashMatch = dash.firstMatch(value);
+    if (dashMatch != null) {
+      final day = int.tryParse(dashMatch.group(1)!);
+      final month = int.tryParse(dashMatch.group(2)!);
+      final year = int.tryParse(dashMatch.group(3)!);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  String _formatLicenseDate(DateTime date) {
+    return DateFormat('dd/MM/yyyy').format(date);
+  }
+
+  String _autoLicenseExpiry({
+    required String licenseClass,
+    required String issueDate,
+  }) {
+    if (_isMotorcycleLicenseClass(licenseClass)) {
+      return _settings.tr('Vĩnh viễn', 'Permanent');
+    }
+    final issued = _tryParseLicenseDate(issueDate) ?? DateTime.now();
+    final expiry = DateTime(issued.year + 10, issued.month, issued.day);
+    return _formatLicenseDate(expiry);
   }
 
   int _pointsForLicenseType(String licenseType) {
@@ -1235,8 +1485,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required String successVi,
     required String successEn,
   }) async {
-    final uid = _settings.uid;
-    if (uid == null) return;
+    final uid = _resolveUid();
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settings.tr(
+            'Không xác định được tài khoản đang đăng nhập.',
+            'Unable to resolve current signed-in account.',
+          )),
+          backgroundColor: AppTheme.warningColor,
+        ),
+      );
+      return;
+    }
 
     showDialog(
       context: context,
@@ -1254,13 +1516,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           backgroundColor: AppTheme.successColor,
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
+      final raw = e.toString().trim();
+      final msg = raw.isEmpty
+          ? _settings.tr('Lỗi khi gửi yêu cầu chỉnh sửa giấy tờ.',
+              'Failed to send document update request.')
+          : raw.replaceFirst('Exception: ', '');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_settings.tr('Lỗi khi gửi yêu cầu chỉnh sửa giấy tờ.',
-              'Failed to send document update request.')),
+          content: Text(msg),
           backgroundColor: AppTheme.dangerColor,
         ),
       );
@@ -1272,9 +1538,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final idCardController = TextEditingController(text: _settings.userIdCard);
     final genderController = TextEditingController(text: _settings.userGender);
     final nationalityController = TextEditingController(
-      text: _settings.userNationality.isNotEmpty
-          ? _settings.userNationality
-          : _settings.tr('Việt Nam', 'Vietnam'),
+      text:
+          _settings.userNationality.isNotEmpty ? _settings.userNationality : '',
     );
     final originController = TextEditingController(
       text: _settings.userPlaceOfOrigin,
@@ -1424,18 +1689,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _showEditLicenseDialog({required int licenseIndex}) {
-    final licenses = _walletLicenses();
-    if (licenses.isEmpty) return;
-    final safeIndex = licenseIndex < 0
-        ? 0
-        : (licenseIndex >= licenses.length
-            ? licenses.length - 1
-            : licenseIndex);
-    final current = licenses[safeIndex];
+    final licenses =
+        _walletLicenses().map((l) => Map<String, String>.from(l)).toList();
+    final isAddMode =
+        licenses.isEmpty || licenseIndex < 0 || licenseIndex >= licenses.length;
+    final safeIndex = isAddMode
+        ? -1
+        : (licenseIndex < 0
+            ? 0
+            : (licenseIndex >= licenses.length
+                ? licenses.length - 1
+                : licenseIndex));
+    final current = isAddMode ? <String, String>{} : licenses[safeIndex];
 
-    final classController = TextEditingController(text: current['class'] ?? '');
-    final vehicleTypeController =
-        TextEditingController(text: current['vehicleType'] ?? '');
+    final classOptions = _licenseClassOptions.toList(growable: true);
+    final currentClass = (current['class'] ?? '').trim().toUpperCase();
+    if (currentClass.isNotEmpty && !classOptions.contains(currentClass)) {
+      classOptions.add(currentClass);
+    }
+    String selectedClass =
+        currentClass.isNotEmpty ? currentClass : classOptions.first;
+
+    final vehicleOptions = _licenseVehicleOptions.toList(growable: true);
+    final currentVehicleType = (current['vehicleType'] ?? '').trim();
+    if (currentVehicleType.isNotEmpty &&
+        !vehicleOptions.contains(currentVehicleType)) {
+      vehicleOptions.add(currentVehicleType);
+    }
+    String selectedVehicleType = currentVehicleType.isNotEmpty
+        ? currentVehicleType
+        : _defaultVehicleTypeForLicenseClass(selectedClass);
+
     final issueDateController =
         TextEditingController(text: current['issueDate'] ?? '');
     final expiryDateController =
@@ -1445,121 +1729,217 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final issuedByController = TextEditingController(
       text: current['issuedBy'] ?? _settings.userLicenseIssuedBy,
     );
+    if (expiryDateController.text.trim().isEmpty) {
+      expiryDateController.text = _autoLicenseExpiry(
+        licenseClass: selectedClass,
+        issueDate: issueDateController.text.trim(),
+      );
+    }
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_settings.tr('Chỉnh sửa GPLX', 'Edit Driver License')),
-        content: SingleChildScrollView(
-          child: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: classController,
-                  decoration: InputDecoration(
-                    labelText: _settings.tr('Hạng bằng', 'License class'),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: vehicleTypeController,
-                  decoration: InputDecoration(
-                    labelText: _settings.tr('Loại xe', 'Vehicle type'),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: numberController,
-                  decoration: InputDecoration(
-                    labelText: _settings.tr('Số GPLX', 'License number'),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: issueDateController,
-                  decoration: InputDecoration(
-                    labelText: _settings.tr('Ngày cấp', 'Issue date'),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: expiryDateController,
-                  decoration: InputDecoration(
-                    labelText: _settings.tr('Có giá trị đến', 'Valid until'),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: issuedByController,
-                  decoration: InputDecoration(
-                    labelText:
-                        _settings.tr('Nơi cấp GPLX', 'Issued by authority'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(_settings.tr('Hủy', 'Cancel')),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (classController.text.trim().isEmpty ||
-                  numberController.text.trim().isEmpty ||
-                  vehicleTypeController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(_settings.tr(
-                      'Vui lòng nhập đủ Hạng bằng, Loại xe và Số GPLX',
-                      'Please fill class, vehicle type and license number',
-                    )),
-                    backgroundColor: AppTheme.warningColor,
-                  ),
-                );
-                return;
-              }
-
-              final updated = licenses
-                  .map((l) => Map<String, String>.from(l))
-                  .toList(growable: false);
-              updated[safeIndex] = {
-                'class': classController.text.trim(),
-                'vehicleType': vehicleTypeController.text.trim(),
-                'issueDate': issueDateController.text.trim(),
-                'expiryDate': expiryDateController.text.trim(),
-                'licenseNumber': numberController.text.trim(),
-                'issuedBy': issuedByController.text.trim(),
-              };
-
-              Navigator.pop(ctx);
-              _submitWalletUpdateRequest(
-                {
-                  'driverLicenses': updated,
-                  ..._legacyLicenseFieldsFrom(updated),
-                  'licenseIssuedBy': issuedByController.text.trim(),
-                  'requestSection': 'wallet_gplx',
-                },
-                successVi:
-                    'Đã gửi yêu cầu cập nhật GPLX. Vui lòng chờ admin duyệt.',
-                successEn:
-                    'Driver license update request sent. Please wait for admin approval.',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          Future<void> pickIssueDate() async {
+            final now = DateTime.now();
+            final initialDate =
+                _tryParseLicenseDate(issueDateController.text.trim()) ?? now;
+            final picked = await showDatePicker(
+              context: ctx,
+              initialDate: initialDate,
+              firstDate: DateTime(1950),
+              lastDate: DateTime(now.year + 30),
+            );
+            if (picked == null) return;
+            setDialogState(() {
+              issueDateController.text = _formatLicenseDate(picked);
+              expiryDateController.text = _autoLicenseExpiry(
+                licenseClass: selectedClass,
+                issueDate: issueDateController.text.trim(),
               );
-            },
-            child: Text(_settings.tr('Gửi duyệt', 'Submit for approval')),
-          ),
-        ],
+            });
+          }
+
+          return AlertDialog(
+            title: Text(_settings.tr(
+              isAddMode ? 'Thêm GPLX' : 'Chỉnh sửa GPLX',
+              isAddMode ? 'Add Driver License' : 'Edit Driver License',
+            )),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: selectedClass,
+                      items: classOptions
+                          .map(
+                            (value) => DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) return;
+                        setDialogState(() {
+                          selectedClass = value.trim().toUpperCase();
+                          selectedVehicleType =
+                              _defaultVehicleTypeForLicenseClass(selectedClass);
+                          expiryDateController.text = _autoLicenseExpiry(
+                            licenseClass: selectedClass,
+                            issueDate: issueDateController.text.trim(),
+                          );
+                        });
+                      },
+                      decoration: InputDecoration(
+                        labelText: _settings.tr('Hạng bằng', 'License class'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      value: selectedVehicleType,
+                      items: vehicleOptions
+                          .map(
+                            (value) => DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) return;
+                        setDialogState(
+                            () => selectedVehicleType = value.trim());
+                      },
+                      decoration: InputDecoration(
+                        labelText: _settings.tr('Loại xe', 'Vehicle type'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: numberController,
+                      decoration: InputDecoration(
+                        labelText: _settings.tr('Số GPLX', 'License number'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: issueDateController,
+                      readOnly: true,
+                      onTap: pickIssueDate,
+                      decoration: InputDecoration(
+                        labelText: _settings.tr('Ngày cấp', 'Issue date'),
+                        hintText: 'dd/MM/yyyy',
+                        suffixIcon: const Icon(Icons.calendar_today_rounded),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: expiryDateController,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        labelText:
+                            _settings.tr('Có giá trị đến', 'Valid until'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: issuedByController,
+                      decoration: InputDecoration(
+                        labelText:
+                            _settings.tr('Nơi cấp GPLX', 'Issued by authority'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(_settings.tr('Hủy', 'Cancel')),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (selectedClass.trim().isEmpty ||
+                      numberController.text.trim().isEmpty ||
+                      selectedVehicleType.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(_settings.tr(
+                          'Vui lòng nhập đủ Hạng bằng, Loại xe và Số GPLX',
+                          'Please fill class, vehicle type and license number',
+                        )),
+                        backgroundColor: AppTheme.warningColor,
+                      ),
+                    );
+                    return;
+                  }
+
+                  final normalizedIssueDate = issueDateController.text.trim();
+                  final normalizedExpiryDate = _autoLicenseExpiry(
+                    licenseClass: selectedClass,
+                    issueDate: normalizedIssueDate,
+                  );
+
+                  final updated = licenses
+                      .map((l) => Map<String, String>.from(l))
+                      .toList(growable: true);
+                  final editedLicense = <String, String>{
+                    'class': selectedClass.trim().toUpperCase(),
+                    'vehicleType': selectedVehicleType.trim(),
+                    'issueDate': normalizedIssueDate,
+                    'expiryDate': normalizedExpiryDate,
+                    'licenseNumber': numberController.text.trim(),
+                    'issuedBy': issuedByController.text.trim(),
+                  };
+                  if (isAddMode) {
+                    updated.add(editedLicense);
+                  } else {
+                    updated[safeIndex] = editedLicense;
+                  }
+
+                  Navigator.pop(ctx);
+                  _submitWalletUpdateRequest(
+                    {
+                      'driverLicenses': updated,
+                      ..._legacyLicenseFieldsFrom(updated),
+                      'licenseIssuedBy': issuedByController.text.trim(),
+                      'requestSection': 'wallet_gplx',
+                    },
+                    successVi: isAddMode
+                        ? 'Đã gửi yêu cầu thêm GPLX. Vui lòng chờ admin duyệt.'
+                        : 'Đã gửi yêu cầu cập nhật GPLX. Vui lòng chờ admin duyệt.',
+                    successEn: isAddMode
+                        ? 'Driver license add request sent. Please wait for admin approval.'
+                        : 'Driver license update request sent. Please wait for admin approval.',
+                  );
+                },
+                child: Text(_settings.tr('Gửi duyệt', 'Submit for approval')),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildDocumentWallet() {
     final licenses = _walletLicenses();
-    final totalPages = 1 + licenses.length;
+    final hasLicenses = licenses.isNotEmpty;
+    final totalPages = hasLicenses ? 1 + licenses.length : 2;
+    if (_walletPage >= totalPages) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final targetPage = totalPages - 1;
+        if (_walletPageController.hasClients) {
+          _walletPageController.jumpToPage(targetPage);
+        }
+        setState(() => _walletPage = targetPage);
+      });
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -1599,38 +1979,97 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   onTap: () => _showCccdDetail(null),
                   child: _buildCccdCard(null),
                 ),
-                ...licenses.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final license = entry.value;
-                  final licenseType = _resolveLicenseType(license);
-                  final licensePoints = _pointsForLicenseType(licenseType);
-                  final isDisabled = licensePoints <= 0;
-                  return GestureDetector(
-                    onTap: () => _showLicenseDetail(
-                      licenseIndex: index,
-                      licenseClass: license['class'] ?? '',
-                      vehicleType: license['vehicleType'] ?? '',
-                      issueDate: license['issueDate'] ?? '',
-                      expiryDate: license['expiryDate'] ?? '',
-                      licenseNumber: license['licenseNumber'] ?? '',
-                      issuedBy: license['issuedBy'] ?? '',
-                      licenseType: licenseType,
-                      points: licensePoints,
-                      isDisabled: isDisabled,
-                    ),
-                    child: _buildLicenseCard(
-                      licenseClass: license['class'] ?? '',
-                      vehicleType: license['vehicleType'] ?? '',
-                      issueDate: license['issueDate'] ?? '',
-                      expiryDate: license['expiryDate'] ?? '',
-                      licenseNumber: license['licenseNumber'] ?? '',
-                      licenseType: licenseType,
-                      points: licensePoints,
-                      isDisabled: isDisabled,
-                    ),
-                  );
-                }),
+                if (hasLicenses)
+                  ...licenses.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final license = entry.value;
+                    final licenseType = _resolveLicenseType(license);
+                    final licensePoints = _pointsForLicenseType(licenseType);
+                    final isDisabled = licensePoints <= 0;
+                    return GestureDetector(
+                      onTap: () => _showLicenseDetail(
+                        licenseIndex: index,
+                        licenseClass: license['class'] ?? '',
+                        vehicleType: license['vehicleType'] ?? '',
+                        issueDate: license['issueDate'] ?? '',
+                        expiryDate: license['expiryDate'] ?? '',
+                        licenseNumber: license['licenseNumber'] ?? '',
+                        issuedBy: license['issuedBy'] ?? '',
+                        licenseType: licenseType,
+                        points: licensePoints,
+                        isDisabled: isDisabled,
+                      ),
+                      child: _buildLicenseCard(
+                        licenseClass: license['class'] ?? '',
+                        vehicleType: license['vehicleType'] ?? '',
+                        issueDate: license['issueDate'] ?? '',
+                        expiryDate: license['expiryDate'] ?? '',
+                        licenseNumber: license['licenseNumber'] ?? '',
+                        licenseType: licenseType,
+                        points: licensePoints,
+                        isDisabled: isDisabled,
+                      ),
+                    );
+                  })
+                else
+                  _buildAddLicensePromptCard(compact: true),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddLicensePromptCard({bool compact = false}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      padding: EdgeInsets.all(compact ? 16 : 18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE8F0FE), Color(0xFFF5F9FF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.22)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _settings.tr('Chưa có GPLX', 'No driver license yet'),
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _settings.tr(
+              'Thêm GPLX để theo dõi điểm và xử lý vi phạm theo đúng loại xe.',
+              'Add your license to track points and handle violations by vehicle type.',
+            ),
+            style:
+                const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ElevatedButton.icon(
+              onPressed: () => _showEditLicenseDialog(licenseIndex: -1),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(_settings.tr('Thêm GPLX', 'Add license')),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ),
         ],
@@ -1774,7 +2213,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         Text(
                           _settings.userDateOfBirth.isNotEmpty
                               ? _settings.userDateOfBirth
-                              : '01/01/2001',
+                              : '—',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 14,
@@ -2039,9 +2478,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (avatarUrl.startsWith('http')) {
       return DecorationImage(image: NetworkImage(avatarUrl), fit: BoxFit.cover);
     }
-    // Local file path (from image_picker)
-    return DecorationImage(
-        image: FileImage(File(avatarUrl)), fit: BoxFit.cover);
+    // Local file path (from image_picker) — guard against deleted cache files
+    final file = File(avatarUrl);
+    if (!file.existsSync()) return null;
+    return DecorationImage(image: FileImage(file), fit: BoxFit.cover);
   }
 
   // ── CCCD Detail Dialog ───────────────────────────────────────────
@@ -2166,22 +2606,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         _settings.profileInitialized &&
                                 _settings.userAddress.isNotEmpty
                             ? _settings.userAddress
-                            : _settings.tr('123 Nguyễn Huệ, Q.1, TP.HCM',
-                                '123 Nguyen Hue, D.1, HCMC'),
+                            : _settings.tr('Chưa cập nhật', 'Not updated'),
                         textPrimary,
                         textSecondary),
                     _buildDetailRow(
                         _settings.tr('Ngày cấp', 'Issue date'),
                         _settings.userIdCardIssueDate.isNotEmpty
                             ? _settings.userIdCardIssueDate
-                            : '15/01/2021',
+                            : _settings.tr('Chưa cập nhật', 'Not updated'),
                         textPrimary,
                         textSecondary),
                     _buildDetailRow(
                         _settings.tr('Có giá trị đến', 'Valid until'),
                         _settings.userIdCardExpiryDate.isNotEmpty
                             ? _settings.userIdCardExpiryDate
-                            : '15/01/2046',
+                            : _settings.tr('Chưa cập nhật', 'Not updated'),
                         textPrimary,
                         textSecondary),
                     const SizedBox(height: 16),
@@ -2757,10 +3196,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   //  FINE OVERVIEW SECTION
   // ═══════════════════════════════════════════════════════════════
   Widget _buildFineOverview() {
-    final pending = _violations.where((v) => v.isPending).length;
+    final pending = _violations.where((v) => v.canPay).length;
     final paid = _violations.where((v) => v.isPaid).length;
     final totalFine = _violations
-        .where((v) => v.isPending)
+        .where((v) => v.canPay)
         .fold<double>(0, (sum, v) => sum + v.fineAmount);
     final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
 
@@ -3342,7 +3781,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final unpaidViolations = _violations.where((v) => v.isPending).toList();
+        final unpaidViolations = _violations.where((v) => v.canPay).toList();
         final totalFine =
             unpaidViolations.fold<double>(0, (sum, v) => sum + v.fineAmount);
 

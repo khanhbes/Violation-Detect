@@ -79,6 +79,7 @@ const wrongwayCount = document.getElementById('wrongwayCount');
 const wronglaneCount = document.getElementById('wronglaneCount');
 const totalCount = document.getElementById('totalCount');
 const snapshotsGallery = document.getElementById('snapshotsGallery');
+const clearSnapshotsBtn = document.getElementById('clearSnapshotsBtn');
 const toast = document.getElementById('toast');
 const confRange = document.getElementById('confRange');
 const debugToggle = document.getElementById('debugToggle');
@@ -90,6 +91,7 @@ const globalPageLoaderMessage = document.getElementById('globalPageLoaderMessage
 let ws = null;
 let selectedDetectors = ['helmet'];
 let isRunning = false;
+let currentSnapshotFilter = 'all';
 let _globalLoaderCount = 0;
 let _globalLoaderDelayTimer = null;
 
@@ -174,21 +176,65 @@ async function loadModels() {
     } catch (e) { modelSelect.innerHTML = '<option value="">No models found</option>'; }
 }
 async function loadSnapshots(filter = 'all') {
+    currentSnapshotFilter = filter || 'all';
     try {
         const resp = await fetch('/api/snapshots');
         let snapshots = await resp.json();
         if (filter !== 'all') snapshots = snapshots.filter(s => s.type === filter);
         if (snapshots.length === 0) { snapshotsGallery.innerHTML = '<p class="no-items">No violations detected yet.</p>'; return; }
         snapshotsGallery.innerHTML = snapshots.slice(0, 12).map(s => `
-            <div class="gallery-item" onclick="window.open('${s.path}', '_blank')">
-                <img src="${s.path}" alt="${s.type}" loading="lazy">
+            <div class="gallery-item" data-violation-type="${s.type}" data-filename="${s.filename}">
+                <img src="${s.path}" alt="${s.type}" loading="lazy" onclick="window.open('${s.path}', '_blank')">
                 <div class="gallery-item-info">
                     <span class="gallery-item-type ${s.type}">${s.type}</span>
                     <span class="gallery-item-name">${s.filename}</span>
                 </div>
+                <button class="gallery-item-delete" title="Xoa anh vi pham" onclick="deleteSnapshot(event, '${s.type}', '${s.filename}')">🗑️</button>
             </div>
         `).join('');
     } catch (e) { console.error('Failed to load snapshots:', e); }
+}
+
+async function deleteSnapshot(event, violationType, filename) {
+    event.stopPropagation();
+    if (!confirm('Xoa anh vi pham "' + filename + '"?')) return;
+    try {
+        const resp = await fetch('/api/snapshots/' + encodeURIComponent(violationType) + '/' + encodeURIComponent(filename), {
+            method: 'DELETE'
+        });
+        const data = await resp.json();
+        if (data.error) { showToast('Loi xoa anh: ' + data.error, 'error'); return; }
+        const card = event.currentTarget.closest('.gallery-item');
+        if (card) card.remove();
+        if (snapshotsGallery.querySelectorAll('.gallery-item').length === 0) {
+            snapshotsGallery.innerHTML = '<p class="no-items">No violations detected yet.</p>';
+        }
+        showToast('🗑️ Da xoa anh vi pham', 'success');
+    } catch (e) { showToast('Loi xoa anh: ' + e.message, 'error'); }
+}
+
+async function clearSnapshots() {
+    const targetType = currentSnapshotFilter === 'all' ? 'all' : currentSnapshotFilter;
+    const scopeText = targetType === 'all' ? 'tat ca anh vi pham' : `tat ca anh loai "${targetType}"`;
+    if (!confirm(`Xoa ${scopeText}?`)) return;
+
+    const finishLoading = showGlobalPageLoader('Dang xoa anh vi pham...');
+    if (clearSnapshotsBtn) clearSnapshotsBtn.disabled = true;
+    try {
+        const query = targetType === 'all' ? '' : `?type=${encodeURIComponent(targetType)}`;
+        const resp = await fetch(`/api/snapshots${query}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (!resp.ok || data.error) {
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
+        await loadSnapshots(currentSnapshotFilter);
+        showToast(`🧹 Da xoa ${data.deleted_count || 0} anh`, 'success');
+    } catch (e) {
+        showToast(`Loi xoa hang loat: ${e.message}`, 'error');
+    } finally {
+        finishLoading();
+        if (clearSnapshotsBtn) clearSnapshotsBtn.disabled = false;
+    }
 }
 
 // =====================================================================
@@ -213,6 +259,10 @@ document.querySelectorAll('.gallery-tab').forEach(tab => {
     });
 });
 
+if (clearSnapshotsBtn) {
+    clearSnapshotsBtn.addEventListener('click', clearSnapshots);
+}
+
 // =====================================================================
 // REAL-TIME WEBSOCKET DETECTION
 // =====================================================================
@@ -227,6 +277,9 @@ function sendSettingsUpdate() {
 }
 
 function startDetection() {
+    // Guard: prevent double-start
+    if (isRunning || (ws && ws.readyState === WebSocket.OPEN)) return;
+
     const video = videoSelect.value;
     const model = modelSelect.value;
     const conf = parseInt(confRange.value) / 100;
@@ -234,7 +287,9 @@ function startDetection() {
     if (!video || !model) { showToast('Please select video and model', 'error'); return; }
     if (selectedDetectors.length === 0) { showToast('Please select at least one detector', 'error'); return; }
 
-    ws = new WebSocket(`ws://${window.location.host}/ws/detect`);
+    startBtn.disabled = true;
+
+    ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/detect`);
 
     ws.onopen = () => {
         statusIndicator.className = 'status-indicator running';
@@ -303,10 +358,12 @@ function startDetection() {
                 showToast('Error: ' + data.message, 'error');
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
+                isRunning = false;
+                if (data.code !== 'busy') resetUI();
                 break;
         }
     };
-    ws.onerror = () => { statusIndicator.className = 'status-indicator error'; statusText.textContent = 'Connection error'; showToast('Connection error', 'error'); };
+    ws.onerror = () => { statusIndicator.className = 'status-indicator error'; statusText.textContent = 'Connection error'; showToast('Connection error', 'error'); isRunning = false; startBtn.disabled = false; stopBtn.disabled = true; };
     ws.onclose = () => { startBtn.disabled = false; stopBtn.disabled = true; isRunning = false; };
 }
 
@@ -335,20 +392,75 @@ startBtn.addEventListener('click', startDetection);
 stopBtn.addEventListener('click', stopDetection);
 
 // =====================================================================
-// IMAGE DETECTION
+// IMAGE DETECTION (Enhanced UI/UX)
 // =====================================================================
 const imageInput = document.getElementById('imageInput');
 const imageUploadArea = document.getElementById('imageUploadArea');
 const imageUploadContent = document.getElementById('imageUploadContent');
 const imagePreview = document.getElementById('imagePreview');
+const imagePreviewWrapper = document.getElementById('imagePreviewWrapper');
 const imageDetectBtn = document.getElementById('imageDetectBtn');
 const imageConf = document.getElementById('imageConf');
-const imageConfLabel = document.getElementById('imageConfLabel');
+const imageConfBubbleEl = document.getElementById('imageConfBubble');
+const imageConfTrack = document.getElementById('imageConfTrack');
+const imageClearBtn = document.getElementById('imageClearBtn');
+const imageCompareBtn = document.getElementById('imageCompareBtn');
+const imageFullscreenBtn = document.getElementById('imageFullscreenBtn');
+const imageDownloadBtn = document.getElementById('imageDownloadBtn');
+const imageFullscreenOverlay = document.getElementById('imageFullscreenOverlay');
+const imageFullscreenClose = document.getElementById('imageFullscreenClose');
+const imageFullscreenImg = document.getElementById('imageFullscreenImg');
+const imageSkeletonCard = document.getElementById('imageSkeletonCard');
+const imageModelSelect = document.getElementById('imageModelSelect');
 let imageFile = null;
+let imageOriginalDataUrl = null;
+let imageDetectedDataUrl = null;
+let imageCompareActive = false;
+let imageDetectStartTime = 0;
 
-imageConf.addEventListener('input', () => { imageConfLabel.textContent = imageConf.value + '%'; });
+// Load available models into dropdown
+(async function loadImageModels() {
+    try {
+        const resp = await fetch('/api/models');
+        const data = await resp.json();
+        if (data.models && imageModelSelect) {
+            data.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                imageModelSelect.appendChild(opt);
+            });
+        }
+    } catch (_) {}
+})();
 
-imageUploadArea.addEventListener('click', () => imageInput.click());
+// Toggle chip click handlers
+document.querySelectorAll('.img-toggle-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        const cb = chip.querySelector('input[type="checkbox"]');
+        cb.checked = !cb.checked;
+        chip.classList.toggle('active', cb.checked);
+    });
+});
+
+// Confidence slider with visual track + bubble
+function updateImageConfUI() {
+    const val = parseInt(imageConf.value);
+    const min = parseInt(imageConf.min);
+    const max = parseInt(imageConf.max);
+    const pct = ((val - min) / (max - min)) * 100;
+    imageConfBubbleEl.textContent = val + '%';
+    imageConfBubbleEl.style.left = pct + '%';
+    if (imageConfTrack) imageConfTrack.style.width = pct + '%';
+}
+imageConf.addEventListener('input', updateImageConfUI);
+updateImageConfUI();
+
+// Upload area events
+imageUploadArea.addEventListener('click', (e) => {
+    if (e.target.closest('.img-clear-btn')) return;
+    imageInput.click();
+});
 imageUploadArea.addEventListener('dragover', e => { e.preventDefault(); imageUploadArea.classList.add('drag-over'); });
 imageUploadArea.addEventListener('dragleave', () => imageUploadArea.classList.remove('drag-over'));
 imageUploadArea.addEventListener('drop', e => {
@@ -357,41 +469,210 @@ imageUploadArea.addEventListener('drop', e => {
 });
 imageInput.addEventListener('change', () => { if (imageInput.files.length) { imageFile = imageInput.files[0]; showImagePreview(); } });
 
+// Clear button
+imageClearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    imageFile = null;
+    imageOriginalDataUrl = null;
+    imageInput.value = '';
+    imagePreviewWrapper.style.display = 'none';
+    imageUploadContent.style.display = '';
+    imageDetectBtn.disabled = true;
+    document.getElementById('imageResultCard').style.display = 'none';
+    document.getElementById('imageStatsCard').style.display = 'none';
+    document.getElementById('imageDetectionMeta').style.display = 'none';
+});
+
 function showImagePreview() {
+    if (!imageFile) return;
     const url = URL.createObjectURL(imageFile);
-    imagePreview.src = url; imagePreview.style.display = 'block';
+    imagePreview.src = url;
+    imagePreviewWrapper.style.display = '';
     imageUploadContent.style.display = 'none';
     imageDetectBtn.disabled = false;
+
+    // Show file info
+    const sizeKB = (imageFile.size / 1024).toFixed(1);
+    const sizeStr = imageFile.size > 1048576 ? (imageFile.size / 1048576).toFixed(1) + ' MB' : sizeKB + ' KB';
+    document.getElementById('imageFileInfo').innerHTML =
+        `<span>📄 ${imageFile.name}</span><span>📦 ${sizeStr}</span>`;
+
+    // Store original for comparison
+    const reader = new FileReader();
+    reader.onload = (ev) => { imageOriginalDataUrl = ev.target.result; };
+    reader.readAsDataURL(imageFile);
 }
 
+// Detect
 imageDetectBtn.addEventListener('click', async () => {
     if (!imageFile) return;
-    imageDetectBtn.disabled = true; imageDetectBtn.textContent = '⏳ Detecting...';
+    imageDetectBtn.disabled = true;
+    imageDetectBtn.querySelector('.img-btn-text').textContent = 'Detecting...';
+    imageDetectBtn.querySelector('.img-btn-icon').textContent = '⏳';
+    imageDetectBtn.classList.add('detecting');
+    imageSkeletonCard.style.display = 'block';
+    document.getElementById('imageResultCard').style.display = 'none';
+    document.getElementById('imageStatsCard').style.display = 'none';
+    imageDetectStartTime = performance.now();
+
     const finishLoading = showGlobalPageLoader(
         currentLang === 'en' ? 'Analyzing image with AI...' : 'Đang phân tích ảnh bằng AI...',
     );
     const fd = new FormData();
     fd.append('file', imageFile);
     fd.append('conf', parseInt(imageConf.value) / 100);
+    // Model selection
+    const selectedModel = imageModelSelect ? imageModelSelect.value : '';
+    if (selectedModel) fd.append('model', selectedModel);
+    // Display toggles
+    const showMasks = document.querySelector('#toggleMask input')?.checked ?? true;
+    const showBoxes = document.querySelector('#toggleBoxes input')?.checked ?? true;
+    const showLabels = document.querySelector('#toggleLabels input')?.checked ?? true;
+    fd.append('show_masks', showMasks);
+    fd.append('show_labels', showLabels);
+    fd.append('show_boxes', showBoxes);
     try {
         const resp = await fetch('/api/detect/image', { method: 'POST', body: fd });
         const data = await resp.json();
         if (data.error) { showToast('Error: ' + data.error, 'error'); return; }
+
+        const elapsed = ((performance.now() - imageDetectStartTime) / 1000).toFixed(2);
+        imageDetectedDataUrl = 'data:image/jpeg;base64,' + data.image;
+
+        // Show result
+        imageSkeletonCard.style.display = 'none';
         document.getElementById('imageResultCard').style.display = 'block';
-        document.getElementById('imageResult').src = 'data:image/jpeg;base64,' + data.image;
-        document.getElementById('imageStatsCard').style.display = 'block';
-        document.getElementById('imageTotalCount').textContent = data.total + ' objects detected';
+        document.getElementById('imageResult').src = imageDetectedDataUrl;
+
+        // Reset compare view
+        imageCompareActive = false;
+        imageCompareBtn.classList.remove('active');
+        document.getElementById('imageResultSingle').style.display = '';
+        document.getElementById('imageCompareView').style.display = 'none';
+
+        // Stats
+        const statsCard = document.getElementById('imageStatsCard');
+        statsCard.style.display = 'block';
+        document.getElementById('imageTotalCount').innerHTML =
+            `<span class="img-total-number">${data.total}</span><span class="img-total-label">objects detected</span>`;
+
+        // Class list with progress bars
         const classList = document.getElementById('imageClassList');
-        classList.innerHTML = Object.entries(data.class_summary).map(([name, info]) =>
-            `<div class="class-item"><span class="class-name">${name}</span><span class="class-count">${info.count}</span><span class="class-conf">${(info.max_conf * 100).toFixed(1)}%</span></div>`
-        ).join('');
+        const maxCount = Math.max(...Object.values(data.class_summary).map(v => v.count), 1);
+        classList.innerHTML = Object.entries(data.class_summary).map(([name, info]) => {
+            const barPct = (info.count / maxCount * 100).toFixed(0);
+            const confPct = (info.max_conf * 100).toFixed(1);
+            return `<div class="class-item">
+                <div style="flex:1">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <span class="class-name">${name}</span>
+                        <span class="class-count">${info.count}</span>
+                    </div>
+                    <div class="img-class-item-conf-bar"><div class="img-class-item-conf-fill" style="width:${confPct}%"></div></div>
+                </div>
+                <span class="class-conf">${confPct}%</span>
+                <div class="img-class-item-bar" style="width:${barPct}%"></div>
+            </div>`;
+        }).join('');
+
+        // Detection meta
+        const metaEl = document.getElementById('imageDetectionMeta');
+        metaEl.style.display = '';
+        document.getElementById('imageDetectionTime').textContent = elapsed + 's';
+        // Get image dimensions from preview
+        const img = new Image();
+        img.onload = () => {
+            document.getElementById('imageDetectionSize').textContent = img.naturalWidth + ' × ' + img.naturalHeight + 'px';
+        };
+        img.src = imageDetectedDataUrl;
+
         showToast(`Detected ${data.total} objects!`, 'success');
     } catch (e) { showToast('Detection failed: ' + e.message, 'error'); }
     finally {
         finishLoading();
+        imageSkeletonCard.style.display = 'none';
         imageDetectBtn.disabled = false;
-        imageDetectBtn.textContent = '🔍 Detect Objects';
+        imageDetectBtn.querySelector('.img-btn-text').textContent = 'Detect Objects';
+        imageDetectBtn.querySelector('.img-btn-icon').textContent = '🔍';
+        imageDetectBtn.classList.remove('detecting');
     }
+});
+
+// Compare toggle
+imageCompareBtn.addEventListener('click', () => {
+    if (!imageOriginalDataUrl || !imageDetectedDataUrl) return;
+    imageCompareActive = !imageCompareActive;
+    imageCompareBtn.classList.toggle('active', imageCompareActive);
+    document.getElementById('imageResultSingle').style.display = imageCompareActive ? 'none' : '';
+    document.getElementById('imageCompareView').style.display = imageCompareActive ? '' : 'none';
+
+    if (imageCompareActive) {
+        const slider = document.getElementById('imageCompareSlider');
+        const beforeImg = document.getElementById('imageCompareBefore');
+        const afterImg = document.getElementById('imageCompareAfterImg');
+        const afterDiv = document.getElementById('imageCompareAfter');
+        const handle = document.getElementById('imageCompareHandle');
+
+        beforeImg.src = imageOriginalDataUrl;
+        afterImg.src = imageDetectedDataUrl;
+
+        // Wait for images to load then set size
+        afterImg.onload = () => {
+            const w = slider.offsetWidth;
+            afterDiv.style.width = '50%';
+            handle.style.left = '50%';
+            afterImg.style.width = w + 'px';
+        };
+
+        // Mouse/touch drag for compare slider
+        let isDragging = false;
+        const onMove = (clientX) => {
+            const rect = slider.getBoundingClientRect();
+            let pct = ((clientX - rect.left) / rect.width) * 100;
+            pct = Math.max(2, Math.min(98, pct));
+            afterDiv.style.width = pct + '%';
+            handle.style.left = pct + '%';
+        };
+        slider.onmousedown = (e) => { isDragging = true; onMove(e.clientX); };
+        document.addEventListener('mousemove', (e) => { if (isDragging) onMove(e.clientX); });
+        document.addEventListener('mouseup', () => { isDragging = false; });
+        slider.ontouchstart = (e) => { isDragging = true; onMove(e.touches[0].clientX); };
+        document.addEventListener('touchmove', (e) => { if (isDragging) onMove(e.touches[0].clientX); });
+        document.addEventListener('touchend', () => { isDragging = false; });
+    }
+});
+
+// Fullscreen
+imageFullscreenBtn.addEventListener('click', () => {
+    if (!imageDetectedDataUrl) return;
+    imageFullscreenImg.src = imageDetectedDataUrl;
+    imageFullscreenOverlay.classList.add('active');
+});
+imageFullscreenClose.addEventListener('click', () => { imageFullscreenOverlay.classList.remove('active'); });
+imageFullscreenOverlay.addEventListener('click', (e) => {
+    if (e.target === imageFullscreenOverlay) imageFullscreenOverlay.classList.remove('active');
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && imageFullscreenOverlay.classList.contains('active')) {
+        imageFullscreenOverlay.classList.remove('active');
+    }
+});
+
+// Result image click to fullscreen
+document.getElementById('imageResult').addEventListener('click', () => {
+    if (imageDetectedDataUrl) {
+        imageFullscreenImg.src = imageDetectedDataUrl;
+        imageFullscreenOverlay.classList.add('active');
+    }
+});
+
+// Download
+imageDownloadBtn.addEventListener('click', () => {
+    if (!imageDetectedDataUrl) return;
+    const link = document.createElement('a');
+    link.href = imageDetectedDataUrl;
+    link.download = 'detection_result_' + new Date().toISOString().slice(0,19).replace(/[:T]/g, '-') + '.jpg';
+    link.click();
 });
 
 // =====================================================================
@@ -549,7 +830,8 @@ debugStatus.textContent = `Debug: ${debugToggle.checked ? 'ON' : 'OFF'}`;
     try {
         const resp = await fetch('/api/server-info');
         const data = await resp.json();
-        const ip = data.ips && data.ips.length > 0 ? data.ips[0] : 'localhost';
+        const preferredIp = (data.preferred_ip || '').toString().trim();
+        const ip = preferredIp || (data.ips && data.ips.length > 0 ? data.ips[0] : 'localhost');
         const port = data.port || 8000;
         const fullAddr = `${ip}:${port}`;
         ipValue.textContent = fullAddr;
@@ -644,6 +926,8 @@ const i18n = {
         nav_lookup: 'Tra cứu',
         nav_manage: 'Quản lý dữ liệu',
         nav_complaints: 'Khiếu nại',
+        manage_title: 'Quản lý Dữ liệu',
+        manage_subtitle: 'Tiếp nhận thông tin người dùng, phương tiện, vi phạm, khiếu nại từ App',
         manage_stat_users: 'Người dùng',
         manage_stat_vehicles: 'Phương tiện',
         manage_stat_violations: 'Vi phạm',
@@ -705,9 +989,50 @@ const i18n = {
         global_loader_message: 'Vui lòng chờ trong giây lát...',
         admin_sync_success: 'Dữ liệu đã được đồng bộ tự động',
         user_count_suffix: 'người dùng',
+        // Image tab controls
+        image_model_label: 'Model',
+        image_model_default: 'Mặc định',
+        image_display_label: 'Hiển thị',
+        image_toggle_mask: 'Mask',
+        image_toggle_boxes: 'BBox',
+        image_toggle_labels: 'Labels',
+        image_detect_btn: 'Nhận diện',
+        // Data Management table headers
+        manage_th_name: 'Họ và tên',
+        manage_th_cccd: 'Số CCCD',
+        manage_th_phone: 'Số điện thoại',
+        manage_th_violations: 'Vi phạm / Thanh toán',
+        manage_th_complaints: 'Khiếu nại / Thông báo',
+        manage_th_actions: 'Hành động',
+        // Data Management dynamic strings
+        manage_not_updated: 'Chưa cập nhật',
+        manage_unpaid: 'Chưa nộp',
+        manage_paid: 'Đã nộp',
+        manage_debt: 'Nợ',
+        manage_no_debt: 'Không nợ',
+        manage_complaints_count: 'khiếu nại',
+        manage_notifications_count: 'thông báo',
+        manage_btn_review: 'Duyệt sửa đổi',
+        manage_btn_detail: 'Chi tiết',
+        manage_btn_delete: 'Xóa TK',
+        manage_no_result: 'Không tìm thấy kết quả phù hợp.',
+        manage_no_data: 'Hệ thống chưa có dữ liệu người dùng.',
+        // Quota
+        quota_title: 'Firestore Quota Monitor',
+        quota_reads: 'Đọc',
+        quota_writes: 'Ghi',
+        quota_deletes: 'Xóa',
+        quota_uptime: 'Thời gian hoạt động',
+        quota_note: 'Dữ liệu quota được theo dõi từ khi server khởi động và cập nhật mỗi 10 giây.',
+        // Reject modal
+        reject_modal_title: 'Từ chối khiếu nại',
+        reject_modal_subtitle: 'Vui lòng nhập lý do từ chối',
+        reject_modal_placeholder: 'Nhập lý do từ chối...',
+        reject_modal_cancel: 'Hủy',
+        reject_modal_confirm: 'Xác nhận từ chối',
         // Typed.js
         typed_strings: [
-            'trí tuệ nhân tạo YOLOv12-Seg',
+            'trí tuệ nhân tạo YOLOv26-seg',
             'nhận diện 40 loại đối tượng',
             'xử lý real-time với độ chính xác cao',
             'theo dõi phương tiện liên tục qua ByteTrack',
@@ -777,6 +1102,8 @@ const i18n = {
         nav_lookup: 'Look Up',
         nav_manage: 'Data Management',
         nav_complaints: 'Complaints',
+        manage_title: 'Data Management',
+        manage_subtitle: 'Receive user, vehicle, violation, and complaint information from the App',
         manage_stat_users: 'Users',
         manage_stat_vehicles: 'Vehicles',
         manage_stat_violations: 'Violations',
@@ -838,9 +1165,50 @@ const i18n = {
         global_loader_message: 'Please wait for a moment...',
         admin_sync_success: 'Data auto-synced successfully',
         user_count_suffix: 'users',
+        // Image tab controls
+        image_model_label: 'Model',
+        image_model_default: 'Default',
+        image_display_label: 'Display',
+        image_toggle_mask: 'Mask',
+        image_toggle_boxes: 'BBox',
+        image_toggle_labels: 'Labels',
+        image_detect_btn: 'Detect Objects',
+        // Data Management table headers
+        manage_th_name: 'Full Name',
+        manage_th_cccd: 'ID Card',
+        manage_th_phone: 'Phone',
+        manage_th_violations: 'Violations / Payment',
+        manage_th_complaints: 'Complaints / Notifications',
+        manage_th_actions: 'Actions',
+        // Data Management dynamic strings
+        manage_not_updated: 'Not updated',
+        manage_unpaid: 'Unpaid',
+        manage_paid: 'Paid',
+        manage_debt: 'Owes',
+        manage_no_debt: 'No debt',
+        manage_complaints_count: 'complaints',
+        manage_notifications_count: 'notifications',
+        manage_btn_review: 'Review changes',
+        manage_btn_detail: 'Details',
+        manage_btn_delete: 'Delete',
+        manage_no_result: 'No matching result found.',
+        manage_no_data: 'No user data available yet.',
+        // Quota
+        quota_title: 'Firestore Quota Monitor',
+        quota_reads: 'Reads',
+        quota_writes: 'Writes',
+        quota_deletes: 'Deletes',
+        quota_uptime: 'Uptime',
+        quota_note: 'Quota data is tracked since server start and refreshed every 10 seconds.',
+        // Reject modal
+        reject_modal_title: 'Reject Complaint',
+        reject_modal_subtitle: 'Please enter rejection reason',
+        reject_modal_placeholder: 'Enter reason for rejection...',
+        reject_modal_cancel: 'Cancel',
+        reject_modal_confirm: 'Confirm rejection',
         // Typed.js
         typed_strings: [
-            'powered by YOLOv12-Seg AI',
+            'powered by YOLOv26-seg AI',
             'recognizing 40 object classes',
             'real-time processing with high accuracy',
             'continuous tracking via ByteTrack',
@@ -1232,7 +1600,18 @@ let _complaintBoardPage = 1;
 const COMPLAINT_PAGE_SIZE = 10;
 const _complaintReviewLoading = new Set();
 const _complaintDeleteLoading = new Set();
-let _adminAutoSyncEnabled = localStorage.getItem('adminAutoSyncEnabled') !== '0';
+let _adminAutoSyncEnabled = localStorage.getItem('adminAutoSyncEnabled') === '1'; // P0: default OFF
+// In-flight guard: prevent overlapping loadAdminData requests
+let _adminLoadInFlight = false;
+// WS event debounce: coalesce burst events into one refresh
+let _adminWsDebounceTimer = null;
+const _ADMIN_WS_DEBOUNCE_MS = 1500;
+// Pending scope from WS events (accumulate during debounce window)
+let _adminPendingScope = null;
+// Fallback polling interval (P0: raised from 10s to 60s)
+const _ADMIN_POLL_INTERVAL_MS = 60000;
+// Track active manage/complaint tab visibility
+let _adminTabActive = false;
 if (complaintStatusFilter) {
     _complaintBoardStatus = complaintStatusFilter.value || 'all';
 }
@@ -1381,6 +1760,7 @@ function getComplaintEvidenceUrl(complaint) {
         complaint.evidence_image_url,
         complaint.downloadUrl,
         complaint.downloadURL,
+        typeof complaint.evidence === 'string' ? complaint.evidence : '',
         complaint.proofUrl,
         complaint.imageUrl,
         complaint.image_url,
@@ -1553,7 +1933,7 @@ function renderAdminTable(data, searchQuery = '') {
                     <div style="display:flex; align-items:center; gap:10px;">
                         <div style="width:34px;height:34px;border-radius:50%;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:0.85rem;flex-shrink:0;">${nameInitial}</div>
                         <div>
-                            <div style="font-weight:700;color:var(--text-primary);">${u.fullName || '<span style="color:var(--text-muted);font-style:italic;">Chưa cập nhật</span>'}</div>
+                            <div style="font-weight:700;color:var(--text-primary);">${u.fullName || `<span style="color:var(--text-muted);font-style:italic;">${tr('manage_not_updated')}</span>`}</div>
                             <div style="font-size:0.72rem;color:var(--text-muted);">${u.email || ''}</div>
                         </div>
                     </div>
@@ -1561,22 +1941,22 @@ function renderAdminTable(data, searchQuery = '') {
                 <td><div style="color:var(--text-secondary);font-family:monospace;">🪪 ${u.idCard || '—'}</div></td>
                 <td><div style="color:var(--text-secondary);">📱 ${u.phone || '—'}</div></td>
                 <td>
-                    <span class="data-tag tag-danger">Chưa nộp: ${pendingCount}</span>
-                    <span class="data-tag tag-success">Đã nộp: ${paidCount}</span>
-                    ${totalPendingFine > 0 ? `<div style="font-weight:700;color:var(--danger);margin-top:6px;font-size:0.8rem;">Nợ: ${formatter.format(totalPendingFine)}</div>` : '<div style="color:var(--success);margin-top:4px;font-weight:600;font-size:0.78rem;">✓ Không nợ</div>'}
+                    <span class="data-tag tag-danger">${tr('manage_unpaid')}: ${pendingCount}</span>
+                    <span class="data-tag tag-success">${tr('manage_paid')}: ${paidCount}</span>
+                    ${totalPendingFine > 0 ? `<div style="font-weight:700;color:var(--danger);margin-top:6px;font-size:0.8rem;">${tr('manage_debt')}: ${formatter.format(totalPendingFine)}</div>` : `<div style="color:var(--success);margin-top:4px;font-weight:600;font-size:0.78rem;">✓ ${tr('manage_no_debt')}</div>`}
                     ${licensePointQuick ? `<div style="margin-top:6px;font-size:0.78rem;color:var(--text-secondary);font-weight:600;">${licensePointQuick}</div>` : ''}
                 </td>
                 <td>
                     ${uComplaints.length > 0
-                        ? `<span class="data-tag tag-warning">📝 ${uComplaints.length} khiếu nại</span><br>`
-                        : `<span class="data-tag tag-secondary">0 khiếu nại</span><br>`}
-                    <span class="data-tag tag-secondary">🔔 ${uNotifications.length} thông báo</span>
+                        ? `<span class="data-tag tag-warning">📝 ${uComplaints.length} ${tr('manage_complaints_count')}</span><br>`
+                        : `<span class="data-tag tag-secondary">0 ${tr('manage_complaints_count')}</span><br>`}
+                    <span class="data-tag tag-secondary">🔔 ${uNotifications.length} ${tr('manage_notifications_count')}</span>
                 </td>
                 <td>
                     <div style="display:flex;flex-direction:column;gap:5px;min-width:110px;">
-                        ${isPendingUpdate ? `<button class="btn btn-warning pending-update-btn" style="padding:5px 10px;font-size:0.78rem;color:#fff;border-radius:7px;" onclick="reviewUserUpdate('${uid}')">🔔 Duyệt sửa đổi</button>` : ''}
-                        <button class="btn btn-primary" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="showUserDetailPage('${uid}')">👁️ Chi tiết</button>
-                        <button class="btn btn-danger" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="confirmDeleteUser('${uid}', '${(u.fullName||'').replace(/'/g,'')}')" >🗑️ Xóa TK</button>
+                        ${isPendingUpdate ? `<button class="btn btn-warning pending-update-btn" style="padding:5px 10px;font-size:0.78rem;color:#fff;border-radius:7px;" onclick="reviewUserUpdate('${uid}')">🔔 ${tr('manage_btn_review')}</button>` : ''}
+                        <button class="btn btn-primary" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="showUserDetailPage('${uid}')">👁️ ${tr('manage_btn_detail')}</button>
+                        <button class="btn btn-danger" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="confirmDeleteUser('${uid}', '${(u.fullName||'').replace(/'/g,'')}')" >🗑️ ${tr('manage_btn_delete')}</button>
                     </div>
                 </td>
             </tr>
@@ -1586,9 +1966,7 @@ function renderAdminTable(data, searchQuery = '') {
     if (rowIndex === 0) {
         html = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:50px 40px;">
             <div style="font-size:2rem;margin-bottom:8px;">🔍</div>
-            ${query
-                ? (currentLang === 'en' ? 'No matching result found.' : 'Không tìm thấy kết quả phù hợp.')
-                : (currentLang === 'en' ? 'No user data available yet.' : 'Hệ thống chưa có dữ liệu người dùng.')}
+            ${query ? tr('manage_no_result') : tr('manage_no_data')}
         </td></tr>`;
     }
 
@@ -1722,6 +2100,8 @@ function renderComplaintBoard(data) {
                         src="${escapeHtml(c.evidenceUrl)}"
                         alt="Complaint evidence"
                         loading="lazy"
+                        style="cursor:zoom-in;"
+                        onclick="openImageLightbox(this.src)"
                         onload="if(this.previousElementSibling){this.previousElementSibling.style.display='none';}"
                         onerror="this.style.display='none'; if(this.previousElementSibling){this.previousElementSibling.style.display='flex'; this.previousElementSibling.style.animation='none'; this.previousElementSibling.textContent='${imageErrorText}';}"
                     />
@@ -1805,7 +2185,13 @@ function setComplaintBoardPage(nextPage) {
 
 async function loadAdminData(options = {}) {
     if (!adminDataTableBody) return;
+    // P0: in-flight guard — skip if a request is already running
+    if (_adminLoadInFlight) return;
+    _adminLoadInFlight = true;
+
     const silent = options.silent === true;
+    const scope = options.scope || null; // P1: partial scope (CSV string)
+    const force = options.force ? 1 : 0;
     const finishLoading = !silent
         ? showGlobalPageLoader(currentLang === 'en'
             ? 'Syncing Data Management...'
@@ -1822,7 +2208,14 @@ async function loadAdminData(options = {}) {
     }
 
     try {
-        const resp = await fetch('/api/admin/data');
+        // P1: build URL with scope/force params
+        let url = '/api/admin/data';
+        const params = [];
+        if (force) params.push('force=1');
+        if (scope) params.push('scope=' + encodeURIComponent(scope));
+        if (params.length) url += '?' + params.join('&');
+
+        const resp = await fetch(url);
         const json = await resp.json();
 
         if (json.status !== 'ok') {
@@ -1834,7 +2227,12 @@ async function loadAdminData(options = {}) {
             return;
         }
 
-        _adminCachedData = json.data;
+        // P1: partial response — merge into existing cache
+        if (json.partial && _adminCachedData) {
+            Object.assign(_adminCachedData, json.data);
+        } else {
+            _adminCachedData = json.data;
+        }
         updateManageStats(_adminCachedData);
         renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
         renderComplaintBoard(_adminCachedData);
@@ -1848,6 +2246,7 @@ async function loadAdminData(options = {}) {
             renderComplaintBoardLoading('Lỗi kết nối khi tải khiếu nại');
         }
     } finally {
+        _adminLoadInFlight = false;
         if (finishLoading) finishLoading();
     }
 }
@@ -2047,7 +2446,7 @@ function stopAdminRealtimeChannel() {
 }
 
 function connectAdminRealtimeChannel() {
-    if (!_adminAutoSyncEnabled) return;
+    // Luôn kết nối WS (cho quota realtime); admin_data_changed sẽ tự check _adminAutoSyncEnabled
     stopAdminRealtimeChannel();
     const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${wsProtocol}://${window.location.host}/ws/admin`;
@@ -2065,11 +2464,35 @@ function connectAdminRealtimeChannel() {
         };
 
         ws.onmessage = async (event) => {
-            if (!_adminAutoSyncEnabled) return;
             let msg = null;
             try { msg = JSON.parse(event.data); } catch (_) { return; }
-            if (!msg || msg.type !== 'admin_data_changed') return;
-            await loadAdminData({ silent: true });
+            if (!msg) return;
+
+            // Realtime quota update — xử lý luôn bất kể auto-sync
+            if (msg.type === 'quota_update') {
+                _applyQuotaData(msg);
+                return;
+            }
+
+            if (!_adminAutoSyncEnabled) return;
+            if (msg.type !== 'admin_data_changed') return;
+            // P0: coalesce burst WS events via debounce
+            const scope = msg.scope || null;
+            if (scope && scope !== 'all') {
+                _adminPendingScope = _adminPendingScope
+                    ? _adminPendingScope + ',' + scope
+                    : scope;
+            } else {
+                _adminPendingScope = null; // full refresh
+            }
+            clearTimeout(_adminWsDebounceTimer);
+            _adminWsDebounceTimer = setTimeout(() => {
+                const s = _adminPendingScope;
+                _adminPendingScope = null;
+                // Deduplicate scope parts
+                const scopeParam = s ? [...new Set(s.split(',').map(x => x.trim()).filter(Boolean))].join(',') : null;
+                loadAdminData({ silent: true, scope: scopeParam });
+            }, _ADMIN_WS_DEBOUNCE_MS);
         };
 
         ws.onclose = () => {
@@ -2078,9 +2501,8 @@ function connectAdminRealtimeChannel() {
                 _adminWsPingTimer = null;
             }
             _adminRealtimeWs = null;
-            if (_adminAutoSyncEnabled) {
-                _adminRealtimeReconnectTimer = setTimeout(connectAdminRealtimeChannel, 2000);
-            }
+            // Luôn reconnect — WS cần cho quota realtime
+            _adminRealtimeReconnectTimer = setTimeout(connectAdminRealtimeChannel, 2000);
         };
 
         ws.onerror = () => {
@@ -2093,8 +2515,10 @@ function startAdminAutoRefresh() {
     if (!_adminAutoSyncEnabled) return;
     stopAdminAutoRefresh();
     _adminAutoRefreshTimer = setInterval(() => {
+        // P0: only poll when admin tab is active AND page is visible
+        if (!_adminTabActive || document.hidden) return;
         loadAdminData({ silent: true });
-    }, 10000); // fallback polling every 10s if websocket misses
+    }, _ADMIN_POLL_INTERVAL_MS); // P0: 60s fallback instead of 10s
 }
 
 function stopAdminAutoRefresh() {
@@ -2119,11 +2543,14 @@ function setAdminAutoSyncEnabled(enabled, options = {}) {
     }
 
     stopAdminAutoRefresh();
-    stopAdminRealtimeChannel();
+    // Không đóng WS channel — vẫn cần cho quota realtime
 }
 
 // Start realtime sync when page loads
 document.addEventListener('DOMContentLoaded', () => {
+    // Luôn kết nối admin WS cho quota realtime push
+    connectAdminRealtimeChannel();
+
     if (adminDataTableBody || complaintBoardList) {
         renderAutoSyncToggleState();
         setAdminAutoSyncEnabled(_adminAutoSyncEnabled, { loadNow: false });
@@ -2138,6 +2565,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (_adminAutoSyncEnabled && (adminDataTableBody || complaintBoardList)) {
         loadAdminData({ silent: true });
+    }
+});
+
+// P0: Track which tab is active — only poll when manage/complaints tab visible
+document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', () => {
+        const tabId = link.dataset.tab;
+        _adminTabActive = (tabId === 'manage' || tabId === 'complaints');
+    });
+});
+
+// P0: Pause sync when page is hidden (minimized / other tab)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        // Stop polling while page is hidden
+        stopAdminAutoRefresh();
+    } else if (_adminAutoSyncEnabled && _adminTabActive) {
+        // Resume polling when page becomes visible AND admin tab is active
+        startAdminAutoRefresh();
     }
 });
 
@@ -2461,6 +2907,27 @@ function row(label, value) {
         <span class="user-detail-info-label">${label}</span>
         <span class="user-detail-info-value">${value}</span>
     </div>`;
+}
+
+/* ── Image Lightbox ────────────────────────────────────── */
+function openImageLightbox(src) {
+    if (!src) return;
+    // Remove existing lightbox if any
+    const existing = document.getElementById('image-lightbox-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'image-lightbox-overlay';
+    overlay.className = 'image-lightbox-overlay';
+    overlay.innerHTML = `<img src="${src.replace(/"/g, '&quot;')}" alt="Zoomed evidence" />`;
+    overlay.addEventListener('click', () => overlay.remove());
+    document.addEventListener('keydown', function _esc(e) {
+        if (e.key === 'Escape') {
+            overlay.remove();
+            document.removeEventListener('keydown', _esc);
+        }
+    });
+    document.body.appendChild(overlay);
 }
 
 function showComplaintDetailModal(complaintId) {
@@ -2817,19 +3284,74 @@ function showRejectComplaintModal(complaintId) {
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
                 <div style="width:44px;height:44px;border-radius:50%;background:rgba(239,68,68,0.15);display:flex;align-items:center;justify-content:center;font-size:1.3rem;">❌</div>
                 <div>
-                    <div style="font-size:1.05rem;font-weight:700;color:#fff;">Từ chối khiếu nại</div>
-                    <div style="font-size:0.8rem;color:var(--text-muted);">Vui lòng nhập lý do từ chối</div>
+                    <div style="font-size:1.05rem;font-weight:700;color:#fff;">${tr('reject_modal_title', 'Từ chối khiếu nại')}</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);">${tr('reject_modal_subtitle', 'Vui lòng nhập lý do từ chối')}</div>
                 </div>
             </div>
-            <textarea id="rejectNoteInput" placeholder="Nhập lý do từ chối..." rows="4" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-family:inherit;font-size:0.9rem;resize:vertical;box-sizing:border-box;margin-bottom:16px;"></textarea>
+            <textarea id="rejectNoteInput" placeholder="${tr('reject_modal_placeholder', 'Nhập lý do từ chối...')}" rows="4" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-family:inherit;font-size:0.9rem;resize:vertical;box-sizing:border-box;margin-bottom:16px;"></textarea>
             <div style="display:flex;gap:10px;justify-content:flex-end;">
-                <button onclick="document.getElementById('rejectComplaintModal').remove()" style="padding:10px 18px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-family:inherit;">Hủy</button>
-                <button onclick="reviewComplaint('${complaintId}', 'reject', document.getElementById('rejectNoteInput').value, this)" style="padding:10px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">❌ Xác nhận từ chối</button>
+                <button onclick="document.getElementById('rejectComplaintModal').remove()" style="padding:10px 18px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,0.06);color:var(--text-primary);font-weight:600;cursor:pointer;font-family:inherit;">${tr('reject_modal_cancel', 'Hủy')}</button>
+                <button onclick="reviewComplaint('${complaintId}', 'reject', document.getElementById('rejectNoteInput').value, this)" style="padding:10px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">❌ ${tr('reject_modal_confirm', 'Xác nhận từ chối')}</button>
             </div>
         </div>
     `;
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
+
+// =====================================================================
+// FIRESTORE QUOTA — REALTIME VIA WS + INITIAL FETCH FALLBACK
+// =====================================================================
+const _QUOTA_LIMITS_DEFAULT = { reads: 50000, writes: 20000, deletes: 20000 };
+
+function _formatUptime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+function _applyQuotaData(d) {
+    const qr = document.getElementById('quotaReads');
+    const qw = document.getElementById('quotaWrites');
+    const qd = document.getElementById('quotaDeletes');
+    const qu = document.getElementById('quotaUptime');
+    if (qr) qr.textContent = Number(d.reads || 0).toLocaleString();
+    if (qw) qw.textContent = Number(d.writes || 0).toLocaleString();
+    if (qd) qd.textContent = Number(d.deletes || 0).toLocaleString();
+    if (qu) qu.textContent = _formatUptime(d.uptime_seconds || 0);
+
+    // Date display
+    const qDate = document.getElementById('quotaDate');
+    if (qDate && d.date) qDate.textContent = d.date;
+
+    // Progress bars
+    const limits = d.limits || _QUOTA_LIMITS_DEFAULT;
+    const br = document.getElementById('quotaBarRead');
+    const bw = document.getElementById('quotaBarWrite');
+    const bd = document.getElementById('quotaBarDelete');
+    if (br) br.style.width = Math.min((d.reads / limits.reads) * 100, 100).toFixed(2) + '%';
+    if (bw) bw.style.width = Math.min((d.writes / limits.writes) * 100, 100).toFixed(2) + '%';
+    if (bd) bd.style.width = Math.min((d.deletes / limits.deletes) * 100, 100).toFixed(2) + '%';
+
+    // Visual warning
+    const grid = document.getElementById('quotaGrid');
+    if (grid) {
+        grid.classList.toggle('quota-warn', d.quota_status === 'warn');
+        grid.classList.toggle('quota-critical', d.quota_status === 'critical');
+    }
+}
+
+// Initial fetch on page load — sau đó WS sẽ push realtime
+(async function _initQuota() {
+    try {
+        const resp = await fetch('/api/firestore-quota');
+        const d = await resp.json();
+        _applyQuotaData(d);
+    } catch (_) {}
+})();
+
 
 

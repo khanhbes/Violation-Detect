@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:traffic_violation_app/theme/app_theme.dart';
 import 'package:traffic_violation_app/models/vehicle.dart';
@@ -7,6 +8,7 @@ import 'package:traffic_violation_app/services/firestore_service.dart';
 import 'package:traffic_violation_app/services/auth_service.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
+import 'package:traffic_violation_app/services/update_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:traffic_violation_app/screens/vehicles_screen.dart'
     as traffic_vehicles;
@@ -23,33 +25,72 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final AppSettings _settings = AppSettings();
+  bool _isLoggingOut = false;
   List<Vehicle> _vehicles = [];
   StreamSubscription? _vehicleSub;
+  StreamSubscription? _serverAddrSub;
+  StreamSubscription? _connectionSub;
+  String? _boundVehicleUid;
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_onSettingsChanged);
     _loadVehicles();
+
+    // Auto-refresh UI when server IP changes (Firestore auto-sync)
+    _serverAddrSub = ApiService().serverAddressStream.listen((_) {
+      debugPrint('📡 ProfileScreen: server address changed → refreshing UI');
+      if (mounted) setState(() {});
+    });
+    _connectionSub = ApiService().connectionStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _loadVehicles() {
-    final uid = _settings.uid;
-    if (uid != null) {
-      _vehicleSub = FirestoreService().vehiclesStream(uid).listen((vehicles) {
-        if (mounted) setState(() => _vehicles = vehicles);
-      });
+    final uid = _resolveUid();
+    if (uid == null) {
+      _boundVehicleUid = null;
+      _vehicleSub?.cancel();
+      _vehicleSub = null;
+      if (mounted) setState(() => _vehicles = []);
+      return;
     }
+    if (_boundVehicleUid == uid && _vehicleSub != null) return;
+
+    _boundVehicleUid = uid;
+    _vehicleSub?.cancel();
+    _vehicleSub = FirestoreService().vehiclesStream(uid).listen(
+      (vehicles) {
+        if (mounted) setState(() => _vehicles = vehicles);
+      },
+      onError: (error, stackTrace) {
+        debugPrint('❌ Profile vehicles stream error: $error');
+        if (mounted) setState(() => _vehicles = []);
+      },
+    );
+  }
+
+  String? _resolveUid() {
+    final settingsUid = _settings.uid?.trim();
+    if (settingsUid != null && settingsUid.isNotEmpty) return settingsUid;
+    final authUid = fb.FirebaseAuth.instance.currentUser?.uid.trim();
+    if (authUid == null || authUid.isEmpty) return null;
+    return authUid;
   }
 
   @override
   void dispose() {
     _vehicleSub?.cancel();
+    _serverAddrSub?.cancel();
+    _connectionSub?.cancel();
     _settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
   void _onSettingsChanged() {
+    _loadVehicles();
     if (mounted) setState(() {});
   }
 
@@ -260,10 +301,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: Row(
                           children: [
-                            _buildStatItem(_settings.userPoints.toString(),
+                            if (_settings.hasMotoLicense) ...[
+                              _buildStatItem(
+                                _settings.motoLicensePoints.toString(),
+                                s.tr('Điểm xe máy', 'Moto pts'),
+                                valueColor: Colors.amber,
+                              ),
+                              _buildStatDivider(),
+                            ],
+                            if (_settings.hasCarLicense) ...[
+                              _buildStatItem(
+                                _settings.carLicensePoints.toString(),
+                                s.tr('Điểm ô tô', 'Car pts'),
+                                valueColor: Colors.amber,
+                              ),
+                              _buildStatDivider(),
+                            ],
+                            if (!_settings.hasMotoLicense &&
+                                !_settings.hasCarLicense) ...[
+                              _buildStatItem(
+                                _settings.userPoints.toString(),
                                 s.tr('Điểm', 'Points'),
-                                valueColor: Colors.amber),
-                            _buildStatDivider(),
+                                valueColor: Colors.amber,
+                              ),
+                              _buildStatDivider(),
+                            ],
                             _buildStatItem(
                               _vehicles.length.toString(),
                               s.tr('Phương tiện', 'Vehicles'),
@@ -718,8 +780,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ═══════════════════════════════════════════════════════════════
 
   Future<void> _submitProfileUpdate(String key, String newValue) async {
-    final uid = _settings.uid;
-    if (uid == null) return;
+    final uid = _resolveUid();
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settings.tr(
+            'Không xác định được tài khoản đang đăng nhập.',
+            'Unable to resolve current signed-in account.',
+          )),
+          backgroundColor: AppTheme.warningColor,
+        ),
+      );
+      return;
+    }
 
     showDialog(
       context: context,
@@ -742,9 +816,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) {
         Navigator.pop(context); // close loading
+        final message = e.toString().replaceFirst('Exception: ', '').trim();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              _settings.tr('Lỗi khi gửi yêu cầu', 'Error sending request')),
+          content: Text(message.isEmpty
+              ? _settings.tr('Lỗi khi gửi yêu cầu', 'Error sending request')
+              : message),
           backgroundColor: AppTheme.dangerColor,
         ));
       }
@@ -1231,14 +1307,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ═══════════════════════════════════════════════════════════════
   //  IP SETTINGS DIALOG
   // ═══════════════════════════════════════════════════════════════
-  void _showIpSettingsDialog(BuildContext context) {
+  void _showIpSettingsDialog(BuildContext parentContext) {
     final ipController = TextEditingController(text: ApiService.serverIp);
     final portController =
         TextEditingController(text: ApiService.serverPort.toString());
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = Theme.of(parentContext).brightness == Brightness.dark;
 
     showDialog(
-      context: context,
+      context: parentContext,
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -1277,10 +1353,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 18),
             TextField(
               controller: ipController,
-              keyboardType: TextInputType.number,
+              keyboardType: TextInputType.url,
               decoration: InputDecoration(
                 labelText: _settings.tr('Địa chỉ IP', 'IP Address'),
-                hintText: '192.168.1.93',
+                hintText: '192.168.1.93 hoặc 192.168.1.93:8000',
                 prefixIcon: const Icon(Icons.computer_rounded, size: 20),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -1352,31 +1428,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: const TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton.icon(
-            onPressed: () {
-              final ip = ipController.text.trim();
-              final port = int.tryParse(portController.text.trim()) ?? 8000;
-              if (ip.isNotEmpty) {
-                ApiService().setServerAddress(ip, port: port);
-                Navigator.pop(ctx);
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
+            onPressed: () async {
+              final rawIp = ipController.text.trim();
+              final rawPort = int.tryParse(portController.text.trim()) ?? 8000;
+              if (rawIp.isEmpty) {
+                if (!parentContext.mounted) return;
+                ScaffoldMessenger.of(parentContext).showSnackBar(
                   SnackBar(
-                    content: Row(
-                      children: [
-                        const Icon(Icons.check_circle,
-                            color: Colors.white, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                            '${_settings.tr("Đã cập nhật IP", "IP updated")}: $ip:$port'),
-                      ],
-                    ),
-                    backgroundColor: AppTheme.successColor,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                    content: Text(_settings.tr(
+                      'Vui lòng nhập địa chỉ IP hợp lệ.',
+                      'Please enter a valid IP address.',
+                    )),
+                    backgroundColor: AppTheme.warningColor,
                   ),
                 );
+                return;
               }
+
+              bool reachable = false;
+              try {
+                reachable = await ApiService()
+                    .pingServerAddress(rawIp, port: rawPort)
+                    .timeout(const Duration(seconds: 5));
+              } catch (_) {
+                reachable = false;
+              }
+              if (!reachable) {
+                if (!parentContext.mounted) return;
+                ScaffoldMessenger.of(parentContext).showSnackBar(
+                  SnackBar(
+                    content: Text(_settings.tr(
+                      'Không thể kết nối tới IP mới. Giữ nguyên máy chủ hiện tại.',
+                      'Cannot reach the new server. Keeping current server.',
+                    )),
+                    backgroundColor: AppTheme.dangerColor,
+                  ),
+                );
+                return;
+              }
+
+              final applied =
+                  ApiService().setServerAddress(rawIp, port: rawPort);
+              // New semantics: false means unchanged or invalid.
+              // Invalid was blocked by ping above, so false here means no change.
+
+              final resolvedIp = ApiService.serverIp;
+              final resolvedPort = ApiService.serverPort;
+              var connected = false;
+              try {
+                connected = await ApiService().testConnection();
+              } catch (_) {
+                connected = false;
+              }
+
+              var syncedToCloud = true;
+              try {
+                await FirestoreService().syncServerConfig(
+                  ip: resolvedIp,
+                  port: resolvedPort,
+                );
+              } catch (e) {
+                syncedToCloud = false;
+                debugPrint('⚠️ Unable to sync server config to cloud: $e');
+              }
+
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (!parentContext.mounted) return;
+              setState(() {});
+              ScaffoldMessenger.of(parentContext).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      Icon(
+                        connected ? Icons.check_circle : Icons.error_outline,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          connected
+                              ? (syncedToCloud
+                                  ? '${_settings.tr("Đã kết nối máy chủ", "Server connected")}: $resolvedIp:$resolvedPort'
+                                  : _settings.tr(
+                                      'Đã kết nối máy chủ, nhưng chưa đồng bộ cloud.',
+                                      'Server connected, but cloud sync failed.',
+                                    ))
+                              : (syncedToCloud
+                                  ? '${_settings.tr("Đã lưu IP nhưng chưa kết nối được", "Saved IP but not connected")}: $resolvedIp:$resolvedPort'
+                                  : _settings.tr(
+                                      'Đã lưu IP cục bộ, nhưng chưa kết nối và chưa đồng bộ cloud.',
+                                      'Saved IP locally, but connection and cloud sync both failed.',
+                                    )),
+                        ),
+                      ),
+                    ],
+                  ),
+                  backgroundColor: connected
+                      ? (syncedToCloud
+                          ? AppTheme.successColor
+                          : AppTheme.warningColor)
+                      : AppTheme.dangerColor,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              );
+
+              await _checkForAppUpdateAfterServerConfigChanged();
             },
             icon: const Icon(Icons.save_rounded, size: 18),
             label: Text(_settings.tr('Lưu & Kết nối', 'Save & Connect')),
@@ -1390,6 +1550,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _checkForAppUpdateAfterServerConfigChanged() async {
+    try {
+      final updateInfo = await UpdateService().checkForUpdate();
+      if (updateInfo == null || !mounted) return;
+      await UpdateService.showUpdateDialog(
+        context,
+        updateInfo: updateInfo,
+      );
+    } catch (e) {
+      debugPrint('📱 Update check after server IP change skipped: $e');
+    }
   }
 
   void _showLogoutDialog(BuildContext context) {
@@ -1417,16 +1590,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: const TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              // Sign out from Firebase and reset local state
-              await AuthService().signOut();
-              _settings.resetOnLogout();
-              if (mounted) {
-                Navigator.pushNamedAndRemoveUntil(
-                    context, '/login', (route) => false);
-              }
-            },
+            onPressed: _isLoggingOut
+                ? null
+                : () async {
+                    setState(() => _isLoggingOut = true);
+                    Navigator.pop(context);
+                    // Navigate immediately, cleanup runs in background
+                    _settings.resetOnLogout();
+                    if (mounted) {
+                      Navigator.pushNamedAndRemoveUntil(
+                          context, '/login', (route) => false);
+                    }
+                    unawaited(AuthService().signOut());
+                  },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.dangerColor,
               foregroundColor: Colors.white,

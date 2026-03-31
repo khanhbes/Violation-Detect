@@ -79,7 +79,7 @@ const i18n = {
         lookup_results_title: 'Kết quả tra cứu',
         lookup_empty: 'Nhập thông tin và nhấn Tra cứu để tìm kiếm vi phạm.',
         typed_strings: [
-            'trí tuệ nhân tạo YOLOv12-Seg',
+            'trí tuệ nhân tạo YOLOv26-seg',
             'nhận diện 40 loại đối tượng',
             'xử lý real-time với độ chính xác cao',
             'theo dõi phương tiện liên tục qua ByteTrack',
@@ -125,7 +125,7 @@ const i18n = {
         lookup_results_title: 'Search Results',
         lookup_empty: 'Enter information and click Search to find violations.',
         typed_strings: [
-            'powered by YOLOv12-Seg AI',
+            'powered by YOLOv26-seg AI',
             'recognizing 40 object classes',
             'real-time processing with high accuracy',
             'continuous tracking via ByteTrack',
@@ -193,3 +193,4 @@ if (langToggle) {
 window.addEventListener('load', () => {
     setTimeout(() => setLanguage(currentLang), 500);
 });
+

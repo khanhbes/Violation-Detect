@@ -1,7 +1,7 @@
 {
-  "version": "1.0.45",
-  "buildNumber": 43,
-  "downloadUrl": "/api/app/download-apk/app-release-v1.0.45.apk",
-  "changelog": "big update",
+  "version": "1.0.74",
+  "buildNumber": 72,
+  "downloadUrl": "/api/app/download-apk/app-release-v1.0.74.apk",
+  "changelog": "khieu nai",
   "forceUpdate": false
 }

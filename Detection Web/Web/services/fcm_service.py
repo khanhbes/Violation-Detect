@@ -16,6 +16,7 @@ from pathlib import Path
 
 import firebase_admin
 from firebase_admin import credentials, messaging, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +73,24 @@ class FCMService:
             # Initialize only if not already initialized
             if not firebase_admin._apps:
                 cred = credentials.Certificate(str(cred_path))
+
+                # Resolve Storage bucket: env > project_id-based
+                bucket = os.environ.get('FIREBASE_STORAGE_BUCKET', '').strip()
+                if not bucket:
+                    # Derive from project_id in service account key
+                    try:
+                        with open(str(cred_path), 'r') as f:
+                            sa = json.load(f)
+                        project_id = sa.get('project_id', '')
+                        if project_id:
+                            bucket = f'{project_id}.firebasestorage.app'
+                    except Exception:
+                        pass
+
                 firebase_admin.initialize_app(cred, {
-                    'storageBucket': 'traffic-violation-c9270.appspot.com'
-                })
+                    'storageBucket': bucket,
+                } if bucket else {})
+                print(f'🪣 Firebase Storage bucket: {bucket or "(not configured)"}')
 
             self._db = firestore.client()
             logger.info("✅ Firebase Admin SDK initialized successfully")
@@ -122,8 +138,23 @@ class FCMService:
         try:
             collection = self._db.collection("user_device_tokens")
 
-            # Check if token already exists (upsert logic)
-            existing = collection.where("fcm_token", "==", fcm_token).limit(1).get()
+            # If a real user is registering, deactivate all OTHER tokens
+            # that share the same fcm_token but belong to a different/dummy user.
+            # This prevents routing violations to 'default_user' or old sessions.
+            if user_id and user_id != 'default_user':
+                stale = collection.where(
+                    filter=FieldFilter("fcm_token", "==", fcm_token)
+                ).get()
+                for stale_doc in stale:
+                    stale_data = stale_doc.to_dict() or {}
+                    if stale_data.get('user_id') != user_id:
+                        stale_doc.reference.update({
+                            "is_active": False,
+                            "last_updated": firestore.SERVER_TIMESTAMP,
+                        })
+                        logger.info(
+                            f"🗑️ Deactivated stale token for old user={stale_data.get('user_id')}"
+                        )
 
             token_data = {
                 "user_id": user_id,
@@ -133,6 +164,16 @@ class FCMService:
                 "last_updated": firestore.SERVER_TIMESTAMP,
                 "is_active": True,
             }
+
+            # Check if this exact (user_id + token) combo already exists
+            existing = (
+                collection.where(
+                    filter=FieldFilter("fcm_token", "==", fcm_token)
+                )
+                .where(filter=FieldFilter("user_id", "==", user_id))
+                .limit(1)
+                .get()
+            )
 
             if existing:
                 # Update existing document
@@ -161,7 +202,9 @@ class FCMService:
 
         try:
             collection = self._db.collection("user_device_tokens")
-            docs = collection.where("fcm_token", "==", fcm_token).get()
+            docs = collection.where(
+                filter=FieldFilter("fcm_token", "==", fcm_token)
+            ).get()
 
             for doc in docs:
                 doc.reference.update({
@@ -187,10 +230,14 @@ class FCMService:
 
         try:
             collection = self._db.collection("user_device_tokens")
-            query = collection.where("is_active", "==", True)
+            query = collection.where(
+                filter=FieldFilter("is_active", "==", True)
+            )
 
             if user_id:
-                query = query.where("user_id", "==", user_id)
+                query = query.where(
+                    filter=FieldFilter("user_id", "==", user_id)
+                )
 
             docs = query.get()
 

@@ -26,14 +26,17 @@ class UpdateService {
   /// Current app version dynamically loaded via package_info_plus
   String currentVersion = '1.0.0';
   int currentBuildNumber = 1;
+  static const String _downloadApkPrefix = 'app-update-';
 
   // Initialize and load version info
   Future<void> init() async {
     try {
-      final  info = await PackageInfo.fromPlatform();
+      final info = await PackageInfo.fromPlatform();
       currentVersion = info.version;
       currentBuildNumber = int.tryParse(info.buildNumber) ?? 1;
-      debugPrint('📱 App Version loaded: $currentVersion ($currentBuildNumber)');
+      debugPrint(
+          '📱 App Version loaded: $currentVersion ($currentBuildNumber)');
+      await cleanupDownloadedApkCache(keepLatest: 1);
     } catch (e) {
       debugPrint('❌ Error loading version info: $e');
     }
@@ -59,14 +62,13 @@ class UpdateService {
   /// Returns update info map if a newer version is available, null otherwise.
   Future<Map<String, dynamic>?> checkForUpdate() async {
     try {
-      debugPrint('📱 Checking for update from: $_serverBaseUrl/api/app/latest-version');
+      debugPrint(
+          '📱 Checking for update from: $_serverBaseUrl/api/app/latest-version');
 
-      final response = await http
-          .get(
-            Uri.parse('$_serverBaseUrl/api/app/latest-version'),
-            headers: {'ngrok-skip-browser-warning': 'true'},
-          )
-          .timeout(const Duration(seconds: 5));
+      final response = await http.get(
+        Uri.parse('$_serverBaseUrl/api/app/latest-version'),
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode != 200) {
         debugPrint('📱 Update check: server returned ${response.statusCode}');
@@ -83,7 +85,8 @@ class UpdateService {
       final changelog = data['changelog'] as String? ?? '';
       final forceUpdate = data['forceUpdate'] as bool? ?? false;
 
-      debugPrint('📱 Update check: current=$currentVersion ($currentBuildNumber), '
+      debugPrint(
+          '📱 Update check: current=$currentVersion ($currentBuildNumber), '
           'latest=$latestVersion ($latestBuild)');
 
       if (_isNewerVersion(latestVersion, latestBuild)) {
@@ -145,7 +148,8 @@ class UpdateService {
   // ═══════════════════════════════════════════════════════════════
 
   /// Download APK from the given URL and trigger install.
-  Future<void> downloadAndInstallApk(String downloadUrl, {
+  Future<void> downloadAndInstallApk(
+    String downloadUrl, {
     Function(double)? onProgress,
   }) async {
     if (_isDownloading) return;
@@ -161,7 +165,8 @@ class UpdateService {
         if (!installStatus.isGranted) {
           final result = await Permission.requestInstallPackages.request();
           if (!result.isGranted) {
-            throw Exception('Vui lòng cấp quyền Cài đặt ứng dụng không rõ nguồn gốc để tiếp tục.');
+            throw Exception(
+                'Vui lòng cấp quyền Cài đặt ứng dụng không rõ nguồn gốc để tiếp tục.');
           }
         }
       }
@@ -172,13 +177,10 @@ class UpdateService {
       final dir = await getExternalStorageDirectory();
       if (dir == null) throw Exception('Cannot access storage directory');
 
-      final filePath = '${dir.path}/app-update.apk';
+      await cleanupDownloadedApkCache(keepLatest: 0);
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final filePath = '${dir.path}/${_downloadApkPrefix}$timestamp.apk';
       final file = File(filePath);
-
-      // Delete old APK if exists
-      if (await file.exists()) {
-        await file.delete();
-      }
 
       debugPrint('📱 Downloading APK from: $downloadUrl');
       debugPrint('📱 Saving to: $filePath');
@@ -186,26 +188,30 @@ class UpdateService {
       // Download with progress tracking using streamed response
       final request = http.Request('GET', uri);
       // Giả lập browser header để tắt nén chunked nếu có thể
-      request.headers['Accept-Encoding'] = 'identity'; 
+      request.headers['Accept-Encoding'] = 'identity';
       request.headers['ngrok-skip-browser-warning'] = 'true';
-      // Tiết lộ lỗi mạng cụ thể thay vì ẩn đi 
+      // Tiết lộ lỗi mạng cụ thể thay vì ẩn đi
       http.StreamedResponse response;
       try {
-        response = await http.Client().send(request).timeout(const Duration(seconds: 15));
+        response = await http.Client()
+            .send(request)
+            .timeout(const Duration(seconds: 15));
       } catch (e) {
         throw Exception('Không thể kết nối đến máy chủ: $e');
       }
 
       if (response.statusCode != 200) {
-        throw Exception('Máy chủ gửi dữ liệu lỗi (Mã HTTP: ${response.statusCode})');
+        throw Exception(
+            'Máy chủ gửi dữ liệu lỗi (Mã HTTP: ${response.statusCode})');
       }
 
       // Nếu Content-Length null (thường do transfer-encoding: chunked), dùng Header 'content-length' tự lấy
       int contentLength = response.contentLength ?? 0;
-      if (contentLength == 0 && response.headers.containsKey('content-length')) {
+      if (contentLength == 0 &&
+          response.headers.containsKey('content-length')) {
         contentLength = int.tryParse(response.headers['content-length']!) ?? 0;
       }
-      
+
       int bytesReceived = 0;
 
       final sink = file.openWrite();
@@ -249,6 +255,45 @@ class UpdateService {
     }
   }
 
+  Future<void> cleanupDownloadedApkCache({int keepLatest = 1}) async {
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) return;
+
+      final entries = await Directory(dir.path).list().toList();
+      final apkFiles = entries.whereType<File>().where((f) {
+        final name = f.path.split(Platform.pathSeparator).last.toLowerCase();
+        return name.startsWith(_downloadApkPrefix) && name.endsWith('.apk');
+      }).toList();
+
+      if (apkFiles.isEmpty) return;
+
+      apkFiles.sort((a, b) {
+        final aTime = a.statSync().modified;
+        final bTime = b.statSync().modified;
+        return bTime.compareTo(aTime);
+      });
+
+      final deleteFrom = keepLatest < 0 ? 0 : keepLatest;
+      final staleFiles = deleteFrom >= apkFiles.length
+          ? <File>[]
+          : apkFiles.sublist(deleteFrom);
+      for (final file in staleFiles) {
+        try {
+          await file.delete();
+        } catch (_) {
+          // Keep cleanup best-effort.
+        }
+      }
+      if (staleFiles.isNotEmpty) {
+        debugPrint(
+            '🧹 Update cleanup: removed ${staleFiles.length} stale APK temp file(s)');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Update cleanup skipped: $e');
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════
   //  INSTALL APK on Android
   // ═══════════════════════════════════════════════════════════════
@@ -263,7 +308,8 @@ class UpdateService {
           filePath,
           type: 'application/vnd.android.package-archive',
         );
-        debugPrint('📱 Install intent result: ${result.type} - ${result.message}');
+        debugPrint(
+            '📱 Install intent result: ${result.type} - ${result.message}');
         if (result.type != ResultType.done) {
           throw Exception(result.message);
         }
@@ -282,6 +328,7 @@ class UpdateService {
   static Future<void> showUpdateDialog(
     BuildContext context, {
     required Map<String, dynamic> updateInfo,
+    bool autoStart = false,
   }) async {
     final settings = AppSettings();
     final version = updateInfo['version'] as String;
@@ -298,6 +345,7 @@ class UpdateService {
         forceUpdate: forceUpdate,
         downloadUrl: downloadUrl,
         settings: settings,
+        autoStart: autoStart,
       ),
     );
   }
@@ -313,6 +361,7 @@ class _UpdateDialog extends StatefulWidget {
   final bool forceUpdate;
   final String downloadUrl;
   final AppSettings settings;
+  final bool autoStart;
 
   const _UpdateDialog({
     required this.version,
@@ -320,6 +369,7 @@ class _UpdateDialog extends StatefulWidget {
     required this.forceUpdate,
     required this.downloadUrl,
     required this.settings,
+    this.autoStart = false,
   });
 
   @override
@@ -345,9 +395,18 @@ class _UpdateDialogState extends State<_UpdateDialog>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _scaleAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOutBack);
+    _scaleAnim =
+        CurvedAnimation(parent: _animController, curve: Curves.easeOutBack);
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeIn);
     _animController.forward();
+
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isDownloading) {
+          _startDownload();
+        }
+      });
+    }
   }
 
   @override
@@ -398,9 +457,8 @@ class _UpdateDialogState extends State<_UpdateDialog>
                 // Indeterminate (chunked encoding, no content_length)
                 final mb = (-progress) / (1024 * 1024);
                 _statusText = widget.settings.tr(
-                  'Đang tải xuống... ${mb.toStringAsFixed(2)} MB', 
-                  'Downloading... ${mb.toStringAsFixed(2)} MB'
-                );
+                    'Đang tải xuống... ${mb.toStringAsFixed(2)} MB',
+                    'Downloading... ${mb.toStringAsFixed(2)} MB');
               }
             });
           }
@@ -421,10 +479,12 @@ class _UpdateDialogState extends State<_UpdateDialog>
       if (mounted) {
         setState(() {
           _isDownloading = false;
-          _errorText = e.toString().contains('Cleartext') 
-            ? 'Cần bật Cleartext networking, đóng app và build lại.' 
-            : widget.settings.tr('Lỗi: ', 'Error: ') + e.toString().replaceAll('Exception:', '').trim();
-          _statusText = widget.settings.tr('Cập nhật thất bại.', 'Update failed.');
+          _errorText = e.toString().contains('Cleartext')
+              ? 'Cần bật Cleartext networking, đóng app và build lại.'
+              : widget.settings.tr('Lỗi: ', 'Error: ') +
+                  e.toString().replaceAll('Exception:', '').trim();
+          _statusText =
+              widget.settings.tr('Cập nhật thất bại.', 'Update failed.');
         });
       }
     }
@@ -437,7 +497,8 @@ class _UpdateDialogState extends State<_UpdateDialog>
       child: FadeTransition(
         opacity: _fadeAnim,
         child: Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           elevation: 16,
           child: Container(
             constraints: const BoxConstraints(maxWidth: 340),
@@ -496,7 +557,8 @@ class _UpdateDialogState extends State<_UpdateDialog>
                       ),
                       const SizedBox(height: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(20),
@@ -602,15 +664,15 @@ class _UpdateDialogState extends State<_UpdateDialog>
                                 ),
                               ),
                             ),
-                              if (_progress >= 0)
-                                Text(
-                                  '${(_progress * 100).toInt()}%',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[800],
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                            if (_progress >= 0)
+                              Text(
+                                '${(_progress * 100).toInt()}%',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[800],
+                                  fontWeight: FontWeight.w700,
                                 ),
+                              ),
                           ],
                         ),
                       ],
@@ -631,7 +693,8 @@ class _UpdateDialogState extends State<_UpdateDialog>
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                          const Icon(Icons.error_outline,
+                              color: Colors.red, size: 16),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -663,7 +726,8 @@ class _UpdateDialogState extends State<_UpdateDialog>
                             disabledBackgroundColor: Colors.grey[300],
                             foregroundColor: Colors.white,
                             elevation: 4,
-                            shadowColor: const Color(0xFFE53935).withOpacity(0.4),
+                            shadowColor:
+                                const Color(0xFFE53935).withOpacity(0.4),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
@@ -680,10 +744,10 @@ class _UpdateDialogState extends State<_UpdateDialog>
                               const SizedBox(width: 8),
                               Text(
                                 _isDownloading
-                                    ? widget.settings.tr(
-                                        'Đang tải...', 'Downloading...')
-                                    : widget.settings.tr(
-                                        'Cập nhật ngay', 'Update Now'),
+                                    ? widget.settings
+                                        .tr('Đang tải...', 'Downloading...')
+                                    : widget.settings
+                                        .tr('Cập nhật ngay', 'Update Now'),
                                 style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,

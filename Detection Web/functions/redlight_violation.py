@@ -188,11 +188,14 @@ class TrackState:
     last_region: Optional[int] = None     # -1: approaching, 0: near/touching, +1: fully crossed
     first_seen: bool = False
     last_event_frame: int = -1000
+    last_warning_frame: int = -1000       # Frame cuối cùng set WARNING (debounce riêng)
+    last_crossing_frame: int = -1000      # Frame cuối cùng phát hiện crossing (debounce riêng)
     label: str = "Safe"
     color: Tuple[int, int, int] = field(default_factory=lambda: (0, 255, 0))
     positions: List[Tuple[float, float]] = field(default_factory=list)
     direction: str = "UNKNOWN"
     warned: bool = False                  # Đã hiển thị WARNING chạm vạch chưa
+    prev_region_at_crossing: Optional[int] = None  # Vùng trước đó khi set VIOLATION (để track escalation)
 
 
 @dataclass
@@ -466,6 +469,13 @@ MIN_FORWARD_STEPS = 6       # Minimum forward-motion steps
 # Stopline crossing buffer (pixels)
 STOPLINE_TOUCH_DIST = 15.0  # Khoảng cách chạm vạch (WARNING zone)
 
+# Debounce frames - separated by event type (not global cooldown)
+DEBOUNCE_WARNING_FRAMES = 8       # Tránh toggle WARNING liên TỤC
+DEBOUNCE_CROSSING_FRAMES = 4      # Tránh phát hiện crossing duplicate từ cùng motion
+# Quy tắc: WARNING + CROSSING dùng debounce khác nhau
+# - Warning debounce: khi từ approaching → touching dưới light red/yellow
+# - Crossing debounce: khi từ (-1|0) → +1 (vượt hoàn toàn)
+
 
 def detect_vehicle_direction(
     positions: List[Tuple[float, float]],
@@ -571,15 +581,17 @@ def check_violation(
     debounce_frames: int = 8
 ) -> Tuple[str, Tuple[int, int, int]]:
     """
-    Kiểm tra vi phạm với 3 vùng:
+    Kiểm tra vi phạm với 3 vùng (NEW logic với debounce tách):
       - Vùng -1 (approaching): signed_distance < -STOPLINE_TOUCH_DIST → xe đang tới
       - Vùng  0 (touching):    |signed_distance| <= STOPLINE_TOUCH_DIST → xe chạm vạch
       - Vùng +1 (crossed):     signed_distance > +STOPLINE_TOUCH_DIST → xe vượt qua hoàn toàn
     
-    Logic:
-      - Approaching → Touching khi đèn đỏ/vàng: WARNING (chạm vạch)
-      - Approaching → Crossed khi đèn đỏ: VIOLATION (vượt hoàn toàn)
-      - Touching → Crossed khi đèn đỏ: VIOLATION (đã warning rồi, giờ vượt hẳn)
+    DEBOUNCE LOGIC (NEW):
+      - WARNING debounce (DEBOUNCE_WARNING_FRAMES): (-1→0) state transition không toggle liên tục
+      - CROSSING debounce (DEBOUNCE_CROSSING_FRAMES): (0→+1) hoặc (-1→+1) state transition
+      - Quy tắc KEY: nếu đang WARNING (prev=0, frame_idx - last_warning < DEBOUNCE_WARNING)
+        và hiện tại crossing (curr=+1) → BỎ QUA WARNING debounce, kiểm tra CROSSING debounce riêng
+        → cho phép ESCALATION: WARNING → VIOLATION ngay cả nếu warning debounce chưa hết
     
     Args:
         track_state: Trạng thái tracking
@@ -588,7 +600,7 @@ def check_violation(
         frame_idx: Frame hiện tại
         px, py: Vị trí hiện tại
         ref_vector: Hướng đi thẳng chuẩn (stopline normal)
-        debounce_frames: Debounce frames
+        debounce_frames: (deprecated) — sử dụng hằng số global thay vì
     """
     # Xác định vùng 3 mức
     if signed_distance < -STOPLINE_TOUCH_DIST:
@@ -611,26 +623,28 @@ def check_violation(
     
     prev_region = track_state.last_region
     
-    # Debounce
-    if (frame_idx - track_state.last_event_frame) < debounce_frames:
-        track_state.last_region = current_region
-        return track_state.label, track_state.color
+    # === REGION TRANSITION ANALYSIS ===
     
     # === APPROACHING → TOUCHING (chạm vạch) ===
     if prev_region == -1 and current_region == 0:
-        if light_state.has_any_red() or light_state.has_any_yellow():
-            track_state.label = "WARNING"
-            track_state.color = config.COLOR_WARNING
-            track_state.warned = True
-            track_state.last_event_frame = frame_idx
+        # Check warning debounce: giữ khoảng cách để tránh toggle WARNING liên tục
+        if (frame_idx - track_state.last_warning_frame) >= DEBOUNCE_WARNING_FRAMES:
+            if light_state.has_any_red() or light_state.has_any_yellow():
+                track_state.label = "WARNING"
+                track_state.color = config.COLOR_WARNING
+                track_state.warned = True
+                track_state.last_warning_frame = frame_idx
+                track_state.last_event_frame = frame_idx  # Cập nhật cả last_event_frame
     
     # === APPROACHING → FULLY CROSSED (vượt thẳng, bỏ qua touch zone) ===
-    elif prev_region == -1 and current_region == +1:
-        _check_crossing(track_state, light_state, frame_idx, ref_vector)
-    
-    # === TOUCHING → FULLY CROSSED (đã chạm, giờ vượt hẳn) ===
-    elif prev_region == 0 and current_region == +1:
-        _check_crossing(track_state, light_state, frame_idx, ref_vector)
+    # HOẶC: TOUCHING → FULLY CROSSED (đã chạm, giờ vượt hẳn) ===
+    # → 2 trường hợp này dùng CROSSING debounce RIÊNG (không phụ thuộc WARNING debounce)
+    elif (prev_region == -1 and current_region == +1) or (prev_region == 0 and current_region == +1):
+        # Check crossing debounce riêng biệt
+        if (frame_idx - track_state.last_crossing_frame) >= DEBOUNCE_CROSSING_FRAMES:
+            _check_crossing(track_state, light_state, frame_idx, ref_vector)
+            track_state.last_crossing_frame = frame_idx
+            track_state.last_event_frame = frame_idx
     
     # === TOUCHING lâu khi đèn xanh → reset warning ===
     elif current_region == 0 and not light_state.has_any_red() and not light_state.has_any_yellow():
@@ -638,6 +652,12 @@ def check_violation(
             track_state.label = "Safe"
             track_state.color = config.COLOR_SAFE
             track_state.warned = False
+    
+    # === Corner case: từ crossed về touching (xe đang lùi?) → reset nếu cần ===
+    elif current_region == 0 and prev_region == +1:
+        # Nếu đã set VIOLATION → giữ nguyên (không revert)
+        # Nếu chỉ WARNING → giữ hoặc reset tùy logic
+        pass
     
     track_state.last_region = current_region
     return track_state.label, track_state.color
@@ -649,14 +669,27 @@ def _check_crossing(
     frame_idx: int,
     ref_vector: Optional[Tuple[float, float]] = None
 ):
-    """Kiểm tra vi phạm khi xe vượt qua hoàn toàn vạch dừng"""
-    track_state.last_event_frame = frame_idx
+    """Kiểm tra vi phạm khi xe vượt qua hoàn toàn vạch dừng (CROSSING PHASE)
     
-    # Đèn vàng → WARNING (nếu chưa vi phạm)
-    if light_state.has_any_yellow() and track_state.label != "VIOLATION":
-        track_state.label = "WARNING"
-        track_state.color = config.COLOR_WARNING
+    Quy tắc:
+    1. Đèn vàng → WARNING (chưa vi phạm pháp lý, chỉ cảnh báo)
+    2. Đèn đỏ + hướng vi phạm → VIOLATION
+    3. Đèn xanh → Safe (không vi phạm dù vượt vạch)
+    """
+    # Đèn vàng → WARNING (thận trọng pháp lý: vàng crossing = cảnh báo, chưa phạt)
+    if light_state.has_any_yellow():
+        if track_state.label != "VIOLATION":  # Không downgrade từ VIOLATION
+            track_state.label = "WARNING"
+            track_state.color = config.COLOR_WARNING
         return
+    
+    # Nếu không có red light nào → safe
+    if not light_state.has_any_red():
+        track_state.label = "Safe"
+        track_state.color = config.COLOR_SAFE
+        track_state.warned = False
+        return
+    
     
     # Phát hiện hướng đi (dùng ref_vector từ stopline normal)
     direction = detect_vehicle_direction(track_state.positions, ref_vector=ref_vector)

@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:traffic_violation_app/widgets/violation_image.dart'
+    show normalizeViolationImageUrl;
 
 class Violation {
   final String id;
+  final String userId;
   final String licensePlate;
   final String violationType;
   final String violationCode;
@@ -20,6 +23,7 @@ class Violation {
 
   Violation({
     required this.id,
+    this.userId = '',
     required this.licensePlate,
     required this.violationType,
     this.violationCode = '',
@@ -63,19 +67,24 @@ class Violation {
     // Prefer 'createdAt' (Firestore server timestamp) over 'timestamp' (ISO string)
     final ts = json['createdAt'] ?? json['timestamp'];
 
+    // Resolve image URL from multiple possible keys, normalize to absolute URL
+    final rawImage = (json['imageUrl'] ?? json['image_url'] ?? json['snapshotPath'] ?? '').toString();
+    final resolvedImage = normalizeViolationImageUrl(rawImage);
+
     return Violation(
       id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
       licensePlate: json['licensePlate'] ?? 'Đang xác minh',
       violationType: json['violationType'] ?? 'Vi phạm',
       violationCode: json['violationCode'] ?? '',
       description: json['description'] ?? '',
       timestamp: _parseTimestamp(ts),
       location: json['location'] ?? '',
-      imageUrl: json['imageUrl'] ?? '',
+      imageUrl: resolvedImage,
       fineAmount: (json['fineAmount'] ?? 0).toDouble(),
-      status: json['status'] ?? 'pending',
+      status: json['status']?.toString().toLowerCase() ?? 'pending',
       lawReference: json['lawReference'] ?? '',
-      complaintStatus: json['complaintStatus']?.toString() ?? '',
+      complaintStatus: json['complaintStatus']?.toString().toLowerCase() ?? '',
       paymentLocked: json['paymentLocked'] == true,
       complaintLocked: json['complaintLocked'] == true,
       paymentDueDate: json['paymentDueDate'] != null
@@ -88,6 +97,7 @@ class Violation {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'userId': userId,
       'licensePlate': licensePlate,
       'violationType': violationType,
       'violationCode': violationCode,

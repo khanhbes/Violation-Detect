@@ -1,5 +1,6 @@
 # Thư viện lõi để chạy mô hình YOLO (Model detection & segmentation)
-ultralytics>=8.3.0
+# Pin version đã kiểm thử để tránh lệch schema tracker config
+ultralytics==8.4.27
 
 # Thư viện xử lý ảnh và video (OpenCV)
 opencv-python>=4.10.0

@@ -479,14 +479,15 @@ class SignViolationDetector:
                                 self.violations_by_type[confirmed_type] += 1
 
                                 # Snapshot
-                                save_violation_snapshot(
+                                snap = save_violation_snapshot(
                                     frame, f"sign_{confirmed_type}",
                                     tid, box, vehicle_class=tracker.vehicle_class
                                 )
                                 violations.append({
                                     'type': 'sign',
                                     'id': tid,
-                                    'label': f'Sign: {confirmed_type}'
+                                    'label': f'Sign: {confirmed_type}',
+                                    'snapshotPath': snap,
                                 })
                                 print(f"🚨 VIOLATION: ID {tid} - {confirmed_type}")
 

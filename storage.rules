@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Violation snapshots (backend writes, all authenticated users read)
+    match /violations/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false; // backend uses admin SDK
+    }
+
+    // Complaint evidence: owner can upload, all authenticated can read
+    match /complaints/{uid}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

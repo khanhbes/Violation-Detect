@@ -1082,11 +1082,12 @@ class WrongLaneDetector:
                         st.touch_violation = True
                         self.cham_count += 1
                         vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
-                        save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2), vehicle_class=vclass)
+                        snap = save_violation_snapshot(frame, "cham_vach", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                         violations.append({
                             'type': 'wrong_lane',
                             'id': tid,
-                            'label': 'Cham Vach'
+                            'label': 'Cham Vach',
+                            'snapshotPath': snap,
                         })
 
                 # ---- WrongDir only at CROSS stopline ----
@@ -1123,11 +1124,12 @@ class WrongLaneDetector:
                                     st.dbg_text = ""
                                     st.dbg_time = time.time()
                                     vclass = config.CLASS_NAMES.get(cid, "vehicle").lower()
-                                    save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2), vehicle_class=vclass)
+                                    snap = save_violation_snapshot(frame, "wrong_lane", tid, (x1, y1, x2, y2), vehicle_class=vclass)
                                     violations.append({
                                         'type': 'wrong_lane',
                                         'id': tid,
-                                        'label': 'Wrong Lane'
+                                        'label': 'Wrong Lane',
+                                        'snapshotPath': snap,
                                     })
 
                 # ---- Merge labels + Draw bbox ----

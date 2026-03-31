@@ -1,11 +1,16 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:traffic_violation_app/models/violation.dart';
-import 'package:traffic_violation_app/theme/app_theme.dart';
-import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/screens/payment_screen.dart';
+import 'package:traffic_violation_app/screens/zoom_image_viewer_screen.dart';
+import 'package:traffic_violation_app/services/api_service.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
-import 'package:traffic_violation_app/screens/payment_screen.dart'; // Added this import
-import 'dart:async';
+import 'package:traffic_violation_app/services/firestore_service.dart';
+import 'package:traffic_violation_app/theme/app_theme.dart';
+import 'package:traffic_violation_app/widgets/violation_image.dart';
 
 class ViolationsScreen extends StatefulWidget {
   final bool embedded;
@@ -18,233 +23,330 @@ class ViolationsScreen extends StatefulWidget {
 
 class _ViolationsScreenState extends State<ViolationsScreen>
     with SingleTickerProviderStateMixin {
+  static const int _tabUnpaid = 1;
+  static const int _tabProcessing = 2;
+  static const int _tabComplaint = 3;
+  static const int _tabPaid = 4;
+
   late TabController _tabController;
+  final ApiService _api = ApiService();
   final FirestoreService _firestore = FirestoreService();
   final AppSettings _settings = AppSettings();
+
   List<Violation> _violations = [];
   bool _isLoading = true;
+  bool _isFallbackLoading = false;
+  String? _deletingViolationId;
   StreamSubscription? _sub;
+  String? _boundUid;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _settings.addListener(_onSettingsChanged);
     _loadData();
   }
 
   void _loadData() {
-    final uid = _settings.uid;
-    _sub = _firestore.violationsStream(userId: uid).listen((list) {
-      if (mounted)
+    final uid = _resolveUid();
+    if (uid == null) {
+      _boundUid = null;
+      _sub?.cancel();
+      _sub = null;
+      if (mounted) {
         setState(() {
-          _violations = list;
+          _violations = [];
           _isLoading = false;
         });
-    });
+      }
+      return;
+    }
+
+    if (_boundUid == uid && _sub != null) return;
+    _boundUid = uid;
+
+    _sub?.cancel();
+    _sub = _firestore.violationsStream(userId: uid).listen(
+      (list) {
+        debugPrint(
+            '📱 ViolationsScreen firestore uid=$uid count=${list.length}');
+        if (!mounted) return;
+        final merged = _mergeById(list, _violations);
+        setState(() {
+          _violations = merged;
+          _isLoading = false;
+        });
+        if (list.isEmpty) {
+          unawaited(_syncFromApiFallback(uid, reason: 'firestore_empty'));
+        }
+      },
+      onError: (error, stackTrace) {
+        final isDenied = FirestoreService.isPermissionDeniedError(error);
+        debugPrint(
+            '❌ Violations stream error${isDenied ? ' (PERMISSION_DENIED)' : ''}: $error');
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+        });
+        unawaited(_syncFromApiFallback(
+            uid, reason: isDenied ? 'permission_denied' : 'firestore_error'));
+      },
+    );
   }
 
-  Future<void> _refresh() async {
-    setState(() => _isLoading = true);
-    final uid = _settings.uid;
-    final violations = await _firestore.getViolations(userId: uid);
-    if (mounted) {
-      setState(() {
-        _violations = violations;
-        _isLoading = false;
-      });
-    }
+  void _onSettingsChanged() {
+    _loadData();
+    if (mounted) setState(() {});
+  }
+
+  String? _resolveUid() {
+    final settingsUid = _settings.uid?.trim();
+    if (settingsUid != null && settingsUid.isNotEmpty) return settingsUid;
+    final authUid = fb.FirebaseAuth.instance.currentUser?.uid.trim();
+    if (authUid == null || authUid.isEmpty) return null;
+    return authUid;
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _sub?.cancel();
+    _boundUid = null;
     _settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
-  void _onSettingsChanged() {
-    if (mounted) setState(() {});
+  List<Violation> _mergeById(
+      List<Violation> primary, List<Violation> secondary) {
+    final byId = <String, Violation>{};
+
+    void addAll(List<Violation> source) {
+      for (final v in source) {
+        final key = v.id.trim();
+        if (key.isEmpty) continue;
+        byId[key] = v;
+      }
+    }
+
+    addAll(secondary);
+    addAll(primary);
+
+    final merged = byId.values.toList()
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return merged;
   }
+
+  Future<void> _syncFromApiFallback(
+    String uid, {
+    required String reason,
+  }) async {
+    if (_isFallbackLoading) return;
+    _isFallbackLoading = true;
+    try {
+      final apiList = await _api.fetchViolations();
+      if (!mounted || _boundUid != uid) return;
+      final merged = _mergeById(apiList, _violations);
+      debugPrint(
+        '📱 ViolationsScreen api_fallback reason=$reason uid=$uid api=${apiList.length} merged=${merged.length}',
+      );
+      setState(() {
+        _violations = merged;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ ViolationsScreen fallback failed ($reason): $e');
+    } finally {
+      _isFallbackLoading = false;
+    }
+  }
+
+  Future<void> _refresh() async {
+    if (_isLoading) return;
+    if (mounted) setState(() => _isLoading = true);
+
+    final uid = _resolveUid();
+    if (uid == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      await _api.refreshCoreData(
+        uid,
+        taskTimeout: const Duration(seconds: 7),
+        hardTimeout: const Duration(seconds: 14),
+      );
+      final latest = await _firestore.violationsStream(userId: uid).first;
+      final merged = _mergeById(latest, _api.violations);
+      if (!mounted) return;
+      setState(() => _violations = merged);
+    } catch (e) {
+      debugPrint('❌ Refresh violations failed: $e');
+      await _syncFromApiFallback(uid, reason: 'manual_refresh_error');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  bool _isPaid(Violation v) => v.isPaid;
+
+  bool _isComplaint(Violation v) => v.isComplaintPending;
+
+  bool _isProcessing(Violation v) {
+    if (_isPaid(v) || _isComplaint(v)) return false;
+    final s = v.status.toLowerCase().trim();
+    return s == 'pending_payment' ||
+        s == 'processing_payment' ||
+        PaymentScreen.isProcessing(v.id);
+  }
+
+  bool _isUnpaid(Violation v) {
+    if (_isPaid(v) || _isComplaint(v) || _isProcessing(v)) return false;
+    final s = v.status.toLowerCase().trim();
+    return s == 'pending' || s == 'pending_payment' || v.canPay;
+  }
+
+  bool _isComplaintRejected(Violation v) =>
+      v.complaintStatus.trim().toLowerCase() == 'rejected';
 
   List<Violation> _filtered(int tab) {
     switch (tab) {
-      case 1:
-        return _violations.where((v) => v.isPending).toList();
-      case 2:
-        return _violations.where((v) => v.isPaid).toList();
+      case _tabUnpaid:
+        return _violations.where(_isUnpaid).toList();
+      case _tabProcessing:
+        return _violations.where(_isProcessing).toList();
+      case _tabComplaint:
+        return _violations.where(_isComplaint).toList();
+      case _tabPaid:
+        return _violations.where(_isPaid).toList();
       default:
         return _violations;
     }
   }
 
+  Future<void> _deletePaidViolation(Violation v) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_settings.tr('Xóa vi phạm', 'Delete violation')),
+        content: Text(
+          _settings.tr(
+            'Xóa vi phạm đã thanh toán này khỏi lịch sử?',
+            'Delete this paid violation from your history?',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_settings.tr('Hủy', 'Cancel')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.dangerColor,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(_settings.tr('Xóa', 'Delete')),
+          ),
+        ],
+      ),
+    );
+
+    if (accepted != true) return;
+
+    setState(() => _deletingViolationId = v.id);
+    try {
+      await _firestore.deletePaidViolation(v.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settings.tr('Đã xóa vi phạm', 'Violation deleted')),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _settings.tr('Không thể xóa vi phạm', 'Unable to delete violation'),
+          ),
+          backgroundColor: AppTheme.dangerColor,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deletingViolationId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final pending = _violations.where((v) => v.isPending).length;
-    final paid = _violations.where((v) => v.isPaid).length;
-    final totalPendingFine = _violations
-        .where((v) => v.isPending)
-        .fold<double>(0, (sum, v) => sum + v.fineAmount);
-    final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unpaidCount = _violations.where(_isUnpaid).length;
+    final processingCount = _violations.where(_isProcessing).length;
+    final complaintCount = _violations.where(_isComplaint).length;
+    final paidCount = _violations.where(_isPaid).length;
+    final openCount = unpaidCount + processingCount + complaintCount;
 
     return Scaffold(
-      backgroundColor: AppTheme.surfaceColor,
+      backgroundColor: isDark ? const Color(0xFF0D131F) : AppTheme.surfaceColor,
       body: Column(
         children: [
-          // ── Header ─────────────────────────────────────────
-          Container(
-            decoration: const BoxDecoration(
-              gradient: AppTheme.headerGradient,
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(24),
-                bottomRight: Radius.circular(24),
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Title row
-                    Row(
-                      children: [
-                        if (!widget.embedded)
-                          GestureDetector(
-                            onTap: () => Navigator.pop(context),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.arrow_back_rounded,
-                                  color: Colors.white, size: 20),
-                            ),
-                          ),
-                        if (!widget.embedded) const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _settings.tr(
-                                'Vi phạm giao thông', 'Traffic Violations'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        if (pending > 0)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppTheme.accentColor,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '$pending ${_settings.tr('chưa nộp', 'unpaid')}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    // Stats row
-                    Row(
-                      children: [
-                        _buildHeaderStat(
-                          icon: Icons.folder_outlined,
-                          label: _settings.tr('Tổng', 'Total'),
-                          value: _violations.length.toString(),
-                        ),
-                        const SizedBox(width: 10),
-                        _buildHeaderStat(
-                          icon: Icons.pending_actions_rounded,
-                          label: _settings.tr('Chưa nộp', 'Unpaid'),
-                          value: pending.toString(),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _settings.tr('Tiền phạt', 'Total fines'),
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  formatter.format(totalPendingFine),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _buildHeader(
+            isDark: isDark,
+            unpaidCount: unpaidCount,
+            processingCount: processingCount,
+            complaintCount: complaintCount,
+            paidCount: paidCount,
+            openCount: openCount,
           ),
-
-          // ── Tab Bar ─────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusM),
+                color: isDark
+                    ? const Color(0xFF1A2233)
+                    : Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF2B3853) : Colors.transparent,
+                ),
               ),
               child: TabBar(
                 controller: _tabController,
+                isScrollable: true,
                 indicator: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusM),
                   color: AppTheme.primaryColor,
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
-                labelColor: Colors.white,
-                unselectedLabelColor: AppTheme.textSecondary,
                 dividerColor: Colors.transparent,
+                labelColor: Colors.white,
+                unselectedLabelColor:
+                    isDark ? const Color(0xFF96A3BC) : AppTheme.textSecondary,
                 tabs: [
                   Tab(
                       text:
                           '${_settings.tr('Tất cả', 'All')} (${_violations.length})'),
-                  Tab(text: '${_settings.tr('Chưa nộp', 'Unpaid')} ($pending)'),
-                  Tab(text: '${_settings.tr('Đã nộp', 'Paid')} ($paid)'),
+                  Tab(
+                      text:
+                          '${_settings.tr('Chưa nộp', 'Unpaid')} ($unpaidCount)'),
+                  Tab(
+                      text:
+                          '${_settings.tr('Đang thanh toán', 'Processing')} ($processingCount)'),
+                  Tab(
+                      text:
+                          '${_settings.tr('Đang khiếu nại', 'Complaint')} ($complaintCount)'),
+                  Tab(text: '${_settings.tr('Đã nộp', 'Paid')} ($paidCount)'),
                 ],
               ),
             ),
           ),
-
-          // ── List ───────────────────────────────────────────
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: List.generate(3, (tab) => _buildList(tab)),
+              children: List.generate(5, (tab) => _buildList(tab, isDark)),
             ),
           ),
         ],
@@ -252,92 +354,143 @@ class _ViolationsScreenState extends State<ViolationsScreen>
     );
   }
 
-  Widget _buildHeaderStat({
-    required IconData icon,
-    required String label,
-    required String value,
+  Widget _buildHeader({
+    required bool isDark,
+    required int unpaidCount,
+    required int processingCount,
+    required int complaintCount,
+    required int paidCount,
+    required int openCount,
   }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: isDark
+            ? const LinearGradient(
+                colors: [Color(0xFF202B42), Color(0xFF111A2B)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              )
+            : AppTheme.headerGradient,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 11,
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  if (!widget.embedded)
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.arrow_back_rounded,
+                          color: Colors.white),
+                    ),
+                  Expanded(
+                    child: Text(
+                      _settings.tr('Vi phạm giao thông', 'Traffic Violations'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$openCount ${_settings.tr('đang xử lý', 'open')}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _chip(
+                    '${_settings.tr('Chưa nộp', 'Unpaid')}: $unpaidCount',
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _chip(
+                    '${_settings.tr('Đang thanh toán', 'Processing')}: $processingCount',
+                    isDark: isDark,
+                  ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _chip(
+                    '${_settings.tr('Đang khiếu nại', 'Complaint')}: $complaintCount',
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _chip(
+                    '${_settings.tr('Đã nộp', 'Paid')}: $paidCount',
+                    isDark: isDark,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildList(int tab) {
+  Widget _chip(String text, {required bool isDark}) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withOpacity(0.1)
+              : Colors.white.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? Colors.white.withOpacity(0.08) : Colors.transparent,
+          ),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 12,
+              fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList(int tab, bool isDark) {
     final list = _filtered(tab);
-
     if (_isLoading) {
-      return ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: 4,
-        itemBuilder: (_, __) => _buildShimmerCard(),
-      );
+      return const Center(
+          child: CircularProgressIndicator(color: AppTheme.primaryColor));
     }
-
     if (list.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: (tab == 2 ? AppTheme.infoColor : AppTheme.successColor)
-                    .withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                tab == 2
-                    ? Icons.hourglass_empty
-                    : Icons.check_circle_outline_rounded,
-                size: 32,
-                color: tab == 2 ? AppTheme.infoColor : AppTheme.successColor,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              tab == 1
-                  ? _settings.tr(
-                      'Không có vi phạm chưa nộp', 'No unpaid violations')
-                  : tab == 2
-                      ? _settings.tr(
-                          'Không có vi phạm đã nộp', 'No paid violations')
-                      : _settings.tr(
-                          'Không có vi phạm nào', 'No violations found'),
-              style: const TextStyle(
-                fontSize: 15,
-                color: AppTheme.textSecondary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+        child: Text(
+          _settings.tr('Không có dữ liệu', 'No data'),
+          style: TextStyle(
+            color: isDark ? const Color(0xFF8C9BB4) : AppTheme.textSecondary,
+          ),
         ),
       );
     }
@@ -346,221 +499,256 @@ class _ViolationsScreenState extends State<ViolationsScreen>
       onRefresh: _refresh,
       color: AppTheme.primaryColor,
       child: ListView.builder(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
-          bottom: widget.embedded ? 100 : 16,
-        ),
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(12, 12, 12, widget.embedded ? 100 : 16),
         itemCount: list.length,
-        itemBuilder: (context, index) =>
-            _buildViolationCard(list[index], index),
+        itemBuilder: (context, index) => _buildCard(list[index], index, isDark),
       ),
     );
   }
 
-  Widget _buildShimmerCard() {
-    return Container(
-      height: 100,
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusL),
-        boxShadow: AppTheme.cardShadow,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 100,
-            decoration: BoxDecoration(
-              color: Colors.grey.withOpacity(0.08),
-              borderRadius:
-                  const BorderRadius.horizontal(left: Radius.circular(16)),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    height: 14,
-                    width: 120,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 10,
-                    width: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.07),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildViolationCard(Violation v, int index) {
-    final df = DateFormat('HH:mm — dd/MM/yyyy');
+  Widget _buildCard(Violation v, int index, bool isDark) {
+    final isPaid = _isPaid(v);
+    final isProcessing = _isProcessing(v);
+    final isComplaint = _isComplaint(v);
+    final canComplain =
+        !isPaid && !isComplaint && !isProcessing && v.canComplain;
+    final deleting = _deletingViolationId == v.id;
     final formatter = NumberFormat.currency(locale: 'vi_VN', symbol: '₫');
+    final dateStr = DateFormat('HH:mm — dd/MM/yyyy').format(v.timestamp);
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 350 + index * 60),
-      curve: Curves.easeOutCubic,
-      builder: (context, anim, child) {
-        return Opacity(
-          opacity: anim,
-          child: Transform.translate(
-            offset: Offset(20 * (1 - anim), 0),
-            child: child,
-          ),
-        );
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusL),
-          border: Border.all(
-            color: v.isPending
-                ? AppTheme.primaryColor.withOpacity(0.1)
-                : AppTheme.successColor.withOpacity(0.1),
-          ),
-          boxShadow: AppTheme.cardShadow,
+    final statusText = isPaid
+        ? _settings.tr('Đã nộp', 'Paid')
+        : isComplaint
+            ? _settings.tr('Đang khiếu nại', 'Under complaint')
+            : isProcessing
+                ? _settings.tr('Đang thanh toán', 'Processing payment')
+                : _settings.tr('Chưa nộp', 'Unpaid');
+
+    final statusColor = isPaid
+        ? AppTheme.successColor
+        : isComplaint
+            ? AppTheme.warningColor
+            : isProcessing
+                ? AppTheme.infoColor
+                : Colors.orange.shade700;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A2233) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: statusColor.withOpacity(isDark ? 0.35 : 0.25),
         ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radiusL),
-          onTap: () =>
-              Navigator.pushNamed(context, '/violation-detail', arguments: v),
-          child: SizedBox(
-            height: 100,
-            child: Row(
-              children: [
-                // Image
-                Hero(
-                  tag: 'violation_image_${v.id}',
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.horizontal(
-                        left: Radius.circular(16)),
-                    child: SizedBox(
-                      width: 100,
-                      height: 100,
-                      child: Image.network(
-                        v.imageUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: Colors.grey[100],
-                          child: Icon(Icons.image_not_supported_rounded,
-                              color: Colors.grey[400]),
-                        ),
-                      ),
+        boxShadow: isDark
+            ? [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.28),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                )
+              ]
+            : AppTheme.cardShadow,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: () {
+                final tag = 'violation_image_${v.id}';
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ZoomImageViewerScreen(
+                      imageUrl: v.imageUrl,
+                      heroTag: tag,
+                    ),
+                  ),
+                );
+              },
+              child: Hero(
+                tag: 'violation_image_${v.id}',
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    width: 82,
+                    height: 104,
+                    child: ViolationImage(
+                      imageUrl: v.imageUrl,
+                      fit: BoxFit.cover,
+                      width: 82,
+                      height: 104,
                     ),
                   ),
                 ),
-                // Info
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => Navigator.pushNamed(context, '/violation-detail',
+                    arguments: v),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                v.violationType,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                  color: AppTheme.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                        Expanded(
+                          child: Text(
+                            v.violationType,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: isDark
+                                  ? const Color(0xFFF3F6FD)
+                                  : AppTheme.textPrimary,
                             ),
-                            Builder(
-                              builder: (context) {
-                                final bool isProcessing = PaymentScreen.isProcessing(v.id);
-                                final Color bColor = v.isPaid
-                                    ? AppTheme.successColor
-                                    : (isProcessing ? AppTheme.infoColor : Colors.orange);
-                                final String textV = v.isPaid
-                                    ? _settings.tr('Đã nộp', 'Paid')
-                                    : (isProcessing ? _settings.tr('Đang nộp', 'Processing') : _settings.tr('Chưa nộp', 'Unpaid'));
-
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: bColor.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    textV,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: v.isPending && !isProcessing ? Colors.orange[800] : bColor,
-                                    ),
-                                  ),
-                                );
-                              }
-                            ),
-                          ],
+                          ),
                         ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            const Icon(Icons.access_time_rounded,
-                                size: 12, color: AppTheme.textSecondary),
-                            const SizedBox(width: 4),
-                            Text(
-                              df.format(v.timestamp),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          formatter.format(v.fineAmount),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            color: AppTheme.primaryColor,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                                color: statusColor,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700),
                           ),
                         ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 6),
+                    Text(dateStr,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF9AA9C3)
+                                : AppTheme.textSecondary)),
+                    const SizedBox(height: 2),
+                    Text(v.licensePlate,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF9AA9C3)
+                                : AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(
+                      formatter.format(v.fineAmount),
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: isPaid
+                            ? AppTheme.successColor
+                            : AppTheme.primaryColor,
+                      ),
+                    ),
+                    if (_isComplaintRejected(v) && !isComplaint)
+                      Text(
+                        _settings.tr('Khiếu nại trước đã bị từ chối',
+                            'Previous complaint rejected'),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.warningColor,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _actionButton(
+                          icon: Icons.visibility_rounded,
+                          label: _settings.tr('Chi tiết', 'Detail'),
+                          color: AppTheme.infoColor,
+                          isDark: isDark,
+                          onTap: () => Navigator.pushNamed(
+                              context, '/violation-detail',
+                              arguments: v),
+                        ),
+                        if (!isPaid && !isComplaint)
+                          _actionButton(
+                            icon: Icons.payment_rounded,
+                            label: isProcessing
+                                ? _settings.tr('Tiếp tục nộp', 'Continue pay')
+                                : _settings.tr('Nộp phạt', 'Pay'),
+                            color: AppTheme.primaryColor,
+                            isDark: isDark,
+                            onTap: () => Navigator.pushNamed(
+                                context, '/payment',
+                                arguments: v),
+                          ),
+                        if (canComplain)
+                          _actionButton(
+                            icon: Icons.rate_review_rounded,
+                            label: _settings.tr('Khiếu nại', 'Complain'),
+                            color: AppTheme.warningColor,
+                            isDark: isDark,
+                            onTap: () =>
+                                Navigator.pushNamed(context, '/complaint'),
+                          ),
+                        if (isPaid)
+                          _actionButton(
+                            icon: deleting
+                                ? Icons.hourglass_top_rounded
+                                : Icons.delete_outline_rounded,
+                            label: deleting
+                                ? _settings.tr('Đang xóa', 'Deleting')
+                                : _settings.tr('Xóa', 'Delete'),
+                            color: AppTheme.dangerColor,
+                            isDark: isDark,
+                            onTap:
+                                deleting ? null : () => _deletePaidViolation(v),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.grey[400],
-                    size: 22,
-                  ),
-                ),
-              ],
+              ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withOpacity(isDark ? 0.2 : 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: color.withOpacity(isDark ? 0.35 : 0.18),
           ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+          ],
         ),
       ),
     );

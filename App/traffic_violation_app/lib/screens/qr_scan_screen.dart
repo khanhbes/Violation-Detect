@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:traffic_violation_app/models/violation.dart';
 import 'package:traffic_violation_app/services/app_settings.dart';
@@ -83,8 +84,14 @@ class _QrScanScreenState extends State<QrScanScreen> {
       }
     }
 
-    final compact = text.replaceAll(RegExp(r'\s+'), '');
-    if (compact.length >= 6) return compact;
+    final upper = text.toUpperCase();
+    if (RegExp(r'^VIO_[A-Z0-9_-]{4,}$').hasMatch(upper)) {
+      return upper;
+    }
+    // Firestore auto IDs in this project are often uppercase alphanumeric.
+    if (RegExp(r'^[A-Z0-9]{16,32}$').hasMatch(upper)) {
+      return upper;
+    }
     return null;
   }
 
@@ -106,15 +113,10 @@ class _QrScanScreenState extends State<QrScanScreen> {
       final violationId = _extractViolationId(normalizedRaw);
       if (violationId == null) {
         final uri = Uri.tryParse(normalizedRaw);
-        if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+        if (uri != null && uri.scheme.isNotEmpty) {
           await _showExternalLinkDialog(uri);
         } else {
-          _showErrorSnackBar(
-            _s.tr(
-              'QR không đúng định dạng vi phạm. Vui lòng thử lại.',
-              'Unsupported QR format. Please try again.',
-            ),
-          );
+          await _showGenericPayloadDialog(normalizedRaw);
         }
         return;
       }
@@ -214,9 +216,93 @@ class _QrScanScreenState extends State<QrScanScreen> {
     );
   }
 
+  Future<void> _showGenericPayloadDialog(String payload) async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _s.tr('Nội dung QR', 'QR content'),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF4F4F5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    payload,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: payload));
+                          Navigator.pop(ctx);
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _s.tr(
+                                  'Đã sao chép nội dung QR',
+                                  'QR content copied',
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: Text(_s.tr('Sao chép', 'Copy')),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: Text(_s.tr('Đã hiểu', 'Got it')),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showViolationActionSheet(Violation violation) async {
-    final isPending =
-        violation.status == 'pending' || violation.status == 'pending_payment';
+    final isPending = violation.canPay;
+    final isComplaintPending = violation.isComplaintPending;
     final formatter = violation.fineAmount.toStringAsFixed(0);
 
     await showModalBottomSheet(
@@ -251,9 +337,11 @@ class _QrScanScreenState extends State<QrScanScreen> {
                     _s.tr('Biển số', 'License plate'), violation.licensePlate),
                 _infoRow(
                     _s.tr('Trạng thái', 'Status'),
-                    isPending
-                        ? _s.tr('Chưa nộp', 'Unpaid')
-                        : _s.tr('Đã nộp', 'Paid')),
+                    isComplaintPending
+                        ? _s.tr('Chờ phản hồi', 'Awaiting response')
+                        : (isPending
+                            ? _s.tr('Chưa nộp', 'Unpaid')
+                            : _s.tr('Đã nộp', 'Paid'))),
                 _infoRow(_s.tr('Số tiền', 'Fine amount'), '$formatter ₫'),
                 const SizedBox(height: 16),
                 Row(
@@ -276,6 +364,13 @@ class _QrScanScreenState extends State<QrScanScreen> {
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.pop(ctx);
+                          if (isComplaintPending) {
+                            _showErrorSnackBar(_s.tr(
+                              'Lỗi này đang chờ phản hồi khiếu nại, tạm thời không thể nộp phạt.',
+                              'This violation is awaiting complaint response, payment is temporarily disabled.',
+                            ));
+                            return;
+                          }
                           if (!isPending) {
                             _showErrorSnackBar(_s.tr(
                               'Lỗi này đã nộp phạt',
@@ -290,14 +385,20 @@ class _QrScanScreenState extends State<QrScanScreen> {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isPending
-                              ? AppTheme.primaryColor
-                              : AppTheme.textHint,
+                          backgroundColor: isComplaintPending
+                              ? AppTheme.warningColor
+                              : (isPending
+                                  ? AppTheme.primaryColor
+                                  : AppTheme.textHint),
                           foregroundColor: Colors.white,
                         ),
-                        child: Text(isPending
-                            ? _s.tr('Nộp phạt', 'Pay now')
-                            : _s.tr('Đã nộp', 'Paid')),
+                        child: Text(
+                          isComplaintPending
+                              ? _s.tr('Chờ phản hồi', 'Awaiting response')
+                              : (isPending
+                                  ? _s.tr('Nộp phạt', 'Pay now')
+                                  : _s.tr('Đã nộp', 'Paid')),
+                        ),
                       ),
                     ),
                   ],
