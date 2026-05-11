@@ -1,6 +1,6 @@
 # Hệ thống Phạt Nguội Giao Thông (Traffic Violation Detection System)
 
-Dựa trên việc phân tích toàn bộ mã nguồn và tài liệu của thư mục `"Violation Detect"` (trong đó bao gồm hệ thống **Python/FastAPI Backend** kết hợp mô hình AI YOLOv12 và ứng dụng **Mobile App Flutter**), hệ thống của bạn hoạt động theo một quy trình khép kín từ lúc camera bắt được hình ảnh cho đến lúc người dùng nộp phạt trên ứng dụng.
+Dựa trên việc phân tích toàn bộ mã nguồn và tài liệu của thư mục `"Violation Detect"` (trong đó bao gồm hệ thống **Python/FastAPI Backend** kết hợp mô hình AI YOLOv26 và ứng dụng **Mobile App Flutter**), hệ thống của bạn hoạt động theo một quy trình khép kín từ lúc camera bắt được hình ảnh cho đến lúc người dùng nộp phạt trên ứng dụng.
 
 Dưới đây là chi tiết toàn bộ hệ thống bằng sơ đồ khối, lưu đồ thuật toán và giải thích lời văn.
 
@@ -17,7 +17,7 @@ graph TD
     end
 
     subgraph Backend_System [Detection Web Server - FastAPI & Python]
-        YOLO[YOLOv12 Object Detection & Segmentation]
+        YOLO[YOLOv26 Instance Segmentation]
         CoreLogic[Hệ thống logic Vi phạm: Đèn đỏ, Ngược chiều, Mũ bảo hiểm...]
         OCR[Nhận diện biển số - OCR]
         LocalStore[Lưu trữ Snapshot/Video nội bộ]

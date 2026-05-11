@@ -11,7 +11,7 @@
 - Nhận thông báo realtime
 
 ### 💻 Web Admin (Đã có sẵn) - Phát hiện vi phạm
-- YOLOv12 Segmentation
+- YOLOv26 Segmentation
 - Trích xuất biển số xe tự động
 - Gửi thông báo đến app user
 

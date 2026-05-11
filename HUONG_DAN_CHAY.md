@@ -19,12 +19,12 @@
 
 | Thành phần | Công nghệ | Vị trí |
 |------------|-----------|--------|
-| **Backend / AI Detection** | Python, FastAPI, YOLOv12, OpenCV | `Detection Web/` |
+| **Backend / AI Detection** | Python, FastAPI, YOLOv26, OpenCV | `Detection Web/` |
 | **Mobile App** | Flutter / Dart | `App/traffic_violation_app/` |
 
 **Luồng hoạt động:**
 ```
-Camera/Video → YOLOv12 Detection → Vi phạm → Firebase Firestore → Push Notification → App
+Camera/Video → YOLOv26 Detection → Vi phạm → Firebase Firestore → Push Notification → App
 ```
 
 ---

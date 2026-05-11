@@ -36,7 +36,7 @@ backend/
 │   │   ├── payment.routes.js
 │   │   └── admin.routes.js
 │   ├── services/
-│   │   ├── detection.service.js      # YOLOv12 integration
+│   │   ├── detection.service.js      # YOLOv26 integration
 │   │   ├── ocr.service.js            # License plate OCR
 │   │   ├── payment.service.js        # VNPay/MoMo
 │   │   └── notification.service.js   # FCM
@@ -98,7 +98,7 @@ MOMO_SECRET_KEY=your_secret_key
 MOMO_ENDPOINT=https://test-payment.momo.vn
 MOMO_IPN_URL=https://yourapi.com/payment/webhook/momo
 
-# YOLOv12 Detection Service
+# YOLOv26 Detection Service
 DETECTION_SERVICE_URL=http://localhost:5000
 DETECTION_API_KEY=your_detection_api_key
 

@@ -13,7 +13,7 @@
 │   WEB ADMIN      │         │   MOBILE APP     │
 │   (Detection)    │         │   (User)         │
 │                  │         │                  │
-│ - YOLOv12 Seg   │         │ - Violations     │
+│ - YOLOv26 Seg   │         │ - Violations     │
 │ - Realtime Det. │         │ - Payments       │
 │ - License Plate │◄───────►│ - Notifications  │
 │ - Auto Process  │   API   │ - Profile        │
@@ -45,7 +45,7 @@
 ### 1. Quy trình phát hiện vi phạm
 
 ```
-Camera → YOLOv12 → Detection → License Plate OCR → 
+Camera → YOLOv26 → Detection → License Plate OCR → 
 Database Lookup → User Match → Create Violation → 
 Send Notification → User App
 ```

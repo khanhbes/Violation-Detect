@@ -28,7 +28,7 @@ graph TB
     end
 
     subgraph AI["🤖 AI Detection Engine"]
-        YOLO["YOLOv12 Model<br/>(.pt weights)"]
+        YOLO["YOLOv26 Model<br/>(.pt weights)"]
         CONFIG["⚙️ config.py"]
         UTILS["🎨 draw_utils.py"]
     end
@@ -108,7 +108,7 @@ graph TB
     UD --> WL["WrongLaneDetectorWrapper<br/>━━━━━━━━━━━━━━━━━<br/>wrong_lane_violation.py<br/>• Phát hiện sai làn đường<br/>• Lane segmentation"]
     UD --> SG["SignDetectorWrapper<br/>━━━━━━━━━━━━━━━━━<br/>sign_violation.py<br/>• Phát hiện vi phạm biển báo<br/>• Sign recognition"]
 
-    YOLO["YOLOv12 (.pt)"] -.-> UD
+    YOLO["YOLOv26 (.pt)"] -.-> UD
     CFG["config.py<br/>━━━━━━━━━━<br/>• Paths, Class IDs<br/>• Thresholds, Colors<br/>• 40 YOLO classes"] -.-> UD
     DRAW["draw_utils.py<br/>━━━━━━━━━━<br/>• draw_bbox_with_label()<br/>• save_violation_snapshot()"] -.-> UD
 
@@ -196,7 +196,7 @@ graph TB
 sequenceDiagram
     participant Web as 🌐 Web Dashboard
     participant Server as ⚙️ FastAPI Server
-    participant YOLO as 🤖 YOLOv12
+    participant YOLO as 🤖 YOLOv26
     participant FS as 🗄️ Firestore
     participant Storage as 📦 Firebase Storage
     participant FCM as 📨 FCM
@@ -272,7 +272,7 @@ Violation Detect/
 
 | Tầng | Công nghệ | Mô tả |
 |------|-----------|-------|
-| **AI/ML** | YOLOv12 + OpenCV | Object detection & tracking |
+| **AI/ML** | YOLOv26 + OpenCV | Instance segmentation & tracking |
 | **Backend** | FastAPI + Uvicorn | HTTP + WebSocket server |
 | **Database** | Cloud Firestore | Real-time NoSQL database |
 | **Storage** | Firebase Storage | Violation snapshot images |
