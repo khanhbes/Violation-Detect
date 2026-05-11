@@ -261,7 +261,7 @@ class AuthService {
     required String idCard,
     required String profileEmail,
   }) async {
-    final idToken = await user.getIdToken(true);
+    final String idToken = await user.getIdToken(true) ?? '';
     final endpoint = '${ApiService.baseUrl}/api/app/register-profile';
     final uri = Uri.parse(endpoint);
 

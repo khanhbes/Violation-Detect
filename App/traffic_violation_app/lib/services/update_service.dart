@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:traffic_violation_app/services/api_service.dart';
@@ -127,8 +126,12 @@ class UpdateService {
       final latestParts = latestVersion.split('.').map(int.parse).toList();
 
       // Pad to same length
-      while (currentParts.length < 3) currentParts.add(0);
-      while (latestParts.length < 3) latestParts.add(0);
+      while (currentParts.length < 3) {
+        currentParts.add(0);
+      }
+      while (latestParts.length < 3) {
+        latestParts.add(0);
+      }
 
       for (int i = 0; i < 3; i++) {
         if (latestParts[i] > currentParts[i]) return true;
@@ -179,7 +182,7 @@ class UpdateService {
 
       await cleanupDownloadedApkCache(keepLatest: 0);
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final filePath = '${dir.path}/${_downloadApkPrefix}$timestamp.apk';
+      final filePath = '${dir.path}/$_downloadApkPrefix$timestamp.apk';
       final file = File(filePath);
 
       debugPrint('📱 Downloading APK from: $downloadUrl');

@@ -473,7 +473,7 @@ class FirestoreService {
       );
     }
 
-    final idToken = await user.getIdToken(true);
+    final String idToken = await user.getIdToken(true) ?? '';
     final uri =
         Uri.parse('${ApiService.baseUrl}/api/app/profile-update-request');
 
@@ -486,6 +486,7 @@ class FirestoreService {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
               'Authorization': 'Bearer $idToken',
+              'X-ID-Token': idToken,
               'ngrok-skip-browser-warning': 'true',
             },
             body: jsonEncode({

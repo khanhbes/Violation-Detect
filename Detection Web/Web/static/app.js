@@ -1015,6 +1015,12 @@ const i18n = {
         manage_btn_review: 'Duyệt sửa đổi',
         manage_btn_detail: 'Chi tiết',
         manage_btn_delete: 'Xóa TK',
+        manage_btn_delete_violations: 'Xóa VP',
+        manage_delete_violations_confirm: 'Bạn có chắc muốn xóa toàn bộ vi phạm của người dùng này? Hệ thống sẽ hoàn điểm GPLX và đồng bộ xuống app.',
+        manage_delete_violations_loading: 'Đang xóa toàn bộ vi phạm của người dùng...',
+        manage_delete_violations_success: '✅ Đã xóa toàn bộ vi phạm của người dùng',
+        manage_delete_violations_empty: 'Người dùng này không có vi phạm để xóa',
+        manage_delete_violations_error: 'Lỗi khi xóa vi phạm người dùng',
         manage_no_result: 'Không tìm thấy kết quả phù hợp.',
         manage_no_data: 'Hệ thống chưa có dữ liệu người dùng.',
         // Quota
@@ -1191,6 +1197,12 @@ const i18n = {
         manage_btn_review: 'Review changes',
         manage_btn_detail: 'Details',
         manage_btn_delete: 'Delete',
+        manage_btn_delete_violations: 'Delete Violations',
+        manage_delete_violations_confirm: 'Delete all violations of this user? License points will be restored and changes synced to the app.',
+        manage_delete_violations_loading: 'Deleting all user violations...',
+        manage_delete_violations_success: '✅ All user violations deleted',
+        manage_delete_violations_empty: 'This user has no violations to delete',
+        manage_delete_violations_error: 'Failed to delete user violations',
         manage_no_result: 'No matching result found.',
         manage_no_data: 'No user data available yet.',
         // Quota
@@ -1956,6 +1968,7 @@ function renderAdminTable(data, searchQuery = '') {
                     <div style="display:flex;flex-direction:column;gap:5px;min-width:110px;">
                         ${isPendingUpdate ? `<button class="btn btn-warning pending-update-btn" style="padding:5px 10px;font-size:0.78rem;color:#fff;border-radius:7px;" onclick="reviewUserUpdate('${uid}')">🔔 ${tr('manage_btn_review')}</button>` : ''}
                         <button class="btn btn-primary" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="showUserDetailPage('${uid}')">👁️ ${tr('manage_btn_detail')}</button>
+                        ${uViolations.length > 0 ? `<button class="btn btn-warning" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="confirmDeleteUserViolations('${uid}', '${(u.fullName || '').replace(/'/g, '')}', ${uViolations.length}, this)">🧹 ${tr('manage_btn_delete_violations')} (${uViolations.length})</button>` : ''}
                         <button class="btn btn-danger" style="padding:5px 10px;font-size:0.78rem;border-radius:7px;" onclick="confirmDeleteUser('${uid}', '${(u.fullName||'').replace(/'/g,'')}')" >🗑️ ${tr('manage_btn_delete')}</button>
                     </div>
                 </td>
@@ -2368,6 +2381,133 @@ async function deleteComplaint(complaintId, triggerButton = null) {
         setActionButtonLoading(triggerButton, false);
         finishLoading();
         if (_adminCachedData) renderComplaintBoard(_adminCachedData);
+    }
+}
+
+// ─── Delete Violation ──────────────────────────────────────────────────────
+const _violationDeleteLoading = new Set();
+
+function confirmDeleteViolation(violationId, triggerButton = null) {
+    const normalizedId = String(violationId || '').trim();
+    if (!normalizedId) return;
+    if (_violationDeleteLoading.has(normalizedId)) return;
+
+    const message = 'Bạn có chắc muốn xóa vi phạm này? Hành động này sẽ hoàn điểm GPLX và xóa thông báo liên quan.';
+    if (!confirm(message)) return;
+    deleteViolation(normalizedId, triggerButton);
+}
+
+async function deleteViolation(violationId, triggerButton = null) {
+    const normalizedId = String(violationId || '').trim();
+    if (!normalizedId) return;
+    if (_violationDeleteLoading.has(normalizedId)) return;
+
+    _violationDeleteLoading.add(normalizedId);
+    if (triggerButton) {
+        triggerButton.disabled = true;
+        triggerButton.textContent = '⏳ Đang xóa...';
+    }
+    const finishLoading = showGlobalPageLoader('Đang xóa vi phạm...');
+
+    try {
+        const res = await fetch(`/api/admin/violations/${encodeURIComponent(normalizedId)}`, {
+            method: 'DELETE',
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'ok') {
+            if (_adminCachedData) {
+                _adminCachedData.violations = (_adminCachedData.violations || []).filter(
+                    v => String(v.id || '').toUpperCase() !== normalizedId.toUpperCase(),
+                );
+                updateManageStats(_adminCachedData);
+                renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+            }
+
+            await loadAdminData({ silent: true });
+            const detailPanel = document.getElementById('tab-user-detail');
+            if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid) {
+                showUserDetails(detailPanel.dataset.uid);
+            }
+
+            showToast(data.message || '🗑️ Đã xóa vi phạm', 'success');
+        } else {
+            showToast(data.message || 'Lỗi khi xóa vi phạm', 'error');
+        }
+    } catch (e) {
+        showToast('Lỗi khi xóa vi phạm', 'error');
+    } finally {
+        _violationDeleteLoading.delete(normalizedId);
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.textContent = '🗑️ Xóa';
+        }
+        finishLoading();
+    }
+}
+
+function confirmDeleteUserViolations(uid, name, violationCount = 0, triggerButton = null) {
+    const normalizedUid = String(uid || '').trim();
+    if (!normalizedUid) return;
+    if (Number(violationCount || 0) <= 0) {
+        showToast(tr('manage_delete_violations_empty', 'Người dùng này không có vi phạm để xóa'), 'warning');
+        return;
+    }
+
+    const owner = String(name || '').trim() || normalizedUid;
+    const message = `${tr('manage_delete_violations_confirm', 'Bạn có chắc muốn xóa toàn bộ vi phạm của người dùng này? Hệ thống sẽ hoàn điểm GPLX và đồng bộ xuống app.')}\n\n` +
+        `${currentLang === 'en' ? 'User' : 'Người dùng'}: ${owner}\n` +
+        `${currentLang === 'en' ? 'Violations' : 'Số vi phạm'}: ${violationCount}`;
+    if (!confirm(message)) return;
+
+    deleteUserViolations(normalizedUid, triggerButton);
+}
+
+async function deleteUserViolations(uid, triggerButton = null) {
+    const normalizedUid = String(uid || '').trim();
+    if (!normalizedUid) return;
+
+    const originalLabel = triggerButton ? triggerButton.textContent : null;
+    if (triggerButton) {
+        triggerButton.disabled = true;
+        triggerButton.textContent = currentLang === 'en' ? '⏳ Deleting...' : '⏳ Đang xóa...';
+    }
+
+    const finishLoading = showGlobalPageLoader(tr('manage_delete_violations_loading', 'Đang xóa toàn bộ vi phạm của người dùng...'));
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(normalizedUid)}/violations`, {
+            method: 'DELETE',
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'ok') {
+            if (_adminCachedData) {
+                const deletedSet = new Set((data.violationIds || []).map(id => String(id || '').toUpperCase()));
+                _adminCachedData.violations = (_adminCachedData.violations || []).filter(v => !deletedSet.has(String(v.id || '').toUpperCase()));
+                updateManageStats(_adminCachedData);
+                renderAdminTable(_adminCachedData, manageSearchInput ? manageSearchInput.value : '');
+            }
+
+            await loadAdminData({ silent: true, scope: 'violations,notifications,users' });
+            const detailPanel = document.getElementById('tab-user-detail');
+            if (detailPanel?.classList.contains('active') && detailPanel.dataset.uid === normalizedUid) {
+                showUserDetails(normalizedUid);
+            }
+
+            showToast(data.message || tr('manage_delete_violations_success', '✅ Đã xóa toàn bộ vi phạm của người dùng'), 'success');
+        } else {
+            showToast(data.message || tr('manage_delete_violations_error', 'Lỗi khi xóa vi phạm người dùng'), 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast(tr('manage_delete_violations_error', 'Lỗi khi xóa vi phạm người dùng'), 'error');
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.textContent = originalLabel || tr('manage_btn_delete_violations', 'Xóa VP');
+        }
+        finishLoading();
     }
 }
 
@@ -2793,13 +2933,15 @@ function showUserDetails(uid) {
                             const statusClass = v.status === 'paid' ? 'paid' : 'pending';
                             const fineClass = v.status === 'paid' ? 'paid' : 'unpaid';
                             const dateStr = v.timestamp ? new Date(v.status === 'pending' ? v.timestamp : (v.createdAt ? v.createdAt * 1000 : Date.now())).toLocaleDateString('vi-VN') : '—';
+                            const vid = escapeHtml(v.id || '');
                             return `
                                 <div class="violation-history-item">
                                     <div class="violation-history-status ${statusClass}"></div>
-                                    <div class="violation-history-name">${v.violationType || v.type || '—'}<br><span style="font-size:0.72rem;color:var(--text-muted);">${v.location || '—'}</span></div>
+                                    <div class="violation-history-name">${v.violationType || v.type || '—'}<br><span style="font-size:0.72rem;color:var(--text-muted);">${v.location || '—'}</span><br><span style="font-size:0.68rem;color:var(--text-muted);opacity:0.7;">ID: ${vid}</span></div>
                                     <div class="violation-history-date">${dateStr}</div>
                                     <div class="violation-history-fine ${fineClass}">${formatter.format(v.fineAmount || 0)}</div>
                                     <span class="data-tag ${v.status === 'paid' ? 'tag-success' : 'tag-danger'}" style="margin:0;">${v.status === 'paid' ? 'Đã nộp' : 'Chưa nộp'}</span>
+                                    <button class="btn btn-danger btn-delete-violation" style="padding:4px 10px;font-size:0.72rem;border-radius:6px;margin-left:6px;white-space:nowrap;" onclick="confirmDeleteViolation('${vid}', this)">🗑️ Xóa</button>
                                 </div>
                             `;
                         }).join('')}

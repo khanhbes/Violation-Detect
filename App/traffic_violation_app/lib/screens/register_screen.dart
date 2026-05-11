@@ -390,19 +390,22 @@ class _RegisterScreenState extends State<RegisterScreen>
                                           icon: Icons.credit_card_rounded,
                                         ).copyWith(counterText: ''),
                                         validator: (value) {
-                                          if (value == null || value.isEmpty)
+                                          if (value == null || value.isEmpty) {
                                             return _settings.tr(
                                                 'Vui lòng nhập số CCCD',
                                                 'Please enter your ID number');
-                                          if (value.length != 12)
+                                          }
+                                          if (value.length != 12) {
                                             return _settings.tr(
                                                 'Số CCCD phải gồm 12 chữ số',
                                                 'ID must be 12 digits');
+                                          }
                                           if (!RegExp(r'^[0-9]{12}$')
-                                              .hasMatch(value))
+                                              .hasMatch(value)) {
                                             return _settings.tr(
                                                 'CCCD chỉ bao gồm chữ số',
                                                 'ID must contain only digits');
+                                          }
                                           return null;
                                         },
                                       ),
@@ -482,31 +485,37 @@ class _RegisterScreenState extends State<RegisterScreen>
                                           ),
                                         ),
                                         validator: (value) {
-                                          if (value == null || value.isEmpty)
+                                          if (value == null || value.isEmpty) {
                                             return _settings.tr(
                                                 'Vui lòng nhập mật khẩu',
                                                 'Please enter password');
-                                          if (value.length < 8)
+                                          }
+                                          if (value.length < 8) {
                                             return _settings.tr(
                                                 'Mật khẩu phải có ít nhất 8 ký tự',
                                                 'Password must be at least 8 characters');
-                                          if (!RegExp(r'[A-Z]').hasMatch(value))
+                                          }
+                                          if (!RegExp(r'[A-Z]').hasMatch(value)) {
                                             return _settings.tr(
                                                 'Phải có ít nhất 1 chữ hoa',
                                                 'Must contain at least 1 uppercase letter');
-                                          if (!RegExp(r'[a-z]').hasMatch(value))
+                                          }
+                                          if (!RegExp(r'[a-z]').hasMatch(value)) {
                                             return _settings.tr(
                                                 'Phải có ít nhất 1 chữ thường',
                                                 'Must contain at least 1 lowercase letter');
-                                          if (!RegExp(r'[0-9]').hasMatch(value))
+                                          }
+                                          if (!RegExp(r'[0-9]').hasMatch(value)) {
                                             return _settings.tr(
                                                 'Phải có ít nhất 1 chữ số',
                                                 'Must contain at least 1 digit');
+                                          }
                                           if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]')
-                                              .hasMatch(value))
+                                              .hasMatch(value)) {
                                             return _settings.tr(
                                                 'Phải có ít nhất 1 ký tự đặc biệt',
                                                 'Must contain at least 1 special character');
+                                          }
                                           return null;
                                         },
                                       ),

@@ -504,6 +504,22 @@ class ApiService {
           _violationStream.add(List<Violation>.unmodifiable(_violations));
           break;
 
+        case 'violation_deleted':
+          final data = msg['data'] as Map<String, dynamic>?;
+          if (data == null) return;
+          final rawIds = data['violationIds'] as List<dynamic>? ?? <dynamic>[];
+          final deletedIds = rawIds
+              .map((id) => (id ?? '').toString().trim().toUpperCase())
+              .where((id) => id.isNotEmpty)
+              .toSet();
+          if (deletedIds.isEmpty) return;
+
+          _violations.removeWhere(
+            (v) => deletedIds.contains(v.id.trim().toUpperCase()),
+          );
+          _violationStream.add(List<Violation>.unmodifiable(_violations));
+          break;
+
         case 'violations_list':
           final dataList = msg['data'] as List<dynamic>? ?? <dynamic>[];
           final next = <Violation>[];
@@ -805,14 +821,21 @@ class ApiService {
   }
 
   Violation _violationFromApi(Map<String, dynamic> json) {
-    // Pre-resolve relative image URLs so the result has an absolute URL.
+    // Pre-resolve image URL with strict rules to avoid invalid local paths.
     for (final key in ['imageUrl', 'image_url', 'snapshotPath']) {
       final raw = (json[key] ?? '').toString().trim();
-      if (raw.isNotEmpty &&
-          !raw.startsWith('http://') &&
-          !raw.startsWith('https://')) {
+      if (raw.isEmpty) {
+        continue;
+      }
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        continue;
+      }
+      if (raw.startsWith('/snapshots') || raw.startsWith('snapshots')) {
         final path = raw.startsWith('/') ? raw : '/$raw';
         json[key] = '$baseUrl$path';
+      } else {
+        // Reject local/invalid paths such as C:\... or /data/... to keep UI stable.
+        json[key] = '';
       }
     }
 

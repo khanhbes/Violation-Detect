@@ -371,7 +371,7 @@ class _ViolationsScreenState extends State<ViolationsScreen>
                 end: Alignment.bottomCenter,
               )
             : AppTheme.headerGradient,
-        borderRadius: BorderRadius.only(
+        borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(24),
           bottomRight: Radius.circular(24),
         ),

@@ -66,6 +66,7 @@ class ViolationImage extends StatelessWidget {
       fit: fit,
       width: safeWidth,
       height: safeHeight,
+      headers: const {'ngrok-skip-browser-warning': 'true'},
       loadingBuilder: (_, child, progress) {
         if (progress == null) return child;
         return _loadingIndicator(isDark);

@@ -74,8 +74,15 @@ class FCMService:
             if not firebase_admin._apps:
                 cred = credentials.Certificate(str(cred_path))
 
-                # Resolve Storage bucket: env > project_id-based
+                # Resolve Storage bucket for Admin SDK uploads.
+                # Firebase web configs often use *.firebasestorage.app, while
+                # Google Cloud Storage API expects the real bucket name (usually *.appspot.com).
                 bucket = os.environ.get('FIREBASE_STORAGE_BUCKET', '').strip()
+                if bucket.startswith('gs://'):
+                    bucket = bucket[5:].strip()
+                if bucket.endswith('/'):
+                    bucket = bucket[:-1]
+
                 if not bucket:
                     # Derive from project_id in service account key
                     try:
@@ -83,9 +90,12 @@ class FCMService:
                             sa = json.load(f)
                         project_id = sa.get('project_id', '')
                         if project_id:
-                            bucket = f'{project_id}.firebasestorage.app'
+                            bucket = f'{project_id}.appspot.com'
                     except Exception:
                         pass
+                elif bucket.endswith('.firebasestorage.app'):
+                    # Convert web-style host to real GCS bucket naming for Admin SDK.
+                    bucket = bucket.replace('.firebasestorage.app', '.appspot.com')
 
                 firebase_admin.initialize_app(cred, {
                     'storageBucket': bucket,

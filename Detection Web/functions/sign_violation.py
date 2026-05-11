@@ -127,6 +127,7 @@ class TrafficSignDetector:
 
         # Map label model -> sign_type nội bộ
         name_to_sign_type = {
+            # Tên chuẩn
             "no_left_turn": "no_left_turn",
             "no_right_turn": "no_right_turn",
             "no_straight": "no_straight",
@@ -135,11 +136,17 @@ class TrafficSignDetector:
             "straight_only": "straight_only",
             "straight_and_left_turn_only": "straight_and_left_turn_only",
             "straight_and_right_turn_only": "straight_and_right_turn_only",
-            # Tên class trong model hiện tại
+            # Tên class trong model hiện tại (prefix sign_)
             "sign_no_left_turn": "no_left_turn",
             "sign_no_right_turn": "no_right_turn",
             "sign_no_left_and_return": "no_left_turn",
             "sign_no_right_and_return": "no_right_turn",
+            # Biển cấm theo loại xe / cấm đi vào
+            "sign_no_car": "no_car",
+            "sign_no_entry": "no_entry",
+            "sign_no_return": "no_return",
+            "sign_no_parking": "no_parking",
+            "sign_no_stopping": "no_stopping",
         }
 
         mapped: Dict[int, str] = {}
@@ -168,7 +175,13 @@ class TrafficSignDetector:
 
         self.calibration_count += 1
 
-        if self.calibration_count >= config.SIGN_CALIBRATION_FRAMES:
+        # Kết thúc sớm nếu đã có đủ bằng chứng mạnh (≥30 frame + nhiều detection)
+        strong_evidence = any(
+            len(dets) >= config.SIGN_MIN_SAMPLES * 3
+            for dets in self.detected_signs.values()
+        )
+        if self.calibration_count >= config.SIGN_CALIBRATION_FRAMES or \
+           (self.calibration_count >= 30 and strong_evidence):
             self._finalize_calibration()
 
     def _finalize_calibration(self):
@@ -190,7 +203,9 @@ class TrafficSignDetector:
                     'sign_type': self.sign_class_map[sign_class],
                     'bbox': tuple(avg_bbox),
                     'detection_count': len(cluster),
-                    'enforcement_zone': self._create_enforcement_zone(avg_bbox)
+                    'enforcement_zone': self._create_enforcement_zone(
+                        avg_bbox, self.sign_class_map[sign_class]
+                    )
                 }
 
                 self.active_signs.append(sign_info)
@@ -201,14 +216,26 @@ class TrafficSignDetector:
 
         self.is_calibrating = False
 
-    def _create_enforcement_zone(self, sign_bbox: np.ndarray) -> Tuple:
+    def _create_enforcement_zone(self, sign_bbox: np.ndarray,
+                                  sign_type: str = None) -> Tuple:
         """
         Tạo vùng hiệu lực từ vị trí biển báo, scale theo frame size.
-        Zone rộng sang hai bên và xuống dưới nhiều hơn lên trên (vì xe ở dưới biển).
+        - Biển hướng (rẽ trái/phải): zone nhỏ gần biển
+        - Biển cấm loại xe / cấm đi vào: zone lớn phủ phần đường dưới biển
         """
         x1, y1, x2, y2 = sign_bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
 
+        # Biển cấm theo vùng → zone lớn: toàn bộ chiều ngang, từ biển xuống hết frame
+        if sign_type in self.ZONE_BASED_SIGNS:
+            return (
+                0,
+                max(0, cy - self.frame_height * 0.05),
+                self.frame_width,
+                self.frame_height
+            )
+
+        # Biển hướng → zone nhỏ quanh biển
         zone_half_w = self.frame_width * config.SIGN_ENFORCEMENT_ZONE_X
         zone_up = self.frame_height * config.SIGN_ENFORCEMENT_ZONE_UP
         zone_down = self.frame_height * config.SIGN_ENFORCEMENT_ZONE_DOWN
@@ -269,22 +296,31 @@ class TrafficSignDetector:
 
         return clusters
 
+    # Biển cấm theo vùng (không cần phân tích hướng đi)
+    ZONE_BASED_SIGNS = {'no_car', 'no_entry', 'no_parking', 'no_stopping'}
+
     def check_violation(self, tracker: VehicleTracker) -> Optional[str]:
         """Kiểm tra xe có vi phạm biển báo nào không."""
         if self.is_calibrating:
             return None
 
-        movement = self._classify_movement(tracker)
-        if movement is None:
-            return None
-
         current_pos = tracker.positions[-1]
+        movement = self._classify_movement(tracker)
 
         for sign in self.active_signs:
             if not self._in_zone(current_pos, sign['enforcement_zone']):
                 continue
-            if self._check_direction_violation(movement, sign['sign_type']):
-                return sign['sign_type']
+
+            stype = sign['sign_type']
+
+            # Biển theo vùng: chỉ cần xe nằm trong zone
+            if stype in self.ZONE_BASED_SIGNS:
+                if self._check_direction_violation(movement, stype, tracker.vehicle_class):
+                    return stype
+            # Biển theo hướng: cần xác định được hướng đi
+            elif movement is not None:
+                if self._check_direction_violation(movement, stype, tracker.vehicle_class):
+                    return stype
         return None
 
     def _in_zone(self, pos: Tuple[float, float], zone: Tuple) -> bool:
@@ -322,20 +358,39 @@ class TrafficSignDetector:
             return "right"
         return "straight"
 
-    def _check_direction_violation(self, movement: str, sign_type: str) -> bool:
-        """Kiểm tra movement có vi phạm sign_type không."""
-        rules = {
+    def _check_direction_violation(self, movement: Optional[str], sign_type: str,
+                                     vehicle_class: str = None) -> bool:
+        """Kiểm tra movement/vehicle_class có vi phạm sign_type không."""
+        # ----- Biển theo hướng (cần movement) -----
+        direction_rules = {
             "no_left_turn":                 lambda m: m == "left",
             "no_right_turn":                lambda m: m == "right",
             "no_straight":                  lambda m: m == "straight",
+            "no_return":                    lambda m: False,  # cần logic riêng (U-turn)
             "turn_left_only":               lambda m: m != "left",
             "turn_right_only":              lambda m: m != "right",
             "straight_only":                lambda m: m != "straight",
             "straight_and_left_turn_only":   lambda m: m not in ("straight", "left"),
             "straight_and_right_turn_only":  lambda m: m not in ("straight", "right"),
         }
-        check = rules.get(sign_type)
-        return check(movement) if check else False
+
+        if sign_type in direction_rules:
+            if movement is None:
+                return False
+            return direction_rules[sign_type](movement)
+
+        # ----- Biển theo vùng (chỉ cần xe nằm trong zone) -----
+        if sign_type == "no_car":
+            # Cấm ô tô — chỉ phạt xe loại car
+            return vehicle_class in ('car',)
+        if sign_type == "no_entry":
+            # Cấm đi vào — mọi xe đều vi phạm
+            return True
+        if sign_type in ("no_parking", "no_stopping"):
+            # Cấm đỗ/dừng — cần xe đứng yên (tạm: mọi xe trong zone)
+            return True
+
+        return False
 
 
 # =============================================================================
@@ -405,7 +460,8 @@ class SignViolationDetector:
                 return frame, []
             results = model.track(
                 frame, imgsz=config.IMG_SIZE, conf=conf,
-                iou=config.IOU_THRESHOLD, persist=True, verbose=False
+                iou=config.IOU_THRESHOLD, persist=True, verbose=False,
+                tracker=config.TRACKER
             )
             r0 = results[0]
 
@@ -426,15 +482,22 @@ class SignViolationDetector:
         if self.sign_detector.is_calibrating:
             self.sign_detector.update_calibration(detections, frame.shape[:2])
 
-            # Vẽ biển báo đang detect
+            # Vẽ biển báo và xe đang detect
             for cls_id, conf_val, bbox in detections:
+                x1, y1, x2, y2 = map(int, bbox)
                 if cls_id in self.sign_detector.sign_class_map:
-                    x1, y1, x2, y2 = map(int, bbox)
                     sign_name = self.sign_detector.sign_class_map[cls_id]
                     draw_bbox_with_label(
                         frame_vis, (x1, y1, x2, y2),
                         f"SIGN: {sign_name} {conf_val:.2f}",
                         config.COLOR_WARNING
+                    )
+                elif cls_id in config.VEHICLE_CLASSES:
+                    cls_name = config.VEHICLE_CLASS_NAMES.get(cls_id, 'vehicle')
+                    draw_bbox_with_label(
+                        frame_vis, (x1, y1, x2, y2),
+                        f"{cls_name} {conf_val:.2f}",
+                        config.COLOR_SAFE
                     )
 
             # Progress HUD

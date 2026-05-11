@@ -1054,7 +1054,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               trailing: Switch(
                 value: s.notificationsEnabled,
                 onChanged: (v) => s.setNotificationsEnabled(v),
-                activeColor: AppTheme.primaryColor,
+                activeThumbColor: AppTheme.primaryColor,
               )),
           _menuDivider(divider),
           _buildMenuItem(
@@ -1092,7 +1092,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 value: s.isDarkMode,
                 onChanged: (v) =>
                     s.setThemeMode(v ? ThemeMode.dark : ThemeMode.light),
-                activeColor: AppTheme.primaryColor,
+                activeThumbColor: AppTheme.primaryColor,
               )),
           _menuDivider(divider),
           // ── Language Toggle ──
@@ -1109,7 +1109,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: Text(
                   s.isVietnamese ? 'Tiếng Việt' : 'English',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
                     color: AppTheme.infoColor,
                     fontWeight: FontWeight.w600,

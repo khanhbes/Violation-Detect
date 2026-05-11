@@ -578,7 +578,8 @@ def check_violation(
     px: float,
     py: float,
     ref_vector: Optional[Tuple[float, float]] = None,
-    debounce_frames: int = 8
+    debounce_frames: int = 8,
+    is_priority_vehicle: bool = False
 ) -> Tuple[str, Tuple[int, int, int]]:
     """
     Kiểm tra vi phạm với 3 vùng (NEW logic với debounce tách):
@@ -593,6 +594,9 @@ def check_violation(
         và hiện tại crossing (curr=+1) → BỎ QUA WARNING debounce, kiểm tra CROSSING debounce riêng
         → cho phép ESCALATION: WARNING → VIOLATION ngay cả nếu warning debounce chưa hết
     
+    Priority vehicle override:
+      - Nếu is_priority_vehicle=True và đèn RED/YELLOW → set label "Priority", bỏ qua WARNING/VIOLATION.
+    
     Args:
         track_state: Trạng thái tracking
         signed_distance: Khoảng cách có dấu đến stopline
@@ -601,6 +605,7 @@ def check_violation(
         px, py: Vị trí hiện tại
         ref_vector: Hướng đi thẳng chuẩn (stopline normal)
         debounce_frames: (deprecated) — sử dụng hằng số global thay vì
+        is_priority_vehicle: Xe ưu tiên (ambulance, fire_truck, police_car) — miễn vi phạm đèn đỏ/vàng
     """
     # Xác định vùng 3 mức
     if signed_distance < -STOPLINE_TOUCH_DIST:
@@ -620,6 +625,20 @@ def check_violation(
         track_state.first_seen = True
         track_state.last_region = current_region
         return track_state.label, track_state.color
+    
+    # === PRIORITY VEHICLE OVERRIDE ===
+    # Xe ưu tiên (ambulance, fire_truck, police_car) được miễn vi phạm đèn đỏ/vàng
+    if is_priority_vehicle:
+        if light_state.has_any_red() or light_state.has_any_yellow():
+            track_state.label = "Priority"
+            track_state.color = config.COLOR_PRIORITY
+            track_state.last_region = current_region
+            return track_state.label, track_state.color
+        else:
+            # Đèn xanh → reset về Safe bình thường
+            if track_state.label == "Priority":
+                track_state.label = "Safe"
+                track_state.color = config.COLOR_SAFE
     
     prev_region = track_state.last_region
     
@@ -997,7 +1016,8 @@ def run(
                 
                 label, color = check_violation(
                     tracks[tid], signed, light_state, frame_idx, px, py,
-                    ref_vector=ref_vec
+                    ref_vector=ref_vec,
+                    is_priority_vehicle=(cls_id in config.PRIORITY_VEHICLE_CLASSES)
                 )
                 
                 # Cập nhật counter
@@ -1018,6 +1038,8 @@ def run(
                 display_label = "Violation"
             elif label == "WARNING":
                 display_label = "Warning"
+            elif label == "Priority":
+                display_label = "Priority"
             else:
                 display_label = f"{vehicle_name}:{tid}"
             draw_bbox_with_label(frame_vis, (x1, y1, x2, y2), display_label, color)

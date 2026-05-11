@@ -14,6 +14,7 @@ Usage:
 import asyncio
 import base64
 import json
+import os
 import cv2
 import numpy as np
 import uuid
@@ -106,33 +107,41 @@ def _run_startup_tasks() -> None:
     except Exception as e:
         print(f"⚠️ Failed to write Local IP to Firestore: {e}")
 
-    # ── Startup Cleanup: snapshot files + runtime cache + stale sessions + apk retention ──
+    # ── Startup Cleanup: snapshot policy + runtime cache + stale sessions + apk retention ──
     try:
-        from config.config import config as _cfg
+        cleanup_snapshots = str(
+            os.environ.get('CLEANUP_SNAPSHOTS_ON_STARTUP', '0')
+        ).strip().lower() in {'1', 'true', 'yes', 'on'}
 
-        _snap_dir = _cfg.SNAPSHOT_DIR
-        _deleted = 0
-        for _pattern in ('*.jpg', '*.jpeg', '*.png'):
-            for _img in _snap_dir.rglob(_pattern):
-                try:
-                    _img.unlink()
-                    _deleted += 1
-                except Exception:
-                    pass
+        if cleanup_snapshots:
+            from config.config import config as _cfg
 
-        if _deleted:
-            print(f"🧹 Startup cleanup: đã xóa {_deleted} ảnh snapshot cũ từ {_snap_dir}")
+            _snap_dir = _cfg.SNAPSHOT_DIR
+            _deleted = 0
+            for _pattern in ('*.jpg', '*.jpeg', '*.png'):
+                for _img in _snap_dir.rglob(_pattern):
+                    try:
+                        _img.unlink()
+                        _deleted += 1
+                    except Exception:
+                        pass
+
+            if _deleted:
+                print(f"🧹 Startup cleanup: đã xóa {_deleted} ảnh snapshot cũ từ {_snap_dir}")
+            else:
+                print("🧹 Startup cleanup: không có ảnh snapshot cũ cần xóa")
         else:
-            print("🧹 Startup cleanup: không có ảnh snapshot cũ cần xóa")
+            print("🗂️ Snapshot cleanup disabled (set CLEANUP_SNAPSHOTS_ON_STARTUP=1 to enable)")
     except Exception as _ce:
         print(f"⚠️ Startup snapshot cleanup failed: {_ce}")
 
     # Reset in-memory runtime caches for a clean session.
     try:
-        global violation_store, violation_counter, notified_violations
+        global violation_store, violation_counter, notified_violations, _current_detect_session_id
         violation_store.clear()
         violation_counter = 0
         notified_violations.clear()
+        _current_detect_session_id = ""
         print("🧹 Startup cleanup: runtime caches reset (violation_store/dedupe)")
     except Exception as _ce:
         print(f"⚠️ Startup runtime cleanup failed: {_ce}")
@@ -160,19 +169,40 @@ def _run_startup_tasks() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _violation_queue, _violation_worker_task
+    _violation_queue = asyncio.Queue()
+    _violation_worker_task = asyncio.create_task(_violation_queue_worker())
     _run_startup_tasks()
     # Background task: push quota qua WS + tự động save file
     quota_task = asyncio.create_task(_quota_push_loop())
     yield
     # Shutdown: cancel background + flush quota ra file
+    _violation_worker_task.cancel()
     quota_task.cancel()
     _save_quota()
     print("📊 Quota saved on shutdown")
 
 
+async def _violation_queue_worker():
+    """Background worker that persists violations from the queue without blocking detection."""
+    while True:
+        try:
+            item = await _violation_queue.get()
+            try:
+                _store_violation_sync(**item)
+            except Exception as e:
+                print(f"⚠️ Violation queue worker error: {e}")
+            finally:
+                _violation_queue.task_done()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(0.1)
+
+
 async def _quota_push_loop():
     """Mỗi 5s kiểm tra rollover + push quota update qua admin WS channel."""
-    global _quota_last_push, _quota_dirty
+    global _quota_dirty
     _prev_snapshot = ""
     while True:
         try:
@@ -267,7 +297,6 @@ _QUOTA_FILE = Path(__file__).parent / "quota_data.json"
 _quota_dirty = False          # True khi có thay đổi chưa ghi file
 _quota_last_save = 0.0        # epoch lần save gần nhất
 _QUOTA_SAVE_INTERVAL = 30     # giây — ghi file tối đa mỗi 30s
-_quota_last_push = 0.0        # epoch lần push WS gần nhất
 _QUOTA_PUSH_INTERVAL = 5      # giây — push WS tối đa mỗi 5s
 
 
@@ -345,12 +374,17 @@ violation_store: List[Dict] = []
 violation_counter = 0
 
 # ─── Notified Violations Cache (to prevent duplicate alerts per vehicle) ────
-# Key: (v_type, stable_track_id) — resets when server restarts
-# Rule: 1 vehicle + 1 violation type = 1 notification per server session.
+# Key: (session_detect_id, v_type, stable_track_id) — resets per detect session.
+# Rule: 1 vehicle + 1 violation type + 1 detect session = 1 notification.
 notified_violations: set = set()
+_current_detect_session_id: str = ""
 
 # ─── Realtime detect session lock (only 1 session at a time) ───────────────
 _realtime_busy = False
+
+# ─── Async Violation Queue (non-blocking persist) ──────────────────────────
+_violation_queue: asyncio.Queue = None  # initialized in lifespan
+_violation_worker_task: asyncio.Task = None
 
 # ─── App WebSocket Clients (for real-time push) ────────────────────────────
 app_clients: Dict[WebSocket, Dict[str, Any]] = {}
@@ -411,6 +445,47 @@ async def broadcast_to_apps(violation: Dict):
     if disconnected:
         print(f"📱 Cleaned {len(disconnected)} disconnected app client(s)")
     print(f"📱 Broadcast violation to {delivered} app client(s) (user={target_user_id}, resolution={owner_resolution})")
+
+async def broadcast_violation_deleted_to_apps(user_id: str, violation_ids: List[str], reason: str = "admin_delete"):
+    """Push violation deletion events to the owner's active app websocket sessions."""
+    if not app_clients:
+        return
+
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return
+
+    normalized_ids = [str(v).strip().upper() for v in (violation_ids or []) if str(v).strip()]
+    if not normalized_ids:
+        return
+
+    message = json.dumps({
+        "type": "violation_deleted",
+        "data": {
+            "userId": target_user_id,
+            "violationIds": normalized_ids,
+            "reason": reason,
+        },
+    })
+
+    disconnected = set()
+    delivered = 0
+    for ws, meta in list(app_clients.items()):
+        client_user_id = str((meta or {}).get("user_id") or "").strip()
+        if client_user_id != target_user_id:
+            continue
+        try:
+            await ws.send_text(message)
+            delivered += 1
+        except Exception:
+            disconnected.add(ws)
+
+    for ws in disconnected:
+        app_clients.pop(ws, None)
+
+    if disconnected:
+        print(f"📱 Cleaned {len(disconnected)} disconnected app client(s)")
+    print(f"📱 Broadcast deleted violations to {delivered} app client(s) (user={target_user_id}, count={len(normalized_ids)})")
 
 async def broadcast_admin_event(event: str, payload: Optional[Dict[str, Any]] = None):
     """Push data-change events to connected admin dashboard clients."""
@@ -1067,6 +1142,29 @@ def _get_active_app_user_ids(db=None) -> List[str]:
     return sorted(merged_user_ids)
 
 
+def _normalize_violation_image_url(image_url: Optional[str], v_type: str) -> str:
+    """Ensure imageUrl is always http(s):// or /snapshots/... — never a local OS path."""
+    if not image_url:
+        return ''
+    url = str(image_url).strip()
+    if not url:
+        return ''
+    # Already a proper URL
+    if url.startswith('http://') or url.startswith('https://'):
+        return url
+    # Relative web path
+    if url.startswith('/snapshots') or url.startswith('snapshots'):
+        return url if url.startswith('/') else f'/{url}'
+    # Local OS path (C:\..., /home/..., etc.) — extract filename and build fallback
+    try:
+        filename = Path(url).name
+        if filename:
+            return f'/snapshots/{v_type}/{filename}'
+    except Exception:
+        pass
+    return ''
+
+
 def store_violation(
     v_type: str,
     track_id: int,
@@ -1076,14 +1174,71 @@ def store_violation(
     stable_track_id: Optional[int] = None,
     raw_track_id: Optional[int] = None,
 ):
-    """Save a violation to in-memory store, Firestore, and Firebase Storage.
+    """Fast dedup check + enqueue to background worker. Does NOT block the frame loop.
 
-    Deduplication rule per session:
-    - 1 vehicle + 1 violation type = 1 notification/record.
+    Deduplication rule per detect session:
+    - 1 vehicle + 1 violation type + 1 detect session = 1 notification/record.
     - Vehicle identity uses stable_track_id (fallback to track_id).
     """
     global violation_counter, notified_violations
 
+    # Safety check: xe ưu tiên không lưu vi phạm redlight
+    if v_type == 'redlight' and (vehicle_class or '').lower() in ('ambulance', 'fire_truck', 'police_car'):
+        return None
+
+    try:
+        resolved_stable_track_id = int(
+            stable_track_id if stable_track_id is not None else track_id
+        )
+    except Exception:
+        resolved_stable_track_id = int(track_id or 0)
+
+    # ── Deduplication: session + stable vehicle ID + violation type ────────
+    violation_key = (_current_detect_session_id, v_type, resolved_stable_track_id)
+    if violation_key in notified_violations:
+        return None  # Already processed — do not send duplicate notification
+    notified_violations.add(violation_key)
+
+    violation_counter += 1
+
+    # Enqueue for background processing (non-blocking)
+    if _violation_queue is not None:
+        _violation_queue.put_nowait({
+            'v_type': v_type,
+            'track_id': track_id,
+            'label': label,
+            'snapshot_path': snapshot_path,
+            'vehicle_class': vehicle_class,
+            'stable_track_id': stable_track_id,
+            'raw_track_id': raw_track_id,
+        })
+    else:
+        # Fallback: run synchronously if queue not ready
+        _store_violation_sync(
+            v_type=v_type,
+            track_id=track_id,
+            label=label,
+            snapshot_path=snapshot_path,
+            vehicle_class=vehicle_class,
+            stable_track_id=stable_track_id,
+            raw_track_id=raw_track_id,
+        )
+
+    return {'enqueued': True, 'type': v_type, 'stableTrackId': resolved_stable_track_id}
+
+
+def _store_violation_sync(
+    v_type: str,
+    track_id: int,
+    label: str,
+    snapshot_path: str = None,
+    vehicle_class: Optional[str] = None,
+    stable_track_id: Optional[int] = None,
+    raw_track_id: Optional[int] = None,
+):
+    """Heavy sync work: upload image, write Firestore, send notifications.
+    Called from the background violation queue worker.
+    """
     try:
         resolved_stable_track_id = int(
             stable_track_id if stable_track_id is not None else track_id
@@ -1097,18 +1252,6 @@ def store_violation(
     except Exception:
         resolved_raw_track_id = int(track_id or 0)
 
-    # ── Deduplication: stable vehicle ID + violation type ─────────────────────
-    violation_key = (v_type, resolved_stable_track_id)
-    if violation_key in notified_violations:
-        return None  # Already processed — do not send duplicate notification
-    notified_violations.add(violation_key)
-    print(
-        f"🆕 New violation [{v_type}] stable_id={resolved_stable_track_id} "
-        f"raw_id={resolved_raw_track_id} — processing "
-        f"(cache size: {len(notified_violations)})"
-    )
-
-    violation_counter += 1
     info = VIOLATION_INFO.get(v_type, VIOLATION_INFO.get('helmet'))
     now = datetime.now()
     payment_due_date = now + timedelta(days=7)
@@ -1146,6 +1289,9 @@ def store_violation(
                 print(f"📷 No snapshot file to upload (path: {local_snapshot})")
         except Exception as e:
             print(f"⚠️ Storage upload failed (non-fatal): {e}")
+
+    # ── Normalize imageUrl: never return local OS paths to clients ───
+    firebase_image_url = _normalize_violation_image_url(firebase_image_url, v_type)
 
     firestore_doc_id = None
     target_user_id = None
@@ -1283,26 +1429,29 @@ def store_violation(
                                 vehicle_bucket=selected_vehicle_bucket,
                                 delta_points=-deducted_points,
                             )
-                            due_str = payment_due_date.strftime('%d/%m/%Y')
-                            create_user_notification(
-                                db=db,
-                                user_id=resolved_user_id,
-                                title=f'🚨 {info["name"]}',
-                                body=(
+                            # Deterministic notification ID to prevent duplicates on retry
+                            notif_doc_id = f'NOTIF_{firestore_doc_id}_{resolved_user_id}'
+                            db.collection('notifications').document(notif_doc_id).set({
+                                'userId': resolved_user_id,
+                                'title': f'🚨 {info["name"]}',
+                                'body': (
                                     f'Mức phạt: {fine_amount:,}₫ • '
                                     f'Trừ {deducted_points} điểm GPLX {vehicle_type_label.lower()}'
                                 ),
-                                notif_type='violation',
-                                violation_id=firestore_doc_id,
-                            )
-                            create_user_notification(
-                                db=db,
-                                user_id=resolved_user_id,
-                                title='⏳ Hạn đóng phạt',
-                                body=f'Vi phạm cần được thanh toán trước ngày {due_str}',
-                                notif_type='payment_due',
-                                violation_id=firestore_doc_id,
-                            )
+                                'subtitle': (
+                                    f'Mức phạt: {fine_amount:,}₫ • '
+                                    f'Trừ {deducted_points} điểm GPLX {vehicle_type_label.lower()}'
+                                ),
+                                'detail': (
+                                    f'Mức phạt: {fine_amount:,}₫ • '
+                                    f'Trừ {deducted_points} điểm GPLX {vehicle_type_label.lower()}'
+                                ),
+                                'type': 'violation',
+                                'violationId': firestore_doc_id,
+                                'isRead': False,
+                                'createdAt': fb_firestore.SERVER_TIMESTAMP,
+                            })
+                            _track_fs('writes')
                             if point_update_result.get('became_disabled'):
                                 create_user_notification(
                                     db=db,
@@ -1613,6 +1762,186 @@ async def list_outputs():
 
 
 # =============================================================================
+# SEPAY WEBHOOK (Bank Transfer Auto-Verification)
+# =============================================================================
+
+import re as _re_module
+
+@app.post("/api/webhook/sepay")
+async def sepay_webhook(request: Request):
+    """Receive SePay bank-transfer webhook and auto-mark violations as 'paid'.
+
+    SePay sends a JSON payload whenever a bank transaction occurs.
+    We look for a violation code in the `content` field with pattern NP<VIOLATION_ID>.
+    If found and amounts match, we update the violation to 'paid' in Firestore.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "Invalid JSON"}, status_code=400)
+
+    # Log incoming webhook
+    transfer_amount = payload.get("transferAmount", 0)
+    content = str(payload.get("content") or "")
+    code = str(payload.get("code") or "")
+    transfer_type = str(payload.get("transferType") or "")
+    reference_code = str(payload.get("referenceCode") or "")
+
+    print(f"💰 SePay webhook received: amount={transfer_amount}, type={transfer_type}, code={code}")
+    print(f"   Content: {content[:120]}...")
+
+    # Only process incoming transfers
+    if transfer_type != "in":
+        print(f"   ⏩ Skipped (transferType={transfer_type}, not 'in')")
+        return JSONResponse({"success": True, "message": "Skipped (not incoming transfer)"})
+
+    # ── Extract violation ID from content or code ─────────────────────────
+    # The Flutter app generates: NP<VIOLATION_ID><USERNAME>
+    # SePay `code` field often contains this exact string.
+    # The `content` field has the full bank message with the code embedded.
+    violation_id = None
+
+    # Strategy 1: Extract from `code` field (SePay auto-extracts the keyword)
+    if code.upper().startswith("NP"):
+        # code = "NP8CWPVTJR0ZPMFPS7YBXS" → need to separate ID from username
+        # Violation IDs in Firestore are uppercase alphanumeric, generated by Firestore
+        # We'll try matching against Firestore docs
+        raw_after_np = code[2:]  # Remove "NP" prefix
+        violation_id = raw_after_np  # Will be refined below
+
+    # Strategy 2: Extract from full `content` using regex
+    if not violation_id:
+        # Look for NP followed by uppercase letters/numbers
+        match = _re_module.search(r'NP([A-Z0-9]{10,})', content.upper())
+        if match:
+            violation_id = match.group(1)
+
+    if not violation_id:
+        print("   ⚠️ No violation ID found in content/code")
+        return JSONResponse({"success": True, "message": "No violation ID found"})
+
+    print(f"   🔍 Extracted raw ID after NP: {violation_id}")
+
+    # ── Find violation in Firestore ───────────────────────────────────────
+    if not (fcm_service and fcm_service.is_available and fcm_service._db):
+        print("   ⚠️ Firestore not available — cannot process payment")
+        return JSONResponse({"success": False, "message": "Firestore unavailable"}, status_code=503)
+
+    db = fcm_service._db
+    from firebase_admin import firestore as fb_firestore
+
+    # The violation_id might have the username appended.
+    # Try progressively shorter substrings to find the matching Firestore doc.
+    found_doc = None
+    found_ref = None
+    found_violation_id = None
+
+    # Try the full string first, then progressively shorter
+    for length in range(len(violation_id), 9, -1):
+        candidate_id = violation_id[:length].upper()
+        try:
+            ref = db.collection('violations').document(candidate_id)
+            doc = ref.get()
+            _track_fs('reads')
+            if doc.exists:
+                found_doc = doc
+                found_ref = ref
+                found_violation_id = candidate_id
+                break
+        except Exception:
+            continue
+
+    if not found_doc:
+        print(f"   ⚠️ No violation found in Firestore for any prefix of '{violation_id}'")
+        return JSONResponse({"success": True, "message": f"Violation not found"})
+
+    violation_data = found_doc.to_dict() or {}
+    current_status = str(violation_data.get('status') or '').strip().lower()
+
+    print(f"   ✅ Found violation: {found_violation_id} (status={current_status})")
+
+    # Already paid?
+    if current_status == 'paid':
+        print(f"   ⏩ Already paid, skipping")
+        return JSONResponse({"success": True, "message": "Already paid"})
+
+    # Verify amount matches (allow equal or overpay)
+    expected_fine = int(violation_data.get('fineAmount') or 0)
+    if transfer_amount < expected_fine and expected_fine > 0:
+        print(f"   ⚠️ Amount mismatch: received {transfer_amount}, expected {expected_fine}")
+        # Still mark as paid if they paid something — admin can review
+        # But log the discrepancy
+
+    # ── Update violation to 'paid' ────────────────────────────────────────
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update_payload = {
+        'status': 'paid',
+        'paidAt': fb_firestore.SERVER_TIMESTAMP,
+        'paidAmount': transfer_amount,
+        'paymentMethod': 'bank_transfer',
+        'paymentGateway': str(payload.get('gateway') or 'SePay'),
+        'paymentReference': reference_code,
+        'paymentTransactionContent': content[:500],
+        'updatedAt': now_iso,
+    }
+    found_ref.set(update_payload, merge=True)
+    _track_fs('writes')
+    print(f"   ✅ Violation {found_violation_id} marked as PAID ({transfer_amount:,}₫)")
+
+    # ── Create payment success notification ───────────────────────────────
+    user_id = str(violation_data.get('userId') or '').strip()
+    violation_type_name = str(violation_data.get('violationType') or violation_data.get('type') or '')
+    if user_id:
+        try:
+            create_user_notification(
+                db=db,
+                user_id=user_id,
+                title='✅ Thanh toán thành công',
+                body=f'Vi phạm "{violation_type_name}" đã được thanh toán {transfer_amount:,}₫',
+                notif_type='payment_success',
+                violation_id=found_violation_id,
+            )
+            print(f"   🔔 Payment notification created for user {user_id}")
+        except Exception as ne:
+            print(f"   ⚠️ Notification creation failed: {ne}")
+
+        # ── Restore license points if violation was penalized ─────────
+        try:
+            deducted = int(violation_data.get('deductedPoints') or 0)
+            if deducted > 0:
+                vehicle_bucket = (
+                    _normalize_vehicle_bucket(violation_data.get('licenseTarget'))
+                    or _normalize_vehicle_bucket(violation_data.get('vehicleType'))
+                    or 'motorcycle'
+                )
+                # Note: We do NOT restore points on payment — points remain deducted.
+                # Only admin can restore points. This is by design.
+                print(f"   ℹ️ Points ({deducted}) remain deducted (admin-only restore)")
+        except Exception:
+            pass
+
+    # ── Broadcast admin event ─────────────────────────────────────────────
+    try:
+        await broadcast_admin_event('violation_paid', {
+            'violationId': found_violation_id,
+            'paidAmount': transfer_amount,
+            'gateway': str(payload.get('gateway') or ''),
+        })
+    except Exception:
+        pass
+
+    # ── Remove from in-memory violation store if present ──────────────────
+    _remove_violation_from_store(found_violation_id)
+
+    return JSONResponse({
+        "success": True,
+        "message": f"Violation {found_violation_id} marked as paid",
+        "violationId": found_violation_id,
+        "paidAmount": transfer_amount,
+    })
+
+
+# =============================================================================
 # FCM TOKEN API (for push notification registration)
 # =============================================================================
 
@@ -1658,9 +1987,35 @@ def _extract_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
     raw = authorization_header.strip()
     if not raw:
         return None
+    if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
+        raw = raw[1:-1].strip()
+    lowered = raw.lower()
+    if lowered in {'null', 'undefined', 'none'}:
+        return None
     if raw.lower().startswith('bearer '):
-        return raw[7:].strip() or None
+        token = raw[7:].strip()
+        if not token:
+            return None
+        lowered_token = token.lower()
+        if lowered_token in {'null', 'undefined', 'none'}:
+            return None
+        return token
     return raw
+
+
+_FIREBASE_ID_TOKEN_CLOCK_SKEW_SECONDS = 60
+
+
+def _verify_firebase_id_token(id_token: str) -> Dict[str, Any]:
+    """Verify Firebase ID token with tolerance for small client/server clock drift."""
+    try:
+        return fb_auth.verify_id_token(
+            id_token,
+            clock_skew_seconds=_FIREBASE_ID_TOKEN_CLOCK_SKEW_SECONDS,
+        )
+    except TypeError:
+        # Older Firebase Admin SDK versions may not support clock_skew_seconds.
+        return fb_auth.verify_id_token(id_token)
 
 
 def _normalize_utc_datetime(value: Any) -> Optional[datetime]:
@@ -1706,7 +2061,7 @@ def _resolve_session_user_id(
     token = (bearer_token or query_token or "").strip()
 
     if token:
-        decoded = fb_auth.verify_id_token(token)
+        decoded = _verify_firebase_id_token(token)
         token_uid = str((decoded or {}).get("uid") or "").strip()
         if not token_uid:
             raise ValueError("Token không hợp lệ (thiếu uid)")
@@ -1995,7 +2350,7 @@ async def register_app_profile(
     try:
         from firebase_admin import firestore as fb_firestore
 
-        decoded = fb_auth.verify_id_token(id_token)
+        decoded = _verify_firebase_id_token(id_token)
         uid = (decoded or {}).get("uid")
         if not uid:
             return JSONResponse(
@@ -2111,6 +2466,7 @@ async def register_app_profile(
 async def create_app_profile_update_request(
     req: AppProfileUpdateRequest,
     authorization: Optional[str] = Header(default=None),
+    x_id_token: Optional[str] = Header(default=None, alias="X-ID-Token"),
 ):
     """
     Create or update a profile update request using Firebase Admin privileges.
@@ -2126,7 +2482,10 @@ async def create_app_profile_update_request(
         )
 
     id_token = _extract_bearer_token(authorization)
+    if not id_token and x_id_token:
+        id_token = _extract_bearer_token(str(x_id_token))
     if not id_token:
+        print("⚠️ profile-update-request auth failed: missing Authorization Bearer token")
         return JSONResponse(
             {"status": "error", "message": "Thiếu Authorization Bearer token"},
             status_code=401,
@@ -2135,9 +2494,10 @@ async def create_app_profile_update_request(
     try:
         from firebase_admin import firestore as fb_firestore
 
-        decoded = fb_auth.verify_id_token(id_token)
+        decoded = _verify_firebase_id_token(id_token)
         uid = (decoded or {}).get("uid")
         if not uid:
+            print("⚠️ profile-update-request auth failed: token verified but uid missing")
             return JSONResponse(
                 {"status": "error", "message": "Token không hợp lệ (thiếu uid)"},
                 status_code=401,
@@ -2193,16 +2553,19 @@ async def create_app_profile_update_request(
         return JSONResponse({"status": "ok", "userId": uid})
 
     except fb_auth.ExpiredIdTokenError:
+        print("⚠️ profile-update-request auth failed: expired Firebase ID token")
         return JSONResponse(
             {"status": "error", "message": "Token đã hết hạn, vui lòng đăng nhập lại"},
             status_code=401,
         )
     except fb_auth.RevokedIdTokenError:
+        print("⚠️ profile-update-request auth failed: revoked Firebase ID token")
         return JSONResponse(
             {"status": "error", "message": "Token đã bị thu hồi, vui lòng đăng nhập lại"},
             status_code=401,
         )
-    except fb_auth.InvalidIdTokenError:
+    except fb_auth.InvalidIdTokenError as auth_err:
+        print(f"⚠️ profile-update-request auth failed: invalid Firebase ID token ({auth_err})")
         return JSONResponse(
             {"status": "error", "message": "Token Firebase không hợp lệ"},
             status_code=401,
@@ -2503,7 +2866,13 @@ async def get_app_violations(since: str = None, user_id: str = None):
                 print(f"⚠️ Firestore fallback error: {fs_err}")
                 # Continue with cache-only results
         
-        # 4. Apply 'since' filter if provided
+        # 4. Normalize imageUrl for all violations (fix legacy local paths)
+        for v in assigned_violations:
+            raw_url = str(v.get('imageUrl') or '').strip()
+            v_type = str(v.get('type') or 'helmet').strip()
+            v['imageUrl'] = _normalize_violation_image_url(raw_url, v_type)
+
+        # 5. Apply 'since' filter if provided
         if since:
             try:
                 since_dt = datetime.fromisoformat(str(since).replace('Z', '+00:00'))
@@ -3261,22 +3630,44 @@ async def get_admin_complaint_evidence(
                 status_code=404,
             )
 
-        from firebase_admin import storage as fb_storage
 
+        # Try Firebase Storage first
+        from firebase_admin import storage as fb_storage
         bucket = fb_storage.bucket()
         blob = bucket.blob(blob_path)
-        if not blob.exists():
-            return JSONResponse(
-                {'status': 'error', 'message': 'Không tìm thấy file ảnh trên Storage'},
-                status_code=404,
+        if blob.exists():
+            image_bytes = blob.download_as_bytes()
+            content_type = blob.content_type or 'image/jpeg'
+            return Response(
+                content=image_bytes,
+                media_type=content_type,
+                headers={'Cache-Control': 'private, max-age=120'},
             )
 
-        image_bytes = blob.download_as_bytes()
-        content_type = blob.content_type or 'image/jpeg'
-        return Response(
-            content=image_bytes,
-            media_type=content_type,
-            headers={'Cache-Control': 'private, max-age=120'},
+        # Fallback: try local uploads directory
+        local_path = (UPLOAD_DIR / blob_path).resolve()
+        try:
+            if local_path.is_file():
+                image_bytes = local_path.read_bytes()
+                # Guess content type from extension
+                ext = local_path.suffix.lower()
+                if ext == '.png':
+                    content_type = 'image/png'
+                elif ext == '.webp':
+                    content_type = 'image/webp'
+                else:
+                    content_type = 'image/jpeg'
+                return Response(
+                    content=image_bytes,
+                    media_type=content_type,
+                    headers={'Cache-Control': 'private, max-age=120'},
+                )
+        except Exception as local_err:
+            print(f'⚠️ Local evidence file error: {local_err}')
+
+        return JSONResponse(
+            {'status': 'error', 'message': 'Không tìm thấy file ảnh trên Storage hoặc uploads'},
+            status_code=404,
         )
 
     except Exception as e:
@@ -3393,7 +3784,7 @@ async def submit_complaint_app(
             status_code=401,
         )
     try:
-        decoded = fb_auth.verify_id_token(id_token)
+        decoded = _verify_firebase_id_token(id_token)
         uid = (decoded or {}).get('uid')
         if not uid:
             raise ValueError('Token thiếu uid')
@@ -3463,6 +3854,7 @@ async def submit_complaint_app(
     evidence_url = ''
     evidence_path = ''
     blob_to_rollback = None
+    local_file_to_rollback: Optional[Path] = None
 
     if evidence is not None:
         content = await evidence.read()
@@ -3490,11 +3882,31 @@ async def submit_complaint_app(
                 blob_to_rollback = blob
                 print(f'☁️ Complaint evidence uploaded: {evidence_path} ({len(content)} bytes)')
             except Exception as upload_err:
-                print(f'❌ Complaint evidence upload failed: {upload_err}')
-                return JSONResponse(
-                    {'status': 'error', 'message': f'Upload ảnh thất bại: {upload_err}'},
-                    status_code=500,
-                )
+                print(f'⚠️ Complaint evidence upload failed, fallback to local: {upload_err}')
+                try:
+                    local_rel_path = Path('complaints') / uid / f'{ts}_{rand}.{ext}'
+                    local_abs_path = UPLOAD_DIR / local_rel_path
+                    local_abs_path.parent.mkdir(parents=True, exist_ok=True)
+                    local_abs_path.write_bytes(content)
+                    evidence_path = str(local_rel_path).replace('\\', '/')
+                    evidence_url = f'/uploads/{evidence_path}'
+                    local_file_to_rollback = local_abs_path
+                    print(
+                        f'💾 Complaint evidence saved locally: {evidence_path} '
+                        f'({len(content)} bytes)'
+                    )
+                except Exception as fallback_err:
+                    print(f'❌ Complaint evidence local fallback failed: {fallback_err}')
+                    return JSONResponse(
+                        {
+                            'status': 'error',
+                            'message': (
+                                f'Upload ảnh thất bại: {upload_err}; '
+                                f'fallback local cũng lỗi: {fallback_err}'
+                            ),
+                        },
+                        status_code=500,
+                    )
 
     # ── Atomic write: complaint + lock violation ─────────────────────────
     try:
@@ -3559,6 +3971,12 @@ async def submit_complaint_app(
             try:
                 blob_to_rollback.delete()
                 print(f'🗑️ Rolled back evidence blob: {evidence_path}')
+            except Exception:
+                pass
+        if local_file_to_rollback:
+            try:
+                local_file_to_rollback.unlink(missing_ok=True)
+                print(f'🗑️ Rolled back local evidence file: {evidence_path}')
             except Exception:
                 pass
         return JSONResponse(
@@ -3698,6 +4116,210 @@ async def review_complaint(complaint_id: str, req: Request):
 
     except Exception as e:
         return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+
+@app.delete("/api/admin/violations/{violation_id}")
+async def delete_violation(violation_id: str):
+    """
+    Xóa vi phạm khỏi hệ thống (Firestore + in-memory + ảnh Storage).
+    Hoàn điểm GPLX nếu vi phạm đã trừ điểm.
+    Xóa kèm notifications liên quan.
+    """
+    try:
+        if not (fcm_service and fcm_service.is_available):
+            return JSONResponse({'status': 'error', 'message': 'Firebase not available'}, status_code=503)
+
+        normalized_id = str(violation_id or '').strip().upper()
+        if not normalized_id:
+            return JSONResponse({'status': 'error', 'message': 'violation_id không hợp lệ'}, status_code=400)
+
+        db = fcm_service._db
+        if not db:
+            return JSONResponse({'status': 'error', 'message': 'Firestore not available'}, status_code=503)
+
+        violation_ref = _resolve_violation_ref_by_id(db, normalized_id)
+        if not violation_ref:
+            # Still remove from in-memory store if exists
+            _remove_violation_from_store(normalized_id)
+            return JSONResponse({'status': 'error', 'message': 'Không tìm thấy vi phạm'}, status_code=404)
+
+        violation_doc = violation_ref.get()
+        _track_fs('reads')
+        if not violation_doc.exists:
+            _remove_violation_from_store(normalized_id)
+            return JSONResponse({'status': 'error', 'message': 'Không tìm thấy vi phạm'}, status_code=404)
+
+        violation_data = violation_doc.to_dict() or {}
+        owner_uid = str(violation_data.get('userId') or '').strip()
+        v_type = str(violation_data.get('type') or '').strip()
+
+        # 1) Restore license points
+        restore_result: Dict[str, Any] = {'changed': False}
+        if owner_uid:
+            try:
+                restore_result = _restore_points_from_violation(db, owner_uid, violation_data)
+            except Exception as re:
+                print(f"⚠️ Failed to restore points for {owner_uid}: {re}")
+
+        # 2) Delete violation image from Firebase Storage (best-effort)
+        try:
+            image_url = str(violation_data.get('imageUrl') or '').strip()
+            if image_url and 'storage.googleapis.com' in image_url:
+                from firebase_admin import storage as fb_storage
+                # Extract blob path from public URL
+                parsed = urlparse(image_url)
+                if '/o/' in parsed.path:
+                    idx = parsed.path.find('/o/')
+                    encoded_blob = parsed.path[idx + 3:]
+                    blob_path = unquote(encoded_blob).strip('/')
+                    if blob_path:
+                        bucket = fb_storage.bucket()
+                        blob = bucket.blob(blob_path)
+                        if blob.exists():
+                            blob.delete()
+        except Exception as img_err:
+            print(f"⚠️ Violation image cleanup skipped for {normalized_id}: {img_err}")
+
+        # 3) Delete related notifications
+        try:
+            _delete_notifications_for_violation(db, violation_ref.id)
+        except Exception as ne:
+            print(f"⚠️ Notification cleanup failed: {ne}")
+
+        # 4) Delete violation document
+        violation_ref.delete()
+        _track_fs('deletes')
+
+        # 5) Remove from in-memory store
+        _remove_violation_from_store(violation_ref.id)
+
+        # 6) Notify admin clients
+        await broadcast_admin_event(
+            'violation_deleted',
+            {
+                'violationId': violation_ref.id,
+                'userId': owner_uid,
+                'type': v_type,
+                'pointsRestored': restore_result.get('changed', False),
+            },
+        )
+
+        # 6.1) Notify owner app clients to remove violation instantly
+        if owner_uid:
+            await broadcast_violation_deleted_to_apps(owner_uid, [violation_ref.id], reason='admin_delete_single')
+
+        # 7) Create notification for user about violation removal
+        if owner_uid:
+            try:
+                create_user_notification(
+                    db=db,
+                    user_id=owner_uid,
+                    title='✅ Vi phạm đã được xóa',
+                    body=f'Vi phạm {violation_data.get("violationType", v_type)} đã được admin xóa khỏi hệ thống.',
+                    notif_type='violation_deleted',
+                    violation_id=violation_ref.id,
+                )
+            except Exception:
+                pass
+
+        msg = 'Đã xóa vi phạm khỏi hệ thống'
+        if restore_result.get('changed'):
+            msg += ' và hoàn điểm GPLX'
+        return JSONResponse({'status': 'ok', 'message': msg})
+
+    except Exception as e:
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
+
+@app.delete("/api/admin/users/{uid}/violations")
+async def delete_user_violations(uid: str):
+    """Delete all violations of a specific user and synchronize removal to app clients."""
+    try:
+        if not (fcm_service and fcm_service.is_available):
+            return JSONResponse({'status': 'error', 'message': 'Firebase not available'}, status_code=503)
+
+        normalized_uid = str(uid or '').strip()
+        if not normalized_uid:
+            return JSONResponse({'status': 'error', 'message': 'uid không hợp lệ'}, status_code=400)
+
+        db = fcm_service._db
+        if not db:
+            return JSONResponse({'status': 'error', 'message': 'Firestore not available'}, status_code=503)
+
+        violation_docs = list(
+            db.collection('violations').where(
+                filter=FieldFilter('userId', '==', normalized_uid)
+            ).stream()
+        )
+        _track_fs('reads', max(len(violation_docs), 1))
+
+        if not violation_docs:
+            return JSONResponse({
+                'status': 'ok',
+                'message': 'Người dùng không có vi phạm để xóa',
+                'deletedCount': 0,
+                'violationIds': [],
+            })
+
+        deleted_ids: List[str] = []
+        restored_points_count = 0
+
+        for doc in violation_docs:
+            violation_ref = doc.reference
+            violation_data = doc.to_dict() or {}
+            violation_id = str(doc.id or '').strip().upper()
+            if not violation_id:
+                continue
+
+            # Restore points before deletion.
+            try:
+                restore_result = _restore_points_from_violation(db, normalized_uid, violation_data)
+                if restore_result.get('changed'):
+                    restored_points_count += 1
+            except Exception as re:
+                print(f"⚠️ Failed to restore points for {normalized_uid}, violation={violation_id}: {re}")
+
+            # Delete related notifications for each violation.
+            try:
+                _delete_notifications_for_violation(db, violation_id)
+            except Exception as ne:
+                print(f"⚠️ Notification cleanup failed for {violation_id}: {ne}")
+
+            violation_ref.delete()
+            _track_fs('deletes')
+            _remove_violation_from_store(violation_id)
+            deleted_ids.append(violation_id)
+
+        await broadcast_admin_event(
+            'user_violations_deleted',
+            {
+                'userId': normalized_uid,
+                'deletedCount': len(deleted_ids),
+                'violationIds': deleted_ids,
+                'pointsRestoredCount': restored_points_count,
+            },
+        )
+
+        if deleted_ids:
+            await broadcast_violation_deleted_to_apps(
+                normalized_uid,
+                deleted_ids,
+                reason='admin_delete_user_all',
+            )
+
+        message = f'Đã xóa {len(deleted_ids)} vi phạm của người dùng'
+        if restored_points_count > 0:
+            message += f' và hoàn điểm GPLX cho {restored_points_count} bản ghi'
+        return JSONResponse({
+            'status': 'ok',
+            'message': message,
+            'deletedCount': len(deleted_ids),
+            'violationIds': deleted_ids,
+            'pointsRestoredCount': restored_points_count,
+        })
+    except Exception as e:
+        return JSONResponse({'status': 'error', 'message': str(e)}, status_code=500)
+
 
 @app.delete("/api/admin/complaints/{complaint_id}")
 async def delete_complaint(complaint_id: str):
@@ -4334,7 +4956,7 @@ async def websocket_detect(websocket: WebSocket):
     """
     await websocket.accept()
     
-    global _realtime_busy
+    global _realtime_busy, _current_detect_session_id
     cap = None
     running = False
     det = None
@@ -4386,7 +5008,8 @@ async def websocket_detect(websocket: WebSocket):
                 det = get_detector(model_path)
                 det.reset()
 
-                # Reset dedupe cache for fresh session
+                # Reset dedupe cache for fresh detect session
+                _current_detect_session_id = uuid.uuid4().hex
                 notified_violations.clear()
                 
                 # Open video
@@ -4414,15 +5037,18 @@ async def websocket_detect(websocket: WebSocket):
                 
                 running = True
                 session_frame_idx = 0
+                _prev_frame_time = time.monotonic()
                 
                 # Process frames
                 while running and cap.isOpened():
+                    frame_start = time.monotonic()
                     ret, frame = cap.read()
                     if not ret:
                         await websocket.send_json({"type": "finished", "stats": det.get_stats()})
                         break
                     
                     # Detect using UnifiedDetector with LIVE settings
+                    detect_t0 = time.monotonic()
                     try:
                         frame_vis, violations = det.process_frame(
                             frame, detectors, conf=live_conf, debug=live_debug
@@ -4434,6 +5060,7 @@ async def websocket_detect(websocket: WebSocket):
                             cap.release()
                             cap = None
                         break
+                    detect_ms = (time.monotonic() - detect_t0) * 1000
                     
                     session_frame_idx += 1
 
@@ -4444,22 +5071,40 @@ async def websocket_detect(websocket: WebSocket):
                         frame_vis = cv2.resize(frame_vis, (1280, int(h * scale)))
                     
                     # Encode to base64
+                    encode_t0 = time.monotonic()
                     _, buffer = cv2.imencode('.jpg', frame_vis, [cv2.IMWRITE_JPEG_QUALITY, 75])
                     frame_b64 = base64.b64encode(buffer).decode('utf-8')
+                    encode_ms = (time.monotonic() - encode_t0) * 1000
                     
                     # Send frame with session-scoped progress capped at 100%
                     progress = min(session_frame_idx / total_frames * 100, 100)
+                    send_t0 = time.monotonic()
+                    frame_gap_ms = (frame_start - _prev_frame_time) * 1000
+                    _prev_frame_time = frame_start
+                    queue_depth = _violation_queue.qsize() if _violation_queue else 0
                     await websocket.send_json({
                         "type": "frame",
                         "image": frame_b64,
                         "stats": det.get_stats(),
-                        "progress": progress
+                        "progress": progress,
+                        "telemetry": {
+                            "detect_ms": round(detect_ms, 1),
+                            "encode_ms": round(encode_ms, 1),
+                            "frame_gap_ms": round(frame_gap_ms, 1),
+                            "queue_depth": queue_depth,
+                        }
                     })
                     
-                    # Send violations if any + save to store
+                    # Send violations if any + enqueue to store (non-blocking)
                     for v in violations:
+                        # Safety gate: xe ưu tiên không lưu/gửi vi phạm redlight
+                        v_type = v.get('type', 'unknown')
+                        v_vehicle_class = (v.get('vehicleClass') or '').lower()
+                        if v_type == 'redlight' and v_vehicle_class in ('ambulance', 'fire_truck', 'police_car'):
+                            continue
+                        
                         stored = store_violation(
-                            v_type=v.get('type', 'unknown'),
+                            v_type=v_type,
                             track_id=v.get('id', 0),
                             label=v.get('label', ''),
                             vehicle_class=v.get('vehicleClass'),
@@ -4472,8 +5117,11 @@ async def websocket_detect(websocket: WebSocket):
                             "data": {**v, "stored": stored}
                         })
                     
-                    # Rate limit
-                    await asyncio.sleep(frame_delay * 0.3)
+                    # Budget-based rate control: sleep remaining time of frame budget
+                    elapsed = time.monotonic() - frame_start
+                    remaining = frame_delay - elapsed
+                    if remaining > 0.001:
+                        await asyncio.sleep(remaining)
                     
                     # Check for messages (stop or update_settings) non-blocking
                     try:

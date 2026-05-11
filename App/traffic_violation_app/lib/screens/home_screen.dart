@@ -1772,7 +1772,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<String>(
-                      value: selectedClass,
+                      initialValue: selectedClass,
                       items: classOptions
                           .map(
                             (value) => DropdownMenuItem<String>(
@@ -1799,7 +1799,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
-                      value: selectedVehicleType,
+                      initialValue: selectedVehicleType,
                       items: vehicleOptions
                           .map(
                             (value) => DropdownMenuItem<String>(
@@ -2633,7 +2633,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               onPressed: () => Navigator.pop(ctx),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: textSecondary,
-                                side: BorderSide(color: AppTheme.dividerColor),
+                                side: const BorderSide(color: AppTheme.dividerColor),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14)),
                               ),
@@ -2901,7 +2901,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       Text(
                         _settings.tr(
                             'Lịch sử trừ điểm', 'Point deduction history'),
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
                             color: AppTheme.dangerColor),
@@ -2991,7 +2991,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               onPressed: () => Navigator.pop(ctx),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: textSecondary,
-                                side: BorderSide(color: AppTheme.dividerColor),
+                                side: const BorderSide(color: AppTheme.dividerColor),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14)),
                               ),

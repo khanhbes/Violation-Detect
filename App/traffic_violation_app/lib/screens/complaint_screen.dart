@@ -244,9 +244,10 @@ class _ComplaintScreenState extends State<ComplaintScreen>
             v.canComplain && !pendingComplaintViolationIds.contains(v.id))
         .toList();
 
-    if (_isLoading)
+    if (_isLoading) {
       return const Center(
           child: CircularProgressIndicator(color: AppTheme.primaryColor));
+    }
     if (complainable.isEmpty) {
       return _buildEmptyState(
         icon: Icons.verified_rounded,

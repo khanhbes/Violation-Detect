@@ -76,7 +76,7 @@ class Config:
     SNAPSHOT_DIR.mkdir(exist_ok=True)
     
     MODEL_PATH = str(MODEL_DIR / 'yolo26_rbf.pt')
-    DEFAULT_VIDEO = str(VIDEO_DIR / 'test_2.mp4')
+    DEFAULT_VIDEO = str(VIDEO_DIR / 'AQPOF6NU6M4Ozb815w-V99aL1qEIwmrFMcsqnLwW9qn7JbaouUfsMXEN8VA1LhVqIAg1WMwDGT_Evxi8BLPtF5tLYcxNxsZHu7nL5vjcOw.mp4')
     OUTPUT_VIDEO = str(OUTPUT_DIR / 'output_violations.mp4')
     
     # ========================================
@@ -113,6 +113,7 @@ class Config:
     
     # Vehicles
     VEHICLE_CLASSES = [0, 6, 9, 21, 26]    # ambulance, car, fire_truck, motorcycle, police_car
+    PRIORITY_VEHICLE_CLASSES = [0, 9, 26]  # ambulance, fire_truck, police_car
     
     # Traffic Lights - Circular
     RED_LIGHTS = [18]
@@ -220,6 +221,7 @@ class Config:
     COLOR_VIOLATION = (0, 0, 255)          # Red
     COLOR_WRONG_LANE = (255, 0, 255)       # Magenta
     COLOR_STOPLINE = (0, 165, 255)         # Orange
+    COLOR_PRIORITY = (255, 165, 0)           # Blue-ish (BGR) for priority vehicles
     COLOR_BG = (20, 20, 20)                # Background
     COLOR_BORDER = (200, 200, 200)         # Border
     COLOR_ARROW = (255, 100, 0)            # Arrow color

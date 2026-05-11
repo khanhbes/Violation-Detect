@@ -620,24 +620,29 @@ class RedlightDetectorWrapper:
                 
                 ref_vec = (a * self.calibrator.sign_flip, b * self.calibrator.sign_flip)
                 
+                is_priority = int(cls_id) in config.PRIORITY_VEHICLE_CLASSES
+                
                 label, color = redlight_check_violation(
                     self.tracks[tid], signed, light_state, self.frame_idx, px, py,
-                    ref_vector=ref_vec
+                    ref_vector=ref_vec,
+                    is_priority_vehicle=is_priority
                 )
                 
-                if label == "VIOLATION" and self.tracks[tid].last_event_frame == self.frame_idx:
-                    self.violations += 1
-                    vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
-                    snap = save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
-                    violations.append({
-                        'type': 'redlight',
-                        'id': tid,
-                        'label': 'Red Light Violation',
-                        'vehicleClass': vclass,
-                        'snapshotPath': snap,
-                    })
-                elif label == "WARNING" and self.tracks[tid].last_event_frame == self.frame_idx:
-                    self.warnings += 1
+                # Xe ưu tiên: không tạo violation/warning
+                if not is_priority:
+                    if label == "VIOLATION" and self.tracks[tid].last_event_frame == self.frame_idx:
+                        self.violations += 1
+                        vclass = config.CLASS_NAMES.get(cls_id, "vehicle").lower()
+                        snap = save_violation_snapshot(frame, "redlight", tid, (x1, y1, x2, y2), vehicle_class=vclass)
+                        violations.append({
+                            'type': 'redlight',
+                            'id': tid,
+                            'label': 'Red Light Violation',
+                            'vehicleClass': vclass,
+                            'snapshotPath': snap,
+                        })
+                    elif label == "WARNING" and self.tracks[tid].last_event_frame == self.frame_idx:
+                        self.warnings += 1
             
             # Lưu label vào dict (KHÔNG vẽ box ở đây)
             vehicle_name = config.CLASS_NAMES.get(cls_id, "Vehicle")
@@ -645,6 +650,8 @@ class RedlightDetectorWrapper:
                 display_label = "Violation"
             elif label == "WARNING":
                 display_label = "Warning"
+            elif label == "Priority":
+                display_label = "Priority"
             else:
                 display_label = f"{vehicle_name}:{tid}"
             self.vehicle_labels[tid] = (display_label, color, cls_id, (x1, y1, x2, y2), (px, py))
@@ -731,7 +738,9 @@ class UnifiedDetector:
             print(msg)
             raise RuntimeError(msg) from e
         finally:
-            # Reset tracker state sau smoke test
+            # Reset tracker state sau smoke test — free GPU trước khi reload
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             self.model = YOLO(self.model_path)
     
     def reset(self):
@@ -745,6 +754,9 @@ class UnifiedDetector:
         self.start_time = time.time()
         self._current_stable_to_raw = {}
         self.stable_track_manager.reset()
+        # Free GPU memory trước khi reload model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         # Reset tracker state 
         self.model = YOLO(self.model_path)
         self.static_model = YOLO(self.model_path)

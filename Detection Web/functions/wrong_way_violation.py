@@ -819,6 +819,8 @@ class PrecisionWrongWayDetector:
 # =====================================================================================
 
 def main():
+    from datetime import datetime
+
     print("\n" + "="*60)
     print("    WRONG-WAY DETECTION SYSTEM (MERGED)")
     print("="*60 + "\n")
@@ -835,11 +837,29 @@ def main():
         print(f"❌ Cannot open: {config.DEFAULT_VIDEO}")
         return
         
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
-    print(f"📹 Video: {width}x{height} @ {fps} FPS")
+    # Tạo output folder và video writer
+    output_dir = Path(config.OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = str(output_dir / f"wrong_way_violation_{timestamp}.mp4")
+    
+    writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height)
+    )
+    if not writer.isOpened():
+        print(f"❌ Cannot create video writer: {output_path}")
+        writer = None
+    else:
+        print(f"📼 Recording output: {output_path}")
+    
+    print(f"📹 Video: {width}x{height} @ {int(fps)} FPS")
     print(f"⏳ Learning: {config.LEARNING_DURATION_FRAMES} frames")
     print(f"⌨️  Press 'q' to quit\n")
     
@@ -849,11 +869,18 @@ def main():
             if not ret:
                 break
             processed, _ = detector.process_frame(frame, conf=config.CONF_DETECTION, debug=True)
+            
+            if writer is not None:
+                writer.write(processed)
+            
             cv2.imshow('Wrong-Way Detection', processed)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
         cap.release()
+        if writer is not None:
+            writer.release()
+            print(f"\n✅ Video output saved: {output_path}")
         cv2.destroyAllWindows()
         
         print("\n" + "="*60)
