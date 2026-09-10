@@ -10,6 +10,9 @@ Thumbs.db
 *.log
 *.tmp
 
+# Legacy nested prototype (removed from the main repository)
+/streamlit_web/
+
 # ========================================
 # Python
 # ========================================

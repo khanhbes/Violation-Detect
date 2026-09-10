@@ -2,8 +2,9 @@
 '''
 # Copy dowloadcode on Roboflow
 !pip install roboflow
+import os
 from roboflow import Roboflow
-rf = Roboflow(api_key="xoNzVN4PxIdhCJt7K6nL")
+rf = Roboflow(api_key=os.environ["ROBOFLOW_API_KEY"])
 project = rf.workspace("nckh2026").project("nckh26-hloi9")
 version = project.version(1)
 dataset = version.download("yolov12")

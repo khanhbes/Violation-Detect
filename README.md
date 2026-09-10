@@ -1,439 +1,353 @@
 <div align="center">
 
-# 🚦 VNeTraffic — Hệ Thống Phạt Nguội Giao Thông Thông Minh
+<img src="Detection%20Web/Web/static/app_icon.png" alt="VNeTraffic" width="92" />
 
-### AI-Powered Traffic Violation Detection & Mobile Fine Payment System
+# VNeTraffic
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Flutter](https://img.shields.io/badge/Flutter-3.41+-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
-[![Firebase](https://img.shields.io/badge/Firebase-Cloud-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![YOLOv26](https://img.shields.io/badge/YOLOv26-Instance_Segmentation-FF6F00?style=for-the-badge&logo=deeplearning-ai&logoColor=white)](#)
-[![License](https://img.shields.io/badge/License-Academic-blue?style=for-the-badge)](#)
+### Hệ thống phát hiện vi phạm giao thông và hỗ trợ xử lý phạt nguội
 
-<br/>
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Flutter](https://img.shields.io/badge/Flutter-Android-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev/)
+[![Firebase](https://img.shields.io/badge/Firebase-Auth%20%7C%20Firestore%20%7C%20FCM-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![YOLOv26](https://img.shields.io/badge/YOLOv26s--seg-40%20classes-7B61FF?style=flat-square)](#mô-hình-ai-và-kết-quả-nghiên-cứu)
 
-**VNeTraffic** là hệ thống **End-to-End** phát hiện vi phạm giao thông tự động bằng trí tuệ nhân tạo,  
-kết hợp ứng dụng di động cho phép người dân tra cứu, thanh toán phạt trực tuyến và khiếu nại.
+**VNeTraffic** là nguyên mẫu end-to-end kết hợp thị giác máy tính, web dashboard và ứng dụng Flutter để phát hiện, lưu bằng chứng, thông báo, tra cứu, thanh toán và tiếp nhận khiếu nại vi phạm giao thông.
 
-[Kiến Trúc](#-kiến-trúc-hệ-thống) · [Tính Năng](#-tính-năng-nổi-bật) · [Cài Đặt](#-cài-đặt--khởi-chạy) · [Demo](#-demo) · [Tài Liệu](#-tài-liệu)
+[Demo](#demo-giao-diện) · [Tính năng](#tính-năng-chính) · [Kiến trúc](#kiến-trúc-hệ-thống) · [Cài đặt](#cài-đặt-và-khởi-chạy) · [Tài liệu](#tài-liệu)
 
 </div>
 
 ---
 
-## 📋 Mục Lục
+## Demo giao diện
 
-- [Tổng Quan](#-tổng-quan)
-- [Kiến Trúc Hệ Thống](#-kiến-trúc-hệ-thống)
-- [Tính Năng Nổi Bật](#-tính-năng-nổi-bật)
-- [Công Nghệ Sử Dụng](#-công-nghệ-sử-dụng)
-- [Mô Hình AI — 40 Class YOLO](#-mô-hình-ai--40-class-yolo)
-- [Cài Đặt & Khởi Chạy](#-cài-đặt--khởi-chạy)
-- [Cấu Trúc Dự Án](#-cấu-trúc-dự-án)
-- [Luồng Xử Lý Vi Phạm](#-luồng-xử-lý-vi-phạm)
-- [Thanh Toán & Webhook](#-thanh-toán--webhook)
-- [Deploy Tự Động (1-Click)](#-deploy-tự-động-1-click)
-- [Tài Liệu](#-tài-liệu)
+### Web dashboard
 
----
+Giao diện web là trung tâm thử nghiệm và vận hành: nhận ảnh/video, lựa chọn mô hình và bộ luật vi phạm, theo dõi kết quả real-time, lưu bằng chứng và quản trị dữ liệu.
 
-## 🎯 Tổng Quan
+<p align="center">
+  <img src="docs/images/report-web-homepage.png" alt="Trang chủ VNeTraffic Web Dashboard" width="100%" />
+  <br />
+  <sub>Trang chủ hệ thống giám sát vi phạm giao thông.</sub>
+</p>
 
-| Thành Phần | Công Nghệ | Mô Tả |
-|:----------:|:----------:|:------:|
-| 🖥️ **Backend Server** | Python · FastAPI · YOLOv26 | Xử lý video, phát hiện vi phạm real-time, API quản lý |
-| 📱 **Mobile App** | Flutter · Dart | Tra cứu vi phạm, nộp phạt online, ví giấy tờ số |
-| ☁️ **Cloud Services** | Firebase (Auth · Firestore · Storage · FCM) | Lưu trữ, xác thực, đồng bộ, push notification |
-| 💳 **Thanh Toán** | VNPay · Momo · VietQR | Nộp phạt trực tuyến qua cổng thanh toán |
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/images/report-web-upload.jpeg" alt="Nhận diện trên ảnh" width="100%" />
+      <br /><sub>Upload ảnh, điều chỉnh confidence và xem kết quả segmentation.</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/images/report-web-realtime.png" alt="Nhận diện vi phạm thời gian thực" width="100%" />
+      <br /><sub>Phân tích video thời gian thực với 6 bộ phát hiện vi phạm.</sub>
+    </td>
+  </tr>
+</table>
 
-### Luồng hoạt động tổng quát
+### Web và ứng dụng di động
 
-```
-📹 Camera ➜ 🧠 YOLOv26 AI ➜ 🔍 Phát hiện vi phạm ➜ 📝 OCR biển số ➜ ☁️ Firebase ➜ 🔔 Push ➜ 📱 App
-```
+<p align="center">
+  <img src="docs/images/report-mobile-notification-anonymized.png" alt="Thông báo vi phạm trên ứng dụng" width="100%" />
+  <br />
+  <sub>Vi phạm từ dashboard được đồng bộ và cảnh báo trên ứng dụng.</sub>
+</p>
 
----
+<p align="center">
+  <img src="docs/images/report-mobile-payment-appeal-anonymized.png" alt="Thanh toán và khiếu nại trên ứng dụng" width="720" />
+  <br />
+  <sub>Thanh toán bằng VietQR và gửi khiếu nại kèm ảnh bằng chứng.</sub>
+</p>
 
-## 🏗 Kiến Trúc Hệ Thống
-
-```mermaid
-graph TD
-    subgraph Edge["📹 Thiết Bị Đầu Cuối"]
-        CAM["Camera Giao Thông<br/>RTSP / Webcam / Video"]
-    end
-
-    subgraph Server["⚙️ Detection Server — FastAPI & Python"]
-        YOLO["🧠 YOLOv26<br/>Instance Segmentation"]
-        LOGIC["📐 Violation Logic Engine<br/>6 bộ phát hiện vi phạm"]
-        OCR["🔤 OCR — Nhận diện biển số"]
-        STORE["💾 Lưu trữ Snapshot nội bộ"]
-        SYNC["🔄 Firebase Admin SDK"]
-    end
-
-    subgraph Cloud["☁️ Firebase Cloud"]
-        FS[("🗄️ Cloud Firestore")]
-        ST["📦 Firebase Storage"]
-        FCM["📨 FCM Push"]
-        AUTH["🔐 Firebase Auth"]
-    end
-
-    subgraph App["📱 Mobile App — Flutter"]
-        UI["🎨 Giao diện 11 màn hình"]
-        PAY["💳 VNPay / Momo / VietQR"]
-    end
-
-    CAM -- "Video Stream" --> YOLO
-    YOLO -- "Bounding Boxes" --> LOGIC
-    LOGIC -- "Vi phạm detected" --> OCR
-    LOGIC --> STORE
-    OCR --> SYNC
-    SYNC -- "Upload ảnh" --> ST
-    SYNC -- "Lưu record" --> FS
-    SYNC -- "Push alert" --> FCM
-    FCM -- "🔔 Notification" --> UI
-    FS <--> UI
-    AUTH <--> UI
-    UI -- "Nộp phạt" --> PAY
-    PAY -- "Webhook callback" --> FS
-```
+> Các ảnh demo được trích từ Chương 6 — *System Implementation* của báo cáo [`KH.NC.SV.25_56.pdf`](./Project%20info/KH.NC.SV.25_56.pdf). Thông tin định danh và thanh toán trong ảnh app đã được thay bằng dữ liệu demo trước khi công khai.
 
 ---
 
-## ✨ Tính Năng Nổi Bật
+## Tổng quan
 
-### 🤖 Trí Tuệ Nhân Tạo (AI Detection)
+| Thành phần | Công nghệ | Vai trò |
+|---|---|---|
+| AI & xử lý video | YOLOv26s-seg, OpenCV, NumPy | Detection, instance segmentation và phân tích hành vi |
+| Tracking | ByteTrack; OC-SORT là phương án thay thế trong nghiên cứu | Duy trì định danh phương tiện qua nhiều frame |
+| Backend | Python, FastAPI, WebSocket | API, xử lý media và truyền kết quả thời gian thực |
+| Web dashboard | HTML, CSS, JavaScript, Jinja2 | Thử nghiệm mô hình, giám sát và quản trị |
+| Mobile app | Flutter, Dart | Tra cứu, thông báo, thanh toán và khiếu nại |
+| Cloud | Firebase Auth, Firestore, Storage, FCM | Xác thực, đồng bộ dữ liệu, lưu bằng chứng và push notification |
+| Thanh toán | VietQR/SePay; luồng mở rộng VNPay, MoMo | Đối soát và cập nhật trạng thái nộp phạt qua webhook |
 
-| # | Loại Vi Phạm | Module | Mô Tả |
-|:-:|:-------------|:------:|:-------|
-| 1 | 🪖 Không đội mũ bảo hiểm | `helmet_violation.py` | Phát hiện người đi xe máy không đội MBH qua phân tích vùng đầu |
-| 2 | 🔴 Vượt đèn đỏ | `redlight_violation.py` | Theo dõi trạng thái đèn + vị trí xe vượt vạch dừng |
-| 3 | 🚶 Đi lên vỉa hè | `sidewalk_violation.py` | Phát hiện phương tiện xâm nhập vùng vỉa hè |
-| 4 | ⬅️ Đi ngược chiều | `wrong_way_violation.py` | Phân tích hướng di chuyển so với luồng giao thông |
-| 5 | 🛣️ Đi sai làn đường | `wrong_lane_violation.py` | Segmentation làn đường + kiểm tra vị trí phương tiện |
-| 6 | 🚫 Vi phạm biển báo | `sign_violation.py` | Nhận diện biển báo cấm và phương tiện vi phạm |
+## Tính năng chính
 
-- **Mô hình:** YOLOv26 custom-trained với **40 class** chuyên biệt cho giao thông Việt Nam
-- **Tracking:** ByteTrack multi-object tracking liên tục qua các frame
-- **Real-time:** Xử lý và phát hiện vi phạm theo thời gian thực qua WebSocket
+### Phát hiện vi phạm bằng AI
 
-### 📱 Ứng Dụng Di Động (Flutter App)
+- Nhận diện và phân đoạn 40 lớp đối tượng đặc thù cho giao thông Việt Nam.
+- Hỗ trợ ảnh, video và luồng phân tích thời gian thực qua WebSocket.
+- Hiển thị bounding box, segmentation mask, nhãn, confidence và track ID.
+- Tự động hiệu chỉnh các vùng hình học như vạch dừng, làn đường và vỉa hè.
+- Lưu frame bằng chứng, thông tin vi phạm và dữ liệu liên quan lên Firebase.
 
-- **11 màn hình UI** hoàn chỉnh với giao diện Dark Mode hiện đại
-- **Tra cứu vi phạm** theo biển số xe, xem chi tiết + ảnh bằng chứng
-- **Thanh toán phạt trực tuyến** qua VNPay / Momo / VietQR
-- **Ví giấy tờ số** — Lưu trữ CCCD, Giấy phép lái xe, hệ thống điểm bằng lái (12 điểm)
-- **Khiếu nại (Appeal)** — Gửi yêu cầu phản đối vi phạm kèm bằng chứng
-- **Push Notification real-time** qua FCM + WebSocket
-- **OTA Update** — Tự động cập nhật phiên bản mới không cần Store
-- **Đa ngôn ngữ** — Hỗ trợ Tiếng Việt & English
+Sáu module luật hiện có:
 
-### 🖥️ Web Dashboard
+| Loại vi phạm | Module | Nguyên tắc xử lý |
+|---|---|---|
+| Không đội mũ bảo hiểm | `helmet_violation.py` | Liên kết người, vùng đầu và xe máy |
+| Vượt đèn đỏ | `redlight_violation.py` | Trạng thái đèn, vạch dừng và quỹ đạo xe |
+| Đi lên vỉa hè/dải phân cách | `sidewalk_violation.py` | Giao cắt giữa phương tiện và vùng cấm |
+| Đi ngược chiều | `wrong_way_violation.py` | Hướng chuyển động theo lịch sử tracking |
+| Sai làn/đè vạch | `wrong_lane_violation.py` | Mask làn đường, vạch kẻ và vị trí phương tiện |
+| Vi phạm biển báo | `sign_violation.py` | Biển cấm, vùng hiệu lực và hướng di chuyển |
 
-- Giao diện quản lý phát hiện vi phạm
-- Chọn video + model + loại vi phạm → Start Detection
-- Xem kết quả detection real-time qua WebSocket streaming
-- Hỗ trợ đa ngôn ngữ (i18n)
+### Web dashboard
 
-### 🚀 DevOps & Automation
+- Điều hướng riêng cho ảnh, video, real-time, tra cứu, quản lý dữ liệu và khiếu nại.
+- Chọn model, detector và ngưỡng confidence trực tiếp trên giao diện.
+- Thống kê phiên xử lý và danh sách vi phạm gần nhất.
+- Quản lý người dùng, phương tiện, điểm giấy phép lái xe và lịch sử xử lý.
+- Tiếp nhận, đối chiếu bằng chứng, chấp thuận hoặc từ chối khiếu nại.
+- Theo dõi hạn mức thao tác Firestore và đồng bộ thay đổi qua kênh admin WebSocket.
 
-- **1-Click Deploy** — Auto tìm IP, build APK, upload server
-- **Auto Version Bump** — Tự động tăng version mỗi lần deploy
-- **Ngrok Webhook** — Tunnel cho thanh toán callback
-- **Firebase Rules** — Firestore & Storage security rules sẵn sàng
+### Ứng dụng Flutter
 
----
+- Đăng ký/đăng nhập bằng Firebase Authentication.
+- Quản lý hồ sơ, CCCD, phương tiện và điểm giấy phép lái xe.
+- Nhận vi phạm mới qua FCM và WebSocket; xem ảnh bằng chứng và chi tiết mức phạt.
+- Lọc danh sách vi phạm theo trạng thái chưa nộp/đã nộp.
+- Thanh toán bằng QR và cập nhật trạng thái tự động qua webhook.
+- Gửi khiếu nại với lý do, mô tả và ảnh bằng chứng.
+- Nhận thông báo kết quả xử lý khiếu nại.
+- Kiểm tra và tải bản APK cập nhật theo cơ chế OTA nội bộ.
 
-## 🛠 Công Nghệ Sử Dụng
+## Mô hình AI và kết quả nghiên cứu
 
-<div align="center">
+Theo báo cáo nghiên cứu đi kèm, mô hình được huấn luyện 150 epoch trên NVIDIA A100 với bộ dữ liệu giao thông Việt Nam tự xây dựng:
 
-| Tầng | Công Nghệ | Chi Tiết |
-|:-----|:----------|:---------|
-| **AI / ML** | YOLOv26 · OpenCV · NumPy | Instance segmentation, detection, tracking |
-| **Backend** | FastAPI · Uvicorn · Python 3.10+ | REST API + WebSocket server |
-| **Mobile** | Flutter 3.41+ · Dart 3.11+ | Cross-platform Android app |
-| **Database** | Cloud Firestore | Real-time NoSQL database |
-| **Storage** | Firebase Storage | Ảnh vi phạm, snapshot bằng chứng |
-| **Auth** | Firebase Authentication | Email/Password authentication |
-| **Push** | Firebase Cloud Messaging | Push notification Android/Web |
-| **Payment** | VNPay · Momo · VietQR (SePay) | Thanh toán phạt trực tuyến |
-| **Tracking** | ByteTrack (lapx) | Multi-object tracking |
-| **DevOps** | Bash · PowerShell · Ngrok | CI/CD automation & tunneling |
+| Chỉ số | Kết quả báo cáo |
+|---|---:|
+| Ảnh gốc | 4.482 |
+| Instance annotations | 47.039 |
+| Số lớp | 40 |
+| mAP50 — bounding box | 86,9% |
+| mAP50 — segmentation mask | 85,5% |
+| Inference latency | 7,2 ms/ảnh |
+| Inference throughput | ~139 FPS trên NVIDIA A100 |
 
-</div>
-
----
-
-## 🧠 Mô Hình AI — 40 Class YOLO
-
-Mô hình YOLOv26 được huấn luyện riêng (custom-trained) với **40 class** đặc thù cho giao thông Việt Nam:
+> FPS trên chỉ phản ánh thời gian inference của mô hình trong môi trường thử nghiệm; tốc độ end-to-end còn phụ thuộc phần cứng, độ phân giải, tracking, logic vi phạm, truyền dữ liệu và lưu trữ.
 
 <details>
-<summary><b>📋 Xem danh sách đầy đủ 40 class</b></summary>
+<summary><strong>Danh sách 40 lớp của mô hình</strong></summary>
 
-| ID | Class | Mô Tả |
-|:--:|:------|:-------|
-| 0 | `ambulance` | Xe cứu thương |
-| 1–5 | `arrow_left`, `arrow_right`, `arrow_straight`, `arrow_straight_and_left`, `arrow_straight_and_right` | Mũi tên chỉ hướng trên đường |
-| 6 | `car` | Ô tô |
-| 7–8 | `dashed_white_line`, `dashed_yellow_line` | Vạch kẻ đường nét đứt |
-| 9 | `fire_truck` | Xe cứu hỏa |
-| 10–19 | `light_left_green/red/yellow`, `light_right_green`, `light_straight_arrow_green/red/yellow`, `light_straight_circle_green/red/yellow` | Đèn giao thông (10 trạng thái) |
-| 20 | `median` | Dải phân cách |
-| 21 | `motorcycle` | Xe máy |
-| 22 | `pedestrian_crossing` | Vạch sang đường |
-| 23 | `person` | Người |
-| 24 | `person_no_helmet` | Người không đội mũ bảo hiểm |
-| 25 | `person_with_helmet` | Người đội mũ bảo hiểm |
-| 26 | `police_car` | Xe cảnh sát |
-| 27 | `sidewalk` | Vỉa hè |
-| 28–36 | `sign_no_car`, `sign_no_entry`, `sign_no_left_and_return`, `sign_no_left_turn`, `sign_no_parking`, `sign_no_return`, `sign_no_right_and_return`, `sign_no_right_turn`, `sign_no_stopping` | Biển báo cấm (9 loại) |
-| 37–38 | `solid_white_line`, `solid_yellow_line` | Vạch kẻ đường liền |
-| 39 | `stop_line` | Vạch dừng |
+| Nhóm | ID | Lớp |
+|---|---:|---|
+| Xe ưu tiên & phương tiện | 0, 6, 9, 21, 26 | `ambulance`, `car`, `fire_truck`, `motorcycle`, `police_car` |
+| Mũi tên chỉ hướng | 1–5 | `arrow_left`, `arrow_right`, `arrow_straight`, `arrow_straight_and_left`, `arrow_straight_and_right` |
+| Vạch kẻ đường | 7–8, 37–39 | `dashed_white_line`, `dashed_yellow_line`, `solid_white_line`, `solid_yellow_line`, `stop_line` |
+| Đèn tín hiệu | 10–19 | Đèn trái/phải/đi thẳng theo trạng thái đỏ, vàng, xanh |
+| Hạ tầng | 20, 22, 27 | `median`, `pedestrian_crossing`, `sidewalk` |
+| Người tham gia giao thông | 23–25 | `person`, `person_no_helmet`, `person_with_helmet` |
+| Biển báo cấm | 28–36 | 9 lớp biển cấm ô tô, cấm đi vào, cấm rẽ/quay đầu, cấm đỗ/dừng |
 
 </details>
 
----
-
-## 🚀 Cài Đặt & Khởi Chạy
-
-### Yêu Cầu Hệ Thống
-
-| Thành Phần | Yêu Cầu |
-|:-----------|:---------|
-| **Python** | 3.10+ |
-| **Flutter SDK** | 3.41+ |
-| **CUDA** *(khuyến nghị)* | 11.8+ |
-| **GPU** *(khuyến nghị)* | NVIDIA, VRAM ≥ 4GB |
-| **RAM** | ≥ 8GB |
-| **Java JDK** | 21+ |
-
-### 1️⃣ Clone Repository
-
-```bash
-git clone https://github.com/khanhbes/Violation-Detect.git
-cd Violation-Detect
-```
-
-### 2️⃣ Cài Đặt Backend (Python)
-
-```bash
-# Tạo môi trường ảo
-python -m venv .venv
-
-# Kích hoạt (Windows)
-.venv\Scripts\activate
-
-# Kích hoạt (Mac/Linux)
-source .venv/bin/activate
-
-# Cài đặt thư viện
-pip install -r requirements.txt
-
-# (Tùy chọn) Cài PyTorch với CUDA cho GPU
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-```
-
-### 3️⃣ Cấu Hình Firebase
-
-1. Tạo project tại [Firebase Console](https://console.firebase.google.com)
-2. Bật: **Authentication**, **Cloud Firestore**, **Firebase Storage**, **Cloud Messaging**
-3. Tải `serviceAccountKey.json` → đặt vào `Detection Web/Web/`
-4. Tải `google-services.json` → đặt vào `App/traffic_violation_app/android/app/`
-5. Copy `firebase-config.example.js` → `firebase-config.js` trong `Detection Web/Web/static/`
-
-### 4️⃣ Chuẩn Bị Model YOLO
-
-Đặt file model `.pt` vào `Detection Web/assets/model/`:
-- Model detection: `yolo26_rbf.pt` (40 class)
-- Model segmentation: `yolov26s_seg.pt`
-
-### 5️⃣ Khởi Chạy Server
-
-```bash
-# Cách 1: Chạy trực tiếp
-cd "Detection Web/Web"
-python app.py
-
-# Cách 2: Chạy 1-Click (Windows)
-START.bat
-```
-
-> 🌐 Server khởi chạy tại: **http://localhost:8000**
-
-### 6️⃣ Khởi Chạy Mobile App
-
-```bash
-cd App/traffic_violation_app
-flutter pub get
-flutter run          # Debug mode
-flutter build apk    # Build release
-```
-
----
-
-## 📁 Cấu Trúc Dự Án
-
-```
-Violation Detect/
-│
-├── Detection Web/                        # 🖥️ Backend + AI + Web Dashboard
-│   ├── Web/
-│   │   ├── app.py                       # FastAPI server chính
-│   │   ├── services/
-│   │   │   ├── detection_service.py     # UnifiedDetector (AI core)
-│   │   │   └── fcm_service.py           # Firebase Cloud Messaging
-│   │   ├── static/                      # Frontend (JS, CSS, icons)
-│   │   └── templates/index.html         # Web Dashboard
-│   │
-│   ├── functions/                       # 🤖 6 Violation Detectors
-│   │   ├── helmet_violation.py
-│   │   ├── redlight_violation.py
-│   │   ├── sidewalk_violation.py
-│   │   ├── sign_violation.py
-│   │   ├── wrong_lane_violation.py
-│   │   └── wrong_way_violation.py
-│   │
-│   ├── config/                          # ⚙️ Cấu hình (40 YOLO classes)
-│   ├── utils/                           # 🎨 Drawing utilities
-│   └── assets/                          # Model weights + video test
-│
-├── App/
-│   └── traffic_violation_app/           # 📱 Flutter Mobile App
-│       └── lib/
-│           ├── main.dart                # Entry point
-│           ├── screens/                 # 11 màn hình UI
-│           ├── services/                # 6 services
-│           ├── models/                  # Data models
-│           ├── theme/                   # Dark mode theme
-│           └── widgets/                 # Reusable widgets
-│
-├── Project info/                        # 📄 Tài liệu & Kiến trúc
-│
-├── deploy.bat / deploy.sh               # 🚀 Auto deploy (1-Click)
-├── START.bat                            # ▶️ Khởi động nhanh
-├── Start_Webhook.bat                    # 💳 Ngrok webhook thanh toán
-├── requirements.txt                     # Python dependencies
-├── firebase.json                        # Firebase config
-├── firestore.rules                      # Firestore security rules
-└── storage.rules                        # Storage security rules
-```
-
----
-
-## 🔄 Luồng Xử Lý Vi Phạm
+## Kiến trúc hệ thống
 
 ```mermaid
-sequenceDiagram
-    participant Cam as 📹 Camera
-    participant Server as ⚙️ FastAPI
-    participant AI as 🧠 YOLOv26
-    participant FS as 🗄️ Firestore
-    participant FCM as 📨 FCM
-    participant App as 📱 Flutter App
+flowchart LR
+    CAM[Camera / ảnh / video] --> AI[YOLOv26s-seg]
+    AI --> TRACK[ByteTrack]
+    TRACK --> RULES[6 module luật hình học]
+    RULES --> EVIDENCE[Ảnh bằng chứng + dữ liệu vi phạm]
 
-    Cam->>Server: Video Stream
-    loop Mỗi Frame
-        Server->>AI: process_frame()
-        AI-->>Server: detections + violations
+    EVIDENCE --> API[FastAPI + WebSocket]
+    API --> WEB[Web dashboard]
+    API --> STORE[(Firebase Storage)]
+    API --> DB[(Cloud Firestore)]
+    API --> FCM[Firebase Cloud Messaging]
 
-        alt Phát hiện Vi Phạm
-            Server->>Server: OCR đọc biển số
-            Server->>FS: Lưu record vi phạm
-            Server->>FCM: Push notification
-            FCM-->>App: 🔔 Thông báo vi phạm
-        end
-    end
-
-    App->>FS: Xem chi tiết vi phạm
-    App->>App: Thanh toán / Khiếu nại
+    AUTH[Firebase Auth] <--> APP[Flutter app]
+    DB <--> APP
+    STORE --> APP
+    FCM --> APP
+    APP --> PAY[VietQR / SePay]
+    PAY -->|Webhook| API
+    APP -->|Khiếu nại| API
 ```
 
-### Chi tiết từng bước:
+### Luồng xử lý một vi phạm
 
-1. **Thu thập** — Camera gửi video stream liên tục đến server
-2. **Nhận diện AI** — YOLOv26 phân tích từng frame, trả về bounding box cho 40 class
-3. **Đánh giá vi phạm** — 6 bộ detector kiểm tra các luật giao thông (đèn đỏ, MBH, làn đường...)
-4. **OCR biển số** — Nhận diện biển số xe vi phạm để quy trách nhiệm
-5. **Lưu bằng chứng** — Snapshot ảnh vi phạm → Firebase Storage, record → Firestore
-6. **Cảnh báo** — FCM push notification + WebSocket real-time đến app người dùng
-7. **Xử lý** — Người dân xem vi phạm, nộp phạt online hoặc gửi khiếu nại
+1. Camera, ảnh hoặc video được gửi đến backend.
+2. YOLOv26s-seg trả về bounding box và mask; ByteTrack duy trì ID đối tượng.
+3. Module tương ứng áp dụng các điều kiện hình học có thể kiểm tra lại.
+4. Khi đủ điều kiện xác nhận, hệ thống đóng băng frame và tạo bản ghi bằng chứng.
+5. Backend lưu ảnh lên Storage, metadata lên Firestore và gửi thông báo đến đúng người dùng.
+6. Người dùng xem chi tiết, thanh toán hoặc gửi khiếu nại trên app.
+7. Webhook thanh toán hoặc quyết định của quản trị viên cập nhật trạng thái và đồng bộ ngược về app.
 
----
+## Cài đặt và khởi chạy
 
-## 💳 Thanh Toán & Webhook
+### Yêu cầu
 
-Hệ thống tích hợp thanh toán trực tuyến qua **SePay** (VNPay / Momo / VietQR):
+| Thành phần | Phiên bản/ghi chú |
+|---|---|
+| Python | 3.10 trở lên |
+| Flutter | 3.x; Dart SDK `>=3.0.0 <4.0.0` |
+| Java | JDK 21 trở lên để build Android |
+| RAM | Tối thiểu 8 GB |
+| GPU | NVIDIA VRAM từ 4 GB được khuyến nghị; vẫn có thể chạy CPU với tốc độ thấp hơn |
+| Firebase | Auth, Firestore, Storage và Cloud Messaging |
 
-```bash
-# Khởi động Ngrok tunnel cho webhook
-Start_Webhook.bat
+### 1. Cài backend
+
+```powershell
+git clone https://github.com/khanhbes/Violation-Detect.git
+cd "Violation-Detect"
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pip install fastapi uvicorn jinja2 python-multipart pyyaml websockets requests
 ```
 
-- **Webhook endpoint:** `/api/webhook/sepay`
-- Khi thanh toán thành công → webhook tự động cập nhật trạng thái `"Đã thanh toán"` trên Firestore
-- Người dùng cũng có thể gửi **Khiếu nại (Appeal)** → trạng thái bị khóa chờ Admin xử lý
+Nếu sử dụng GPU, cài PyTorch phù hợp với phiên bản CUDA trên máy theo hướng dẫn chính thức của PyTorch.
 
----
+### 2. Chuẩn bị model và Firebase
 
-## 🚀 Deploy Tự Động (1-Click)
-
-```bash
-# Windows
-deploy.bat
-
-# Mac/Linux
-chmod +x deploy.sh && ./deploy.sh
+```text
+Detection Web/assets/model/yolo26_rbf.pt
+Detection Web/assets/model/yolov26s_seg.pt
+Detection Web/Web/serviceAccountKey.json
+Detection Web/Web/static/firebase-config.js
+App/traffic_violation_app/android/app/google-services.json
 ```
 
-Script tự động thực hiện:
+Tạo `firebase-config.js` từ [`firebase-config.example.js`](./Detection%20Web/Web/static/firebase-config.example.js), sau đó điền cấu hình Web App của Firebase. Không commit các khóa bí mật vào Git.
 
-| Bước | Hành Động |
-|:----:|:----------|
-| 1 | 🔍 Tìm IP WiFi/LAN hiện tại |
-| 2 | 📝 Cập nhật IP vào `api_service.dart` |
-| 3 | 🔢 Tự động tăng version trong `pubspec.yaml` |
-| 4 | 📦 Build APK release |
-| 5 | ☁️ Upload APK lên server → App nhận popup cập nhật (OTA) |
+### 3. Chạy web dashboard
 
----
+Cách nhanh trên Windows:
 
-## 📚 Tài Liệu
-
-| Tài Liệu | Mô Tả |
-|:----------|:-------|
-| [`HE_THONG_HOAT_DONG.md`](./HE_THONG_HOAT_DONG.md) | Sơ đồ khối, lưu đồ thuật toán, giải thích hệ thống chi tiết |
-| [`HUONG_DAN_CHAY.md`](./HUONG_DAN_CHAY.md) | Hướng dẫn cài đặt & chạy chi tiết từng bước |
-| [`Project info/architecture_diagram.md`](./Project%20info/architecture_diagram.md) | Sơ đồ kiến trúc Mermaid đầy đủ |
-| [`Project info/Project_Overview.md`](./Project%20info/Project_Overview.md) | Tổng quan dự án & tính năng |
-
----
-
-## ⚠️ Lưu Ý Bảo Mật
-
-Các file sau **KHÔNG được commit** lên Git (đã cấu hình trong `.gitignore`):
-
+```powershell
+.\START.bat
 ```
-🔒 serviceAccountKey.json      — Firebase Admin key
-🔒 google-services.json        — Firebase Android config
-🔒 firebase-config.js          — Firebase Web config
-🔒 *.pt / *.onnx               — Model weights (23-60MB)
-🔒 assets/video/               — Video test (~130MB)
+
+Hoặc chạy trực tiếp:
+
+```powershell
+.\.venv\Scripts\python.exe "Detection Web\Web\app.py"
 ```
+
+Mở [http://localhost:8000](http://localhost:8000). Khi Firebase chưa sẵn sàng, phần AI cục bộ vẫn có thể được kiểm tra nhưng các chức năng đồng bộ cloud, quản trị và thông báo sẽ bị giới hạn.
+
+### 4. Chạy ứng dụng Flutter
+
+```powershell
+cd "App\traffic_violation_app"
+flutter pub get
+flutter run
+```
+
+Build APK release:
+
+```powershell
+flutter build apk --release
+```
+
+### 5. Kiểm tra chất lượng
+
+```powershell
+# Python
+python -m py_compile "Detection Web\Web\app.py"
+
+# Flutter
+cd "App\traffic_violation_app"
+flutter analyze
+flutter test
+```
+
+## API và kênh thời gian thực
+
+Một số endpoint quan trọng:
+
+| Endpoint | Chức năng |
+|---|---|
+| `GET /api/videos` | Danh sách video thử nghiệm |
+| `GET /api/models` | Danh sách model khả dụng |
+| `GET /api/detectors` | Danh sách module vi phạm |
+| `POST /api/detect/image` | Nhận diện ảnh |
+| `POST /api/detect/video` | Khởi tạo xử lý video |
+| `GET /api/app/violations` | Danh sách vi phạm theo người dùng |
+| `POST /api/app/complaints/submit` | Gửi khiếu nại |
+| `POST /api/webhook/sepay` | Nhận callback thanh toán |
+| `WS /ws/app` | Cập nhật real-time cho ứng dụng |
+| `WS /ws/admin` | Cập nhật real-time cho dashboard quản trị |
+
+## Cấu trúc repository
+
+```text
+Violation Detect/
+├── Detection Web/
+│   ├── Web/
+│   │   ├── app.py                    # FastAPI, REST API và WebSocket
+│   │   ├── services/                 # AI orchestration và FCM
+│   │   ├── static/                   # CSS, JavaScript, icon, Firebase config
+│   │   └── templates/index.html      # Web dashboard
+│   ├── functions/                    # 6 module phát hiện vi phạm
+│   ├── config/                       # Model, tracker và ngưỡng xử lý
+│   └── assets/                       # Model và video thử nghiệm (không commit)
+├── App/traffic_violation_app/
+│   ├── lib/screens/                  # Các màn hình Flutter
+│   ├── lib/services/                 # Auth, API, Firestore, FCM, OTA
+│   ├── lib/models/                   # Mô hình dữ liệu
+│   └── android/                      # Cấu hình Android
+├── docs/images/                      # Ảnh minh họa dùng trong README
+├── Project info/                     # Ghi chú kỹ thuật và kiến trúc
+│   └── KH.NC.SV.25_56.pdf            # Báo cáo nghiên cứu
+├── START.bat                         # Khởi động backend trên Windows
+├── deploy.bat / deploy.sh            # Build và phát hành APK nội bộ
+├── firestore.rules / storage.rules   # Quy tắc bảo mật Firebase
+└── requirements.txt                  # Phụ thuộc AI/Python cốt lõi
+```
+
+## Deploy APK nội bộ
+
+```powershell
+.\deploy.bat
+```
+
+Quy trình deploy tự động phát hiện IP LAN, cập nhật endpoint của app, tăng version/build number, build APK và đưa bản phát hành vào `Detection Web/Web/apk_releases/` để ứng dụng kiểm tra cập nhật OTA.
+
+## Bảo mật và dữ liệu nhạy cảm
+
+Các tệp sau đã được loại khỏi Git và không được chia sẻ công khai:
+
+- `serviceAccountKey.json`
+- `google-services.json`
+- `GoogleService-Info.plist`
+- `firebase-config.js`
+- `.env`
+- model `*.pt`, `*.onnx`
+- video thử nghiệm và ảnh bằng chứng sinh ra trong quá trình chạy
+
+Nên sử dụng Firebase Security Rules theo nguyên tắc quyền tối thiểu, xác minh chữ ký webhook thanh toán và chỉ triển khai backend qua HTTPS trong môi trường thực tế.
+
+## Phạm vi nghiên cứu
+
+Đây là nguyên mẫu nghiên cứu. Báo cáo ghi nhận một số giới hạn cần cân nhắc trước khi triển khai thực địa: tập kiểm thử của một số module còn nhỏ, dữ liệu tập trung chủ yếu tại Hà Nội, và đánh giá quy mô lớn với nhiều luồng RTSP chưa nằm trong phạm vi thử nghiệm. Kết quả AI không nên được dùng làm quyết định xử phạt cuối cùng nếu chưa có quy trình kiểm duyệt, hiệu chuẩn camera và cơ chế đối soát pháp lý phù hợp.
+
+## Tài liệu
+
+| Tài liệu | Nội dung |
+|---|---|
+| [`KH.NC.SV.25_56.pdf`](./Project%20info/KH.NC.SV.25_56.pdf) | Báo cáo nghiên cứu, phương pháp, đánh giá và giao diện hệ thống |
+| [`HE_THONG_HOAT_DONG.md`](./HE_THONG_HOAT_DONG.md) | Sơ đồ khối và mô tả luồng hoạt động |
+| [`HUONG_DAN_CHAY.md`](./HUONG_DAN_CHAY.md) | Hướng dẫn cài đặt và xử lý lỗi chi tiết |
+| [`Project info/architecture_diagram.md`](./Project%20info/architecture_diagram.md) | Sơ đồ kiến trúc mở rộng |
+| [`Project info/Project_Overview.md`](./Project%20info/Project_Overview.md) | Tổng quan thành phần và quy trình triển khai |
 
 ---
 
 <div align="center">
 
-## 🤝 Đóng Góp
+**VNeTraffic — Computer vision for transparent traffic enforcement**
 
-Mọi đóng góp đều được chào đón! Hãy tạo **Issue** hoặc **Pull Request** nếu bạn muốn cải thiện dự án.
-
----
-
-**VNeTraffic** — *Giải pháp phạt nguội giao thông thông minh bằng AI cho Việt Nam* 🇻🇳
-
-Made with ❤️ using YOLOv26 · FastAPI · Flutter · Firebase
+Phát triển phục vụ mục đích nghiên cứu khoa học và thử nghiệm kỹ thuật.
 
 </div>

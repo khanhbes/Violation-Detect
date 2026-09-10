@@ -1492,13 +1492,14 @@ if (scrollTopBtn) {
             navigator.serviceWorker.register('/firebase-messaging-sw.js')
                 .then((registration) => {
                     console.log('[FCM] Service Worker registered:', registration.scope);
-                    messaging.useServiceWorker(registration);
-                    requestNotificationPermission(messaging);
+                    setupNotificationToken(messaging, registration);
+                    window.enableFCMNotifications = () => requestNotificationPermission(messaging, registration);
                 })
                 .catch((err) => {
                     console.error('[FCM] Service Worker registration failed:', err);
-                    // Still try to request permission without explicit SW
-                    requestNotificationPermission(messaging);
+                    // Still support foreground notifications without an explicit SW registration.
+                    setupNotificationToken(messaging);
+                    window.enableFCMNotifications = () => requestNotificationPermission(messaging);
                 });
         } else {
             console.warn('[FCM] Service Workers not supported');
@@ -1542,21 +1543,56 @@ if (scrollTopBtn) {
     }
 })();
 
-// Request notification permission and get FCM token
-async function requestNotificationPermission(messaging) {
+// Register an FCM token only when the browser notification permission is ready.
+function setupNotificationToken(messaging, serviceWorkerRegistration) {
+    if (!('Notification' in window)) {
+        console.info('[FCM] Browser notifications are not supported');
+        return;
+    }
+
+    const permission = Notification.permission;
+    console.log('[FCM] Permission:', permission);
+
+    if (permission !== 'granted') {
+        console.info(`[FCM] Notification permission is "${permission}", token registration skipped`);
+        return;
+    }
+
+    registerFcmToken(messaging, serviceWorkerRegistration);
+}
+
+// Request notification permission from a user action, then get FCM token.
+async function requestNotificationPermission(messaging, serviceWorkerRegistration) {
     try {
+        if (!('Notification' in window)) {
+            console.info('[FCM] Browser notifications are not supported');
+            return;
+        }
+
         const permission = await Notification.requestPermission();
         console.log('[FCM] Permission:', permission);
 
         if (permission !== 'granted') {
-            console.warn('[FCM] Notification permission denied');
+            console.info(`[FCM] Notification permission is "${permission}", token registration skipped`);
             return;
         }
 
-        // Get FCM token
-        const token = await messaging.getToken({
-            // vapidKey: 'YOUR_VAPID_KEY_HERE'  // Uncomment and set for production
-        });
+        await registerFcmToken(messaging, serviceWorkerRegistration);
+    } catch (e) {
+        console.error('[FCM] Permission/token error:', e);
+    }
+}
+
+async function registerFcmToken(messaging, serviceWorkerRegistration) {
+    try {
+        const tokenOptions = {};
+        if (serviceWorkerRegistration) {
+            tokenOptions.serviceWorkerRegistration = serviceWorkerRegistration;
+        }
+        if (typeof FIREBASE_VAPID_KEY !== 'undefined' && FIREBASE_VAPID_KEY) {
+            tokenOptions.vapidKey = FIREBASE_VAPID_KEY;
+        }
+        const token = await messaging.getToken(tokenOptions);
 
         if (token) {
             console.log('[FCM] Token:', token.substring(0, 20) + '...');
@@ -1580,7 +1616,7 @@ async function requestNotificationPermission(messaging) {
             }
         }
     } catch (e) {
-        console.error('[FCM] Permission/token error:', e);
+        console.error('[FCM] Token registration error:', e);
     }
 }
 
