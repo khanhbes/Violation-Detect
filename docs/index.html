@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b14" />
+    <meta
+      name="description"
+      content="VNeTraffic — Demo hệ thống AI phát hiện vi phạm giao thông, quản trị bằng chứng và hỗ trợ xử lý phạt nguội."
+    />
+    <meta property="og:title" content="VNeTraffic — Traffic Violation Detection" />
+    <meta property="og:url" content="https://khanhbes.github.io/Violation-Detect/" />
+    <meta
+      property="og:description"
+      content="YOLOv26s-seg, FastAPI, Firebase và Flutter trong một hệ thống end-to-end."
+    />
+    <meta property="og:image" content="images/report-web-homepage.png" />
+    <title>VNeTraffic — Interactive System Demo</title>
+    <link rel="icon" href="images/vnetraffic-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Bỏ qua điều hướng</a>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="VNeTraffic — về đầu trang">
+        <img src="images/vnetraffic-icon.png" alt="" width="38" height="38" />
+        <span>VNeTraffic</span>
+      </a>
+
+      <nav aria-label="Điều hướng chính">
+        <a href="#capabilities">Năng lực</a>
+        <a href="#system">Hệ thống</a>
+        <a href="#mobile">Ứng dụng</a>
+      </nav>
+
+      <a
+        class="header-link"
+        href="https://github.com/khanhbes/Violation-Detect"
+        target="_blank"
+        rel="noreferrer"
+      >
+        GitHub <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-media" aria-hidden="true">
+          <img src="images/report-web-homepage.png" alt="" />
+        </div>
+        <div class="hero-shade" aria-hidden="true"></div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">AI Research Prototype · Vietnam</p>
+          <h1 id="hero-title">Quan sát giao thông.<br />Giải thích vi phạm.</h1>
+          <p class="hero-lede">
+            Một pipeline end-to-end kết hợp instance segmentation, tracking và luật hình học
+            để tạo bằng chứng có thể kiểm tra lại.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#system">Xem hệ thống</a>
+            <a
+              class="button button-quiet"
+              href="https://github.com/khanhbes/Violation-Detect/blob/main/Project%20info/KH.NC.SV.25_56.pdf"
+              target="_blank"
+              rel="noreferrer"
+            >Báo cáo nghiên cứu ↗</a>
+          </div>
+        </div>
+
+        <p class="hero-note">Static product preview · Backend AI không chạy trên GitHub Pages</p>
+      </section>
+
+      <section class="proof" aria-label="Kết quả nghiên cứu">
+        <div class="proof-intro reveal">
+          <p class="eyebrow">Kết quả thực nghiệm</p>
+          <h2>Được xây dựng từ dữ liệu giao thông Việt Nam.</h2>
+        </div>
+        <dl class="proof-grid reveal">
+          <div><dt>4.482</dt><dd>ảnh gốc</dd></div>
+          <div><dt>47.039</dt><dd>instance annotations</dd></div>
+          <div><dt>86,9%</dt><dd>mAP50 bounding box</dd></div>
+          <div><dt>85,5%</dt><dd>mAP50 segmentation</dd></div>
+          <div><dt>7,2 ms</dt><dd>inference / ảnh trên A100</dd></div>
+        </dl>
+      </section>
+
+      <section class="capabilities section" id="capabilities" aria-labelledby="capabilities-title">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Violation intelligence</p>
+          <h2 id="capabilities-title">Sáu nhóm hành vi.<br />Một lớp nhận thức chung.</h2>
+          <p>
+            YOLOv26s-seg nhận diện 40 lớp đối tượng; ByteTrack giữ định danh; mỗi module
+            đưa ra quyết định bằng điều kiện hình học rõ ràng.
+          </p>
+        </div>
+
+        <ol class="capability-list reveal">
+          <li><span>01</span><strong>Không đội mũ bảo hiểm</strong><small>Người · vùng đầu · xe máy</small></li>
+          <li><span>02</span><strong>Vượt đèn đỏ</strong><small>Đèn tín hiệu · vạch dừng · quỹ đạo</small></li>
+          <li><span>03</span><strong>Đi lên vỉa hè</strong><small>Mask phương tiện · vùng cấm</small></li>
+          <li><span>04</span><strong>Đi ngược chiều</strong><small>Lịch sử tracking · hướng luồng xe</small></li>
+          <li><span>05</span><strong>Sai làn, đè vạch</strong><small>Làn đường · vạch kẻ · vị trí xe</small></li>
+          <li><span>06</span><strong>Vi phạm biển báo</strong><small>Biển cấm · vùng hiệu lực · chuyển động</small></li>
+        </ol>
+      </section>
+
+      <section class="system section" id="system" aria-labelledby="system-title">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Web control room</p>
+          <h2 id="system-title">Từ một frame đến một hồ sơ bằng chứng.</h2>
+        </div>
+
+        <figure class="feature-figure reveal">
+          <img
+            src="images/report-web-upload.jpeg"
+            alt="Dashboard VNeTraffic hiển thị kết quả nhận diện và segmentation trên ảnh giao thông"
+            loading="lazy"
+          />
+          <figcaption>
+            <span>01 / Image intelligence</span>
+            <strong>Bounding box, mask và confidence trong cùng một workspace.</strong>
+          </figcaption>
+        </figure>
+
+        <figure class="feature-figure feature-figure-dark reveal">
+          <img
+            src="images/report-web-realtime.png"
+            alt="Màn hình phân tích video thời gian thực của VNeTraffic"
+            loading="lazy"
+          />
+          <figcaption>
+            <span>02 / Real-time analysis</span>
+            <strong>Chọn nguồn video, model và detector; theo dõi kết quả qua WebSocket.</strong>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="mobile section" id="mobile" aria-labelledby="mobile-title">
+        <div class="mobile-copy reveal">
+          <p class="eyebrow">Citizen touchpoint</p>
+          <h2 id="mobile-title">Bằng chứng đến đúng người, đúng thời điểm.</h2>
+          <p>
+            Ứng dụng Flutter nhận cảnh báo, hiển thị chi tiết vi phạm và kết nối trực tiếp
+            tới luồng thanh toán hoặc khiếu nại.
+          </p>
+          <ul>
+            <li>Firebase Authentication &amp; hồ sơ phương tiện</li>
+            <li>FCM + WebSocket real-time</li>
+            <li>VietQR/SePay và webhook đối soát</li>
+            <li>Khiếu nại kèm ảnh bằng chứng</li>
+          </ul>
+        </div>
+
+        <figure class="mobile-visual reveal">
+          <img
+            src="images/report-mobile-notification-anonymized.png"
+            alt="Dashboard phát hiện vượt đèn đỏ và cảnh báo tương ứng trên ứng dụng di động"
+            loading="lazy"
+          />
+        </figure>
+      </section>
+
+      <section class="resolution section" aria-labelledby="resolution-title">
+        <figure class="resolution-visual reveal">
+          <img
+            src="images/report-mobile-payment-appeal-anonymized.png"
+            alt="Màn hình thanh toán VietQR demo và biểu mẫu gửi khiếu nại"
+            loading="lazy"
+          />
+        </figure>
+        <div class="resolution-copy reveal">
+          <p class="eyebrow">Resolution workflow</p>
+          <h2 id="resolution-title">Thanh toán minh bạch. Khiếu nại có bằng chứng.</h2>
+          <p>
+            Webhook cập nhật trạng thái giao dịch; yêu cầu khiếu nại tạm khóa thanh toán
+            để quản trị viên đối chiếu trước khi ra quyết định.
+          </p>
+          <p class="privacy-note">Dữ liệu định danh và QR trong ảnh demo đã được ẩn danh.</p>
+        </div>
+      </section>
+
+      <section class="architecture section" aria-labelledby="architecture-title">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Architecture</p>
+          <h2 id="architecture-title">Một luồng dữ liệu xuyên suốt.</h2>
+        </div>
+        <div class="pipeline reveal" role="list" aria-label="Luồng xử lý hệ thống">
+          <div role="listitem"><span>01</span><strong>Camera</strong><small>Ảnh · Video · RTSP</small></div>
+          <i aria-hidden="true">→</i>
+          <div role="listitem"><span>02</span><strong>YOLOv26s-seg</strong><small>40 object classes</small></div>
+          <i aria-hidden="true">→</i>
+          <div role="listitem"><span>03</span><strong>Rule engine</strong><small>6 violation modules</small></div>
+          <i aria-hidden="true">→</i>
+          <div role="listitem"><span>04</span><strong>FastAPI</strong><small>REST · WebSocket</small></div>
+          <i aria-hidden="true">→</i>
+          <div role="listitem"><span>05</span><strong>Firebase + App</strong><small>Evidence · Alert · Action</small></div>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="reveal">
+          <p class="eyebrow">Open research prototype</p>
+          <h2>Khám phá mã nguồn và phương pháp đánh giá.</h2>
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://github.com/khanhbes/Violation-Detect"
+              target="_blank"
+              rel="noreferrer"
+            >Mở repository ↗</a>
+            <a
+              class="button button-quiet"
+              href="https://github.com/khanhbes/Violation-Detect#cài-đặt-và-khởi-chạy"
+              target="_blank"
+              rel="noreferrer"
+            >Hướng dẫn chạy</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand" href="#top">
+        <img src="images/vnetraffic-icon.png" alt="" width="32" height="32" />
+        <span>VNeTraffic</span>
+      </a>
+      <p>Computer vision for transparent traffic enforcement.</p>
+      <p>© <span data-year></span> · Research prototype</p>
+    </footer>
+  </body>
+</html>

@@ -14,7 +14,7 @@
 
 **VNeTraffic** là nguyên mẫu end-to-end kết hợp thị giác máy tính, web dashboard và ứng dụng Flutter để phát hiện, lưu bằng chứng, thông báo, tra cứu, thanh toán và tiếp nhận khiếu nại vi phạm giao thông.
 
-[Demo](#demo-giao-diện) · [Tính năng](#tính-năng-chính) · [Kiến trúc](#kiến-trúc-hệ-thống) · [Cài đặt](#cài-đặt-và-khởi-chạy) · [Tài liệu](#tài-liệu)
+[Live Demo](https://khanhbes.github.io/Violation-Detect/) · [Ảnh giao diện](#demo-giao-diện) · [Tính năng](#tính-năng-chính) · [Kiến trúc](#kiến-trúc-hệ-thống) · [Cài đặt](#cài-đặt-và-khởi-chạy) · [Tài liệu](#tài-liệu)
 
 </div>
 
