@@ -19,9 +19,8 @@ violations/
 Web/uploads/
 
 # ========================================
-# Model files (quá nặng cho git)
+# ONNX model files are not currently distributed with the repository.
 # ========================================
-assets/model/*.pt
 assets/model/*.onnx
 
 # ========================================

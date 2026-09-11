@@ -36,9 +36,8 @@ Detection Web/Violations/
 Detection Web/Web/uploads/
 Detection Web/Web/static/snapshots/
 
-# Large binaries (keep smaller files if needed, but usually models/videos are large)
+# Large runtime binaries. PyTorch models (*.pt) are tracked with Git LFS.
 Detection Web/assets/video/
-Detection Web/assets/model/*.pt
 Detection Web/assets/model/*.onnx
 
 # ========================================
