@@ -1,353 +1,523 @@
-<div align="center">
+# VNeTraffic — AI Traffic Violation Detection
 
-<img src="Detection%20Web/Web/static/app_icon.png" alt="VNeTraffic" width="92" />
+Hệ thống nghiên cứu phát hiện vi phạm giao thông Việt Nam bằng **instance segmentation**, **multi-object tracking** và các luật hình học có thể giải thích. Dự án gồm dashboard FastAPI dành cho người vận hành, backend Firebase và ứng dụng Android Flutter dành cho người tham gia giao thông.
 
-# VNeTraffic
+[Project Showcase](https://khanhbes.github.io/projects/violation-detect/) · [Tính năng](#tính-năng-chính) · [Cài nhanh trên Windows](#cài-đặt-nhanh-trên-windows) · [Launcher](#launcher-thống-nhất) · [Xử lý lỗi](#xử-lý-lỗi-thường-gặp)
 
-### Hệ thống phát hiện vi phạm giao thông và hỗ trợ xử lý phạt nguội
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Flutter](https://img.shields.io/badge/Flutter-Android-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev/)
-[![Firebase](https://img.shields.io/badge/Firebase-Auth%20%7C%20Firestore%20%7C%20FCM-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
-[![YOLOv26](https://img.shields.io/badge/YOLOv26s--seg-40%20classes-7B61FF?style=flat-square)](#mô-hình-ai-và-kết-quả-nghiên-cứu)
-
-**VNeTraffic** là nguyên mẫu end-to-end kết hợp thị giác máy tính, web dashboard và ứng dụng Flutter để phát hiện, lưu bằng chứng, thông báo, tra cứu, thanh toán và tiếp nhận khiếu nại vi phạm giao thông.
-
-[Project Showcase](https://khanhbes.github.io/projects/violation-detect/) · [Ảnh giao diện](#demo-giao-diện) · [Tính năng](#tính-năng-chính) · [Kiến trúc](#kiến-trúc-hệ-thống) · [Cài đặt](#cài-đặt-và-khởi-chạy) · [Tài liệu](#tài-liệu)
-
-</div>
-
----
-
-## Demo giao diện
-
-### Web dashboard
-
-Giao diện web là trung tâm thử nghiệm và vận hành: nhận ảnh/video, lựa chọn mô hình và bộ luật vi phạm, theo dõi kết quả real-time, lưu bằng chứng và quản trị dữ liệu.
-
-<p align="center">
-  <img src="docs/images/report-web-homepage.png" alt="Trang chủ VNeTraffic Web Dashboard" width="100%" />
-  <br />
-  <sub>Trang chủ hệ thống giám sát vi phạm giao thông.</sub>
-</p>
-
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="docs/images/report-web-upload.jpeg" alt="Nhận diện trên ảnh" width="100%" />
-      <br /><sub>Upload ảnh, điều chỉnh confidence và xem kết quả segmentation.</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="docs/images/report-web-realtime.png" alt="Nhận diện vi phạm thời gian thực" width="100%" />
-      <br /><sub>Phân tích video thời gian thực với 6 bộ phát hiện vi phạm.</sub>
-    </td>
-  </tr>
-</table>
-
-### Web và ứng dụng di động
-
-<p align="center">
-  <img src="docs/images/report-mobile-notification-anonymized.png" alt="Thông báo vi phạm trên ứng dụng" width="100%" />
-  <br />
-  <sub>Vi phạm từ dashboard được đồng bộ và cảnh báo trên ứng dụng.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/report-mobile-payment-appeal-anonymized.png" alt="Thanh toán và khiếu nại trên ứng dụng" width="720" />
-  <br />
-  <sub>Thanh toán bằng VietQR và gửi khiếu nại kèm ảnh bằng chứng.</sub>
-</p>
-
-> Các ảnh demo được trích từ Chương 6 — *System Implementation* của báo cáo [`KH.NC.SV.25_56.pdf`](./Project%20info/KH.NC.SV.25_56.pdf). Thông tin định danh và thanh toán trong ảnh app đã được thay bằng dữ liệu demo trước khi công khai.
-
----
+> Đây là research prototype, không phải hệ thống xử phạt đã được chứng nhận pháp lý. Kết quả AI cần được người có thẩm quyền kiểm tra trước khi sử dụng.
 
 ## Tổng quan
 
-| Thành phần | Công nghệ | Vai trò |
-|---|---|---|
-| AI & xử lý video | YOLOv26s-seg, OpenCV, NumPy | Detection, instance segmentation và phân tích hành vi |
-| Tracking | ByteTrack; OC-SORT là phương án thay thế trong nghiên cứu | Duy trì định danh phương tiện qua nhiều frame |
-| Backend | Python, FastAPI, WebSocket | API, xử lý media và truyền kết quả thời gian thực |
-| Web dashboard | HTML, CSS, JavaScript, Jinja2 | Thử nghiệm mô hình, giám sát và quản trị |
-| Mobile app | Flutter, Dart | Tra cứu, thông báo, thanh toán và khiếu nại |
-| Cloud | Firebase Auth, Firestore, Storage, FCM | Xác thực, đồng bộ dữ liệu, lưu bằng chứng và push notification |
-| Thanh toán | VietQR/SePay; luồng mở rộng VNPay, MoMo | Đối soát và cập nhật trạng thái nộp phạt qua webhook |
-
-## Tính năng chính
-
-### Phát hiện vi phạm bằng AI
-
-- Nhận diện và phân đoạn 40 lớp đối tượng đặc thù cho giao thông Việt Nam.
-- Hỗ trợ ảnh, video và luồng phân tích thời gian thực qua WebSocket.
-- Hiển thị bounding box, segmentation mask, nhãn, confidence và track ID.
-- Tự động hiệu chỉnh các vùng hình học như vạch dừng, làn đường và vỉa hè.
-- Lưu frame bằng chứng, thông tin vi phạm và dữ liệu liên quan lên Firebase.
-
-Sáu module luật hiện có:
-
-| Loại vi phạm | Module | Nguyên tắc xử lý |
-|---|---|---|
-| Không đội mũ bảo hiểm | `helmet_violation.py` | Liên kết người, vùng đầu và xe máy |
-| Vượt đèn đỏ | `redlight_violation.py` | Trạng thái đèn, vạch dừng và quỹ đạo xe |
-| Đi lên vỉa hè/dải phân cách | `sidewalk_violation.py` | Giao cắt giữa phương tiện và vùng cấm |
-| Đi ngược chiều | `wrong_way_violation.py` | Hướng chuyển động theo lịch sử tracking |
-| Sai làn/đè vạch | `wrong_lane_violation.py` | Mask làn đường, vạch kẻ và vị trí phương tiện |
-| Vi phạm biển báo | `sign_violation.py` | Biển cấm, vùng hiệu lực và hướng di chuyển |
-
-### Web dashboard
-
-- Điều hướng riêng cho ảnh, video, real-time, tra cứu, quản lý dữ liệu và khiếu nại.
-- Chọn model, detector và ngưỡng confidence trực tiếp trên giao diện.
-- Thống kê phiên xử lý và danh sách vi phạm gần nhất.
-- Quản lý người dùng, phương tiện, điểm giấy phép lái xe và lịch sử xử lý.
-- Tiếp nhận, đối chiếu bằng chứng, chấp thuận hoặc từ chối khiếu nại.
-- Theo dõi hạn mức thao tác Firestore và đồng bộ thay đổi qua kênh admin WebSocket.
-
-### Ứng dụng Flutter
-
-- Đăng ký/đăng nhập bằng Firebase Authentication.
-- Quản lý hồ sơ, CCCD, phương tiện và điểm giấy phép lái xe.
-- Nhận vi phạm mới qua FCM và WebSocket; xem ảnh bằng chứng và chi tiết mức phạt.
-- Lọc danh sách vi phạm theo trạng thái chưa nộp/đã nộp.
-- Thanh toán bằng QR và cập nhật trạng thái tự động qua webhook.
-- Gửi khiếu nại với lý do, mô tả và ảnh bằng chứng.
-- Nhận thông báo kết quả xử lý khiếu nại.
-- Kiểm tra và tải bản APK cập nhật theo cơ chế OTA nội bộ.
-
-## Mô hình AI và kết quả nghiên cứu
-
-Theo báo cáo nghiên cứu đi kèm, mô hình được huấn luyện 150 epoch trên NVIDIA A100 với bộ dữ liệu giao thông Việt Nam tự xây dựng:
-
-| Chỉ số | Kết quả báo cáo |
-|---|---:|
-| Ảnh gốc | 4.482 |
-| Instance annotations | 47.039 |
-| Số lớp | 40 |
-| mAP50 — bounding box | 86,9% |
-| mAP50 — segmentation mask | 85,5% |
-| Inference latency | 7,2 ms/ảnh |
-| Inference throughput | ~139 FPS trên NVIDIA A100 |
-
-> FPS trên chỉ phản ánh thời gian inference của mô hình trong môi trường thử nghiệm; tốc độ end-to-end còn phụ thuộc phần cứng, độ phân giải, tracking, logic vi phạm, truyền dữ liệu và lưu trữ.
-
-<details>
-<summary><strong>Danh sách 40 lớp của mô hình</strong></summary>
-
-| Nhóm | ID | Lớp |
-|---|---:|---|
-| Xe ưu tiên & phương tiện | 0, 6, 9, 21, 26 | `ambulance`, `car`, `fire_truck`, `motorcycle`, `police_car` |
-| Mũi tên chỉ hướng | 1–5 | `arrow_left`, `arrow_right`, `arrow_straight`, `arrow_straight_and_left`, `arrow_straight_and_right` |
-| Vạch kẻ đường | 7–8, 37–39 | `dashed_white_line`, `dashed_yellow_line`, `solid_white_line`, `solid_yellow_line`, `stop_line` |
-| Đèn tín hiệu | 10–19 | Đèn trái/phải/đi thẳng theo trạng thái đỏ, vàng, xanh |
-| Hạ tầng | 20, 22, 27 | `median`, `pedestrian_crossing`, `sidewalk` |
-| Người tham gia giao thông | 23–25 | `person`, `person_no_helmet`, `person_with_helmet` |
-| Biển báo cấm | 28–36 | 9 lớp biển cấm ô tô, cấm đi vào, cấm rẽ/quay đầu, cấm đỗ/dừng |
-
-</details>
-
-## Kiến trúc hệ thống
+VNeTraffic xử lý một luồng dữ liệu khép kín:
 
 ```mermaid
 flowchart LR
-    CAM[Camera / ảnh / video] --> AI[YOLOv26s-seg]
-    AI --> TRACK[ByteTrack]
-    TRACK --> RULES[6 module luật hình học]
-    RULES --> EVIDENCE[Ảnh bằng chứng + dữ liệu vi phạm]
-
-    EVIDENCE --> API[FastAPI + WebSocket]
-    API --> WEB[Web dashboard]
-    API --> STORE[(Firebase Storage)]
-    API --> DB[(Cloud Firestore)]
-    API --> FCM[Firebase Cloud Messaging]
-
-    AUTH[Firebase Auth] <--> APP[Flutter app]
-    DB <--> APP
-    STORE --> APP
-    FCM --> APP
-    APP --> PAY[VietQR / SePay]
-    PAY -->|Webhook| API
-    APP -->|Khiếu nại| API
+    A[Camera / video / ảnh] --> B[YOLOv26s-seg]
+    B --> C[ByteTrack]
+    C --> D[6 bộ luật vi phạm]
+    D --> E[FastAPI + WebSocket]
+    E --> F[(Firestore + Storage)]
+    F --> G[FCM / Flutter app]
+    G --> H[Thanh toán hoặc khiếu nại]
 ```
 
-### Luồng xử lý một vi phạm
+Mô hình nhận diện 40 lớp đối tượng. Kết quả segmentation và tracking được chuyển đến sáu module logic: không đội mũ bảo hiểm, vượt đèn đỏ, đi trên vỉa hè/dải phân cách, sai làn hoặc đè vạch, đi ngược chiều và vi phạm biển báo.
 
-1. Camera, ảnh hoặc video được gửi đến backend.
-2. YOLOv26s-seg trả về bounding box và mask; ByteTrack duy trì ID đối tượng.
-3. Module tương ứng áp dụng các điều kiện hình học có thể kiểm tra lại.
-4. Khi đủ điều kiện xác nhận, hệ thống đóng băng frame và tạo bản ghi bằng chứng.
-5. Backend lưu ảnh lên Storage, metadata lên Firestore và gửi thông báo đến đúng người dùng.
-6. Người dùng xem chi tiết, thanh toán hoặc gửi khiếu nại trên app.
-7. Webhook thanh toán hoặc quyết định của quản trị viên cập nhật trạng thái và đồng bộ ngược về app.
+### Kết quả nghiên cứu
 
-## Cài đặt và khởi chạy
+| Chỉ số | Kết quả |
+|---|---:|
+| Ảnh trong tập dữ liệu | 4.482 |
+| Instance annotations | 47.039 |
+| Số lớp đối tượng | 40 |
+| Box mAP50 | 86,9% |
+| Mask mAP50 | 85,5% |
+| Inference trên NVIDIA A100 | 7,2 ms/ảnh, khoảng 139 FPS |
+| Số epoch huấn luyện | 150 |
 
-### Yêu cầu
+Chỉ số 7,2 ms chỉ đo inference của mô hình; độ trễ toàn hệ thống còn phụ thuộc giải mã video, tracking, mạng và lưu trữ.
 
-| Thành phần | Phiên bản/ghi chú |
+## Giao diện
+
+<p align="center">
+  <img src="docs/images/report-web-homepage.png" alt="VNeTraffic Web Dashboard" width="100%" />
+</p>
+
+| Phân tích ảnh | Phân tích thời gian thực |
 |---|---|
-| Python | 3.10 trở lên |
-| Flutter | 3.x; Dart SDK `>=3.0.0 <4.0.0` |
-| Java | JDK 21 trở lên để build Android |
-| RAM | Tối thiểu 8 GB |
-| GPU | NVIDIA VRAM từ 4 GB được khuyến nghị; vẫn có thể chạy CPU với tốc độ thấp hơn |
-| Firebase | Auth, Firestore, Storage và Cloud Messaging |
+| <img src="docs/images/report-web-upload.jpeg" alt="Phân tích ảnh giao thông" width="100%" /> | <img src="docs/images/report-web-realtime.png" alt="Phân tích video thời gian thực" width="100%" /> |
 
-### 1. Cài backend
+<p align="center">
+  <img src="docs/images/report-mobile-notification-anonymized.png" alt="Thông báo vi phạm trên Flutter app" width="760" />
+</p>
+
+<p align="center">
+  <img src="docs/images/report-mobile-payment-appeal-anonymized.png" alt="Thanh toán và khiếu nại trên Flutter app" width="760" />
+</p>
+
+Các ảnh ứng dụng trong README đã được thay dữ liệu định danh và thanh toán bằng dữ liệu demo trước khi công khai.
+
+## Tính năng chính
+
+### AI và dashboard vận hành
+
+- Nhận nguồn từ ảnh, video, webcam hoặc RTSP.
+- Instance segmentation và tracking nhiều đối tượng bằng YOLO + ByteTrack.
+- Bật/tắt từng detector và điều chỉnh confidence trên dashboard.
+- Phân tích video thời gian thực qua WebSocket.
+- Lưu snapshot bằng chứng theo từng nhóm vi phạm.
+- Quản lý người dùng, phương tiện, vi phạm, khiếu nại và bản phát hành APK.
+
+### Ứng dụng Android Flutter
+
+- Firebase Authentication và hồ sơ người dùng/phương tiện.
+- Đồng bộ danh sách vi phạm từ Firestore và backend.
+- Push notification bằng Firebase Cloud Messaging.
+- Xem chi tiết và ảnh bằng chứng.
+- Thanh toán VietQR/SePay và nhận trạng thái qua webhook.
+- Gửi khiếu nại kèm ảnh hỗ trợ.
+- Kiểm tra và tải bản APK mới từ backend.
+
+## Yêu cầu hệ thống
+
+### Bắt buộc để chạy backend
+
+- Windows 10/11 64-bit.
+- Python 3.10 trở lên. Python 3.11 hoặc 3.12 được khuyến nghị.
+- Git. Cài Git LFS trước khi clone vì video mẫu được quản lý bằng LFS.
+- Ít nhất 8 GB RAM và khoảng 4 GB dung lượng trống cho môi trường Python.
+
+GPU NVIDIA/CUDA không bắt buộc. Backend có thể chạy CPU nhưng xử lý video sẽ chậm hơn đáng kể.
+
+### Bổ sung để chạy/build ứng dụng
+
+- Flutter SDK 3.x.
+- Android Studio, Android SDK và một emulator hoặc điện thoại Android đã bật USB debugging.
+- Java/JDK theo phiên bản Flutter hiện tại; `flutter doctor` sẽ chỉ ra thành phần còn thiếu.
+
+### Tùy chọn
+
+- Tài khoản Firebase để dùng đăng nhập, Firestore, Storage và FCM.
+- Ngrok để nhận webhook từ Internet. Repo có sẵn `ngrok_bin/ngrok.exe`; người dùng vẫn cần cấu hình auth token của tài khoản ngrok.
+- Node.js và Firebase CLI nếu muốn deploy security rules.
+
+## Cài đặt nhanh trên Windows
+
+### 1. Clone repository
 
 ```powershell
+git lfs install
 git clone https://github.com/khanhbes/Violation-Detect.git
 cd "Violation-Detect"
-
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pip install fastapi uvicorn jinja2 python-multipart pyyaml websockets requests
+git lfs pull
 ```
 
-Nếu sử dụng GPU, cài PyTorch phù hợp với phiên bản CUDA trên máy theo hướng dẫn chính thức của PyTorch.
+Nếu đã tải repo dạng ZIP, hãy giải nén vào đường dẫn ngắn, không chứa ký tự đặc biệt. Git clone vẫn được khuyến nghị để tải đúng file LFS.
 
-### 2. Chuẩn bị model và Firebase
+### 2. Mở launcher
+
+Nhấp đúp [`START.bat`](./START.bat), hoặc chạy:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\VNeTraffic.ps1
+```
+
+Chọn lần lượt:
+
+1. **Cài đặt backend** — tạo `.venv` và cài dependencies.
+2. **Kiểm tra môi trường** — xác nhận Python, model, video, Flutter và Firebase.
+3. **Chạy server Web + AI** hoặc mục 4 nếu chưa muốn dùng Ngrok.
+
+Sau khi server báo sẵn sàng, mở [http://localhost:8000](http://localhost:8000).
+
+### 3. Lần chạy đầu tiên nên không dùng Ngrok
+
+```powershell
+.\VNeTraffic.ps1 -Action server -SkipNgrok
+```
+
+Dashboard vẫn chạy nếu chưa cấu hình Firebase; các chức năng đăng nhập, Firestore, Storage và push notification sẽ không hoạt động cho đến khi thêm credential.
+
+## Launcher thống nhất
+
+Repo chỉ duy trì một script PowerShell: [`VNeTraffic.ps1`](./VNeTraffic.ps1). `START.bat` là wrapper nhỏ để người dùng Windows mở menu bằng cách nhấp đúp.
+
+### Menu
+
+| Lựa chọn | Chức năng | Thay đổi file? |
+|---:|---|---|
+| 1 | Tạo `.venv`, nâng cấp pip và cài `requirements.txt` | Có, chỉ trong `.venv` |
+| 2 | Kiểm tra môi trường và import Python | Không |
+| 3 | Chạy FastAPI cùng Ngrok | Không |
+| 4 | Chạy FastAPI nội bộ, không Ngrok | Không |
+| 5 | Chạy riêng Ngrok tunnel | Không |
+| 6 | Chạy Flutter trên device/emulator | Có thể sinh build cache |
+| 7 | Build APK release | Sinh thư mục `build/` |
+| 8 | Cập nhật IP, tăng version, build và upload APK | Có, sửa Dart và `pubspec.yaml` |
+| 9 | Deploy Firestore + Storage rules | Thay đổi cấu hình Firebase cloud |
+
+### Chạy trực tiếp bằng tham số
+
+```powershell
+# Hiện tất cả câu lệnh
+.\VNeTraffic.ps1 -Action help
+
+# Cài backend
+.\VNeTraffic.ps1 -Action setup
+
+# Tạo lại hoàn toàn .venv nếu môi trường cũ bị hỏng
+.\VNeTraffic.ps1 -Action setup -ResetVenv
+
+# Kiểm tra môi trường
+.\VNeTraffic.ps1 -Action check
+
+# Chạy server local không mở tunnel
+.\VNeTraffic.ps1 -Action server -SkipNgrok
+
+# Chạy trên port khác
+.\VNeTraffic.ps1 -Action server -Port 8080 -SkipNgrok
+
+# Chạy Flutter trên device cụ thể
+.\VNeTraffic.ps1 -Action app -Device emulator-5554
+
+# Chỉ build APK
+.\VNeTraffic.ps1 -Action build-apk
+
+# Tăng version, build và upload APK lên backend đang chạy
+.\VNeTraffic.ps1 -Action deploy-apk -Changelog "Sửa lỗi thông báo"
+
+# Bắt buộc người dùng cập nhật bản mới
+.\VNeTraffic.ps1 -Action deploy-apk -Changelog "Bản cập nhật bắt buộc" -ForceUpdate
+```
+
+Nếu PowerShell chặn script, không cần thay đổi policy toàn hệ thống. Dùng câu lệnh có `-ExecutionPolicy Bypass`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\VNeTraffic.ps1 -Action check
+```
+
+## Cấu hình Firebase
+
+Firebase là tùy chọn cho demo AI local nhưng bắt buộc cho đầy đủ tài khoản, dữ liệu, ảnh và notification.
+
+### Backend Admin SDK
+
+1. Mở Firebase Console → **Project settings** → **Service accounts**.
+2. Chọn **Generate new private key**.
+3. Đổi tên file thành `serviceAccountKey.json`.
+4. Đặt tại:
 
 ```text
-Detection Web/assets/model/yolo26_rbf.pt
-Detection Web/assets/model/yolov26s_seg.pt
 Detection Web/Web/serviceAccountKey.json
-Detection Web/Web/static/firebase-config.js
+```
+
+Không commit file này. `.gitignore` đã loại trừ `serviceAccountKey.json`.
+
+### Web dashboard Firebase client
+
+```powershell
+Copy-Item `
+  ".\Detection Web\Web\static\firebase-config.example.js" `
+  ".\Detection Web\Web\static\firebase-config.js"
+```
+
+Mở `firebase-config.js` và điền cấu hình Web App từ Firebase Console. File thật đã được ignore; chỉ file `.example.js` được commit.
+
+### Android Firebase
+
+Tải `google-services.json` của Android app và đặt tại:
+
+```text
 App/traffic_violation_app/android/app/google-services.json
 ```
 
-Tạo `firebase-config.js` từ [`firebase-config.example.js`](./Detection%20Web/Web/static/firebase-config.example.js), sau đó điền cấu hình Web App của Firebase. Không commit các khóa bí mật vào Git.
-
-### 3. Chạy web dashboard
-
-Cách nhanh trên Windows:
+Sau đó chạy lại:
 
 ```powershell
-.\START.bat
+cd .\App\traffic_violation_app
+flutter clean
+flutter pub get
+cd ..\..
 ```
 
-Hoặc chạy trực tiếp:
+### Deploy security rules
 
 ```powershell
-.\.venv\Scripts\python.exe "Detection Web\Web\app.py"
+npm install -g firebase-tools
+firebase login
+firebase use --add
+.\VNeTraffic.ps1 -Action firebase
 ```
 
-Mở [http://localhost:8000](http://localhost:8000). Khi Firebase chưa sẵn sàng, phần AI cục bộ vẫn có thể được kiểm tra nhưng các chức năng đồng bộ cloud, quản trị và thông báo sẽ bị giới hạn.
+Launcher deploy cả `firestore.rules` và `storage.rules` theo [`firebase.json`](./firebase.json).
 
-### 4. Chạy ứng dụng Flutter
+## Chạy ứng dụng Android
+
+### 1. Kiểm tra Flutter
 
 ```powershell
-cd "App\traffic_violation_app"
+flutter doctor
+flutter devices
+```
+
+Giải quyết các mục có dấu đỏ trong `flutter doctor`, sau đó:
+
+```powershell
+.\VNeTraffic.ps1 -Action app
+```
+
+Nếu có nhiều thiết bị:
+
+```powershell
+.\VNeTraffic.ps1 -Action app -Device <device-id>
+```
+
+### 2. Kết nối app với backend
+
+- Điện thoại và máy chạy backend phải cùng mạng LAN/Wi-Fi.
+- Không dùng `localhost` trên điện thoại; `localhost` khi đó là chính điện thoại.
+- IP server mặc định nằm trong `App/traffic_violation_app/lib/services/api_service.dart`.
+- Người dùng có thể đổi IP/port trong phần cài đặt ứng dụng.
+- Workflow `deploy-apk` tự tìm IPv4 LAN và cập nhật `serverIp` trước khi build.
+
+Nếu dùng Android emulator mặc định, host thường có thể truy cập qua `10.0.2.2:8000`. Nếu dùng máy thật, dùng IPv4 của máy tính, ví dụ `192.168.1.10:8000`.
+
+### 3. Build APK release
+
+```powershell
+.\VNeTraffic.ps1 -Action build-apk
+```
+
+APK được tạo tại:
+
+```text
+App/traffic_violation_app/build/app/outputs/flutter-apk/app-release.apk
+```
+
+## Ngrok và webhook SePay
+
+### Cấu hình lần đầu
+
+```powershell
+.\ngrok_bin\ngrok.exe config add-authtoken <NGROK_AUTH_TOKEN>
+```
+
+### Mở tunnel riêng
+
+Giữ backend chạy ở một cửa sổ, mở cửa sổ PowerShell thứ hai:
+
+```powershell
+.\VNeTraffic.ps1 -Action ngrok -Port 8000
+```
+
+Webhook SePay cần trỏ tới:
+
+```text
+https://<ngrok-domain>/api/webhook/sepay
+```
+
+Nếu tài khoản có reserved domain:
+
+```powershell
+.\VNeTraffic.ps1 -Action ngrok -NgrokDomain <domain>.ngrok-free.app
+```
+
+Không đưa auth token, API key hoặc credential vào README, source code hay commit Git.
+
+## Chạy thủ công không qua launcher
+
+Launcher là cách khuyến nghị. Các lệnh tương đương dưới đây hữu ích khi debug:
+
+```powershell
+# Backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:VNETRAFFIC_ENABLE_NGROK = "0"
+.\.venv\Scripts\python.exe ".\Detection Web\Web\app.py"
+```
+
+```powershell
+# Flutter
+cd .\App\traffic_violation_app
 flutter pub get
 flutter run
 ```
 
-Build APK release:
+Các biến môi trường backend hỗ trợ:
 
-```powershell
-flutter build apk --release
-```
+| Biến | Mặc định | Ý nghĩa |
+|---|---:|---|
+| `VNETRAFFIC_PORT` | `8000` | Port HTTP/WebSocket |
+| `VNETRAFFIC_ENABLE_NGROK` | `1` | Đặt `0` để không tự chạy Ngrok |
+| `FIREBASE_CREDENTIALS` | rỗng | Đường dẫn khác tới service-account JSON |
+| `CLEANUP_SNAPSHOTS_ON_STARTUP` | `0` | Đặt `1` để xóa snapshot cũ khi server khởi động |
 
-### 5. Kiểm tra chất lượng
+## API và địa chỉ quan trọng
 
-```powershell
-# Python
-python -m py_compile "Detection Web\Web\app.py"
-
-# Flutter
-cd "App\traffic_violation_app"
-flutter analyze
-flutter test
-```
-
-## API và kênh thời gian thực
-
-Một số endpoint quan trọng:
-
-| Endpoint | Chức năng |
+| Thành phần | Địa chỉ mặc định |
 |---|---|
-| `GET /api/videos` | Danh sách video thử nghiệm |
-| `GET /api/models` | Danh sách model khả dụng |
-| `GET /api/detectors` | Danh sách module vi phạm |
-| `POST /api/detect/image` | Nhận diện ảnh |
-| `POST /api/detect/video` | Khởi tạo xử lý video |
-| `GET /api/app/violations` | Danh sách vi phạm theo người dùng |
-| `POST /api/app/complaints/submit` | Gửi khiếu nại |
-| `POST /api/webhook/sepay` | Nhận callback thanh toán |
-| `WS /ws/app` | Cập nhật real-time cho ứng dụng |
-| `WS /ws/admin` | Cập nhật real-time cho dashboard quản trị |
+| Dashboard | `http://localhost:8000` |
+| OpenAPI docs | `http://localhost:8000/docs` |
+| App WebSocket | `ws://<server-ip>:8000/ws/app` |
+| Admin WebSocket | `ws://<server-ip>:8000/ws/admin` |
+| App stats | `GET /api/app/stats` |
+| Bản app mới nhất | `GET /api/app/latest-version` |
+| Upload APK | `POST /api/app/upload-apk` |
+| SePay webhook | `POST /api/webhook/sepay` |
 
 ## Cấu trúc repository
 
 ```text
-Violation Detect/
+Violation-Detect/
+├── VNeTraffic.ps1                  # Launcher duy nhất: setup/run/build/deploy
+├── START.bat                       # Mở menu launcher trên Windows
+├── requirements.txt                # Python dependencies
 ├── Detection Web/
-│   ├── Web/
-│   │   ├── app.py                    # FastAPI, REST API và WebSocket
-│   │   ├── services/                 # AI orchestration và FCM
-│   │   ├── static/                   # CSS, JavaScript, icon, Firebase config
-│   │   └── templates/index.html      # Web dashboard
-│   ├── functions/                    # 6 module phát hiện vi phạm
-│   ├── config/                       # Model, tracker và ngưỡng xử lý
-│   └── assets/                       # Model và video thử nghiệm (không commit)
+│   ├── config/                     # Model, tracker và ngưỡng phát hiện
+│   ├── functions/                  # 6 nhóm logic vi phạm
+│   ├── utils/                      # Vẽ kết quả và lưu bằng chứng
+│   ├── assets/
+│   │   ├── model/                  # Model YOLO
+│   │   └── video/                  # Video mẫu
+│   └── Web/
+│       ├── app.py                  # FastAPI entry point
+│       ├── services/               # Detection và Firebase/FCM
+│       ├── templates/              # Dashboard HTML
+│       ├── static/                 # CSS, JavaScript và icon
+│       └── apk_releases/           # APK mới nhất cho OTA update
 ├── App/traffic_violation_app/
-│   ├── lib/screens/                  # Các màn hình Flutter
-│   ├── lib/services/                 # Auth, API, Firestore, FCM, OTA
-│   ├── lib/models/                   # Mô hình dữ liệu
-│   └── android/                      # Cấu hình Android
-├── docs/images/                      # Ảnh minh họa dùng trong README
-├── Project info/                     # Ghi chú kỹ thuật và kiến trúc
-│   └── KH.NC.SV.25_56.pdf            # Báo cáo nghiên cứu
-├── START.bat                         # Khởi động backend trên Windows
-├── deploy.bat / deploy.sh            # Build và phát hành APK nội bộ
-├── firestore.rules / storage.rules   # Quy tắc bảo mật Firebase
-└── requirements.txt                  # Phụ thuộc AI/Python cốt lõi
+│   ├── lib/                        # Flutter application source
+│   ├── android/                    # Android runner/configuration
+│   ├── test/                       # Flutter tests
+│   └── pubspec.yaml                # Flutter dependencies/version
+├── Project info/
+│   ├── KH.NC.SV.25_56.pdf          # Báo cáo nghiên cứu
+│   ├── poster.pdf                  # Poster nghiên cứu
+│   ├── class_index.txt             # Danh sách class của model
+│   └── code_train.txt              # Mã tham khảo huấn luyện
+├── docs/images/                    # Ảnh minh họa cho README
+├── firebase.json
+├── firestore.rules
+└── storage.rules
 ```
 
-## Deploy APK nội bộ
+Repo tập trung vào backend và Android. Các runner Flutter iOS, web và desktop không được lưu vì chưa thuộc phạm vi phát hành; có thể tái tạo bằng `flutter create .` nếu dự án mở rộng nền tảng sau này.
+
+## Kiểm tra chất lượng
 
 ```powershell
-.\deploy.bat
+# Kiểm tra toàn bộ môi trường
+.\VNeTraffic.ps1 -Action check
+
+# Kiểm tra cú pháp Python
+.\.venv\Scripts\python.exe -m py_compile `
+  ".\Detection Web\Web\app.py" `
+  ".\Detection Web\Web\services\detection_service.py" `
+  ".\Detection Web\Web\services\fcm_service.py"
+
+# Phân tích Flutter mà không tải package lại
+cd .\App\traffic_violation_app
+flutter analyze --no-pub
+flutter test --no-pub
 ```
 
-Quy trình deploy tự động phát hiện IP LAN, cập nhật endpoint của app, tăng version/build number, build APK và đưa bản phát hành vào `Detection Web/Web/apk_releases/` để ứng dụng kiểm tra cập nhật OTA.
+## Xử lý lỗi thường gặp
 
-## Bảo mật và dữ liệu nhạy cảm
+### PowerShell báo “running scripts is disabled”
 
-Các tệp sau đã được loại khỏi Git và không được chia sẻ công khai:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\VNeTraffic.ps1
+```
 
+### `ModuleNotFoundError`
+
+Đảm bảo đang dùng Python trong `.venv`, sau đó cài lại:
+
+```powershell
+.\VNeTraffic.ps1 -Action setup
+```
+
+Nếu pip hoặc `.venv` bị hỏng, tạo lại môi trường sạch:
+
+```powershell
+.\VNeTraffic.ps1 -Action setup -ResetVenv
+```
+
+### Không tìm thấy model hoặc video
+
+```powershell
+git lfs pull
+.\VNeTraffic.ps1 -Action check
+```
+
+Model mặc định là `Detection Web/assets/model/yolo26_rbf.pt`; video mặc định là `Detection Web/assets/video/test_2_fixed.mp4`.
+
+### CUDA không khả dụng
+
+Kiểm tra:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print('CUDA:', torch.cuda.is_available())"
+```
+
+CPU vẫn chạy được. Nếu cần GPU, cài đúng bản PyTorch tương ứng với driver/CUDA từ hướng dẫn chính thức của PyTorch rồi chạy lại kiểm tra.
+
+### Điện thoại không kết nối được backend
+
+1. Xác nhận backend mở bằng trình duyệt trên máy tính.
+2. Truy cập `http://<server-ip>:8000/api/app/stats` từ trình duyệt điện thoại.
+3. Cho phép Python qua Windows Firewall trên mạng Private.
+4. Đảm bảo hai thiết bị cùng Wi-Fi và router không bật client isolation.
+5. Kiểm tra IP/port trong phần cài đặt của app.
+
+### Firebase bị `PERMISSION_DENIED`
+
+- Xác nhận ứng dụng đang dùng đúng Firebase project.
+- Kiểm tra `serviceAccountKey.json` và `google-services.json` thuộc cùng project.
+- Deploy lại rules bằng `VNeTraffic.ps1 -Action firebase`.
+- Không sửa rules thành chế độ public để né lỗi xác thực.
+
+### Ngrok không tạo tunnel
+
+```powershell
+.\ngrok_bin\ngrok.exe config check
+.\ngrok_bin\ngrok.exe http 8000
+```
+
+Kiểm tra auth token, kết nối Internet và bảo đảm không có tiến trình Ngrok khác giữ cùng domain.
+
+### Build APK thất bại
+
+```powershell
+flutter doctor
+cd .\App\traffic_violation_app
+flutter clean
+flutter pub get
+flutter build apk --release
+```
+
+## Bảo mật và dữ liệu
+
+Các file sau đã được `.gitignore` bảo vệ và không được commit:
+
+- `.env`
 - `serviceAccountKey.json`
 - `google-services.json`
 - `GoogleService-Info.plist`
 - `firebase-config.js`
-- `.env`
-- model `*.pt`, `*.onnx`
-- video thử nghiệm và ảnh bằng chứng sinh ra trong quá trình chạy
+- output, upload, snapshot và build cache
 
-Nên sử dụng Firebase Security Rules theo nguyên tắc quyền tối thiểu, xác minh chữ ký webhook thanh toán và chỉ triển khai backend qua HTTPS trong môi trường thực tế.
+Nếu một credential từng bị commit, việc xóa file ở commit mới là chưa đủ; hãy thu hồi/rotate credential trong Firebase, ngrok hoặc nhà cung cấp tương ứng.
 
-## Phạm vi nghiên cứu
+## Tài liệu nghiên cứu
 
-Đây là nguyên mẫu nghiên cứu. Báo cáo ghi nhận một số giới hạn cần cân nhắc trước khi triển khai thực địa: tập kiểm thử của một số module còn nhỏ, dữ liệu tập trung chủ yếu tại Hà Nội, và đánh giá quy mô lớn với nhiều luồng RTSP chưa nằm trong phạm vi thử nghiệm. Kết quả AI không nên được dùng làm quyết định xử phạt cuối cùng nếu chưa có quy trình kiểm duyệt, hiệu chuẩn camera và cơ chế đối soát pháp lý phù hợp.
+- [Báo cáo KH.NC.SV.25_56](./Project%20info/KH.NC.SV.25_56.pdf)
+- [Poster nghiên cứu](./Project%20info/poster.pdf)
+- [Danh sách 40 class](./Project%20info/class_index.txt)
+- [Mã tham khảo huấn luyện](./Project%20info/code_train.txt)
 
-## Tài liệu
+## License và đóng góp
 
-| Tài liệu | Nội dung |
-|---|---|
-| [`KH.NC.SV.25_56.pdf`](./Project%20info/KH.NC.SV.25_56.pdf) | Báo cáo nghiên cứu, phương pháp, đánh giá và giao diện hệ thống |
-| [`HE_THONG_HOAT_DONG.md`](./HE_THONG_HOAT_DONG.md) | Sơ đồ khối và mô tả luồng hoạt động |
-| [`HUONG_DAN_CHAY.md`](./HUONG_DAN_CHAY.md) | Hướng dẫn cài đặt và xử lý lỗi chi tiết |
-| [`Project info/architecture_diagram.md`](./Project%20info/architecture_diagram.md) | Sơ đồ kiến trúc mở rộng |
-| [`Project info/Project_Overview.md`](./Project%20info/Project_Overview.md) | Tổng quan thành phần và quy trình triển khai |
+Repository hiện chưa khai báo license mã nguồn mở. Bạn có thể đọc và chạy phục vụ học tập/nghiên cứu; không nên mặc định rằng mã nguồn được phép sử dụng thương mại hoặc phân phối lại.
 
----
-
-<div align="center">
-
-**VNeTraffic — Computer vision for transparent traffic enforcement**
-
-Phát triển phục vụ mục đích nghiên cứu khoa học và thử nghiệm kỹ thuật.
-
-</div>
+Khi đóng góp, không commit dữ liệu cá nhân, credential Firebase, ảnh biển số thật chưa ẩn danh hoặc output model dung lượng lớn. Hãy chạy kiểm tra Python và Flutter trước khi tạo pull request.

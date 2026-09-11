@@ -48,6 +48,16 @@ App/traffic_violation_app/build/
 App/traffic_violation_app/.dart_tool/
 App/traffic_violation_app/.flutter-plugins
 App/traffic_violation_app/.flutter-plugins-dependencies
+# Current release target is Android only. These runners can be regenerated
+# with `flutter create .` if another platform is added later.
+App/traffic_violation_app/ios/
+App/traffic_violation_app/macos/
+App/traffic_violation_app/linux/
+App/traffic_violation_app/windows/
+App/traffic_violation_app/web/
+
+# Raw presentation media is published in an optimized form on the portfolio.
+Project info/*.mp4
 
 # ========================================
 # Firebase secrets - do not commit

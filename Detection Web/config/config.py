@@ -76,7 +76,7 @@ class Config:
     SNAPSHOT_DIR.mkdir(exist_ok=True)
     
     MODEL_PATH = str(MODEL_DIR / 'yolo26_rbf.pt')
-    DEFAULT_VIDEO = str(VIDEO_DIR / 'AQPOF6NU6M4Ozb815w-V99aL1qEIwmrFMcsqnLwW9qn7JbaouUfsMXEN8VA1LhVqIAg1WMwDGT_Evxi8BLPtF5tLYcxNxsZHu7nL5vjcOw.mp4')
+    DEFAULT_VIDEO = str(VIDEO_DIR / 'test_2_fixed.mp4')
     OUTPUT_VIDEO = str(OUTPUT_DIR / 'output_violations.mp4')
     
     # ========================================

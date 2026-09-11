@@ -1,15 +1,17 @@
-# Thư viện lõi để chạy mô hình YOLO (Model detection & segmentation)
-# Pin version đã kiểm thử để tránh lệch schema tracker config
+# Web API and realtime transport
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.30.0,<1.0
+jinja2>=3.1.4,<4.0
+python-multipart>=0.0.9
+requests>=2.32.0,<3.0
+
+# Computer vision, segmentation and tracking
 ultralytics==8.4.27
-
-# Thư viện xử lý ảnh và video (OpenCV)
 opencv-python>=4.10.0
-
-# Thư viện toán học xử lý mảng (dùng để xử lý tọa độ box)
 numpy>=1.24.0
-
-# Thư viện hỗ trợ thuật toán Tracking (Linear Assignment Problem)
+scipy>=1.11.0
 lapx>=0.5.5
+PyYAML>=6.0.1
 
-# Firebase Admin SDK (FCM push notifications + Firestore)
+# Firebase Admin, Firestore, Storage and FCM
 firebase-admin>=6.4.0

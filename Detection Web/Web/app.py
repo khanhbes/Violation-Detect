@@ -75,6 +75,8 @@ for vtype in SNAPSHOT_VIOLATION_TYPES:
 
 def _run_startup_tasks() -> None:
     try:
+        configured_port = int(os.environ.get("VNETRAFFIC_PORT", "8000"))
+
         def get_local_ip():
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
@@ -93,14 +95,14 @@ def _run_startup_tasks() -> None:
             from firebase_admin import firestore as fb_firestore
             fcm_service._db.collection('server').document('config').set({
                 'ip': local_ip,
-                'port': 8000,
+                'port': configured_port,
                 'updatedBy': 'backend_startup',
                 'updatedAt': fb_firestore.SERVER_TIMESTAMP,
                 'updated_at': fb_firestore.SERVER_TIMESTAMP,
             }, merge=True)
             print(
                 f"✅ Bật Firebase Auto-Discovery: "
-                f"Cập nhật IP {local_ip}:8000 lên Firestore [server/config]"
+                f"Cập nhật IP {local_ip}:{configured_port} lên Firestore [server/config]"
             )
         else:
             print("⚠️ Firebase auto-discovery bị tắt (FCM/Firestore chưa sẵn sàng)")
@@ -2803,7 +2805,7 @@ async def get_server_info():
     return JSONResponse({
         "ips": ips,
         "preferred_ip": preferred_ip or ips[0],
-        "port": 8000,
+        "port": int(os.environ.get("VNETRAFFIC_PORT", "8000")),
         "hostname": socket.gethostname(),
         "ws_path": "/ws/app",
     })
@@ -5420,16 +5422,23 @@ async def websocket_admin(websocket: WebSocket):
 # MAIN
 # =============================================================================
 
-def start_ngrok():
+def start_ngrok(port: int = 8000):
     import subprocess
     import time
     print("🌍 Đang khởi động Ngrok...")
     try:
+        bundled_ngrok = config.BASE_DIR.parent / "ngrok_bin" / "ngrok.exe"
+        ngrok_command = str(bundled_ngrok) if bundled_ngrok.exists() else "ngrok"
+
         # Check if ngrok is available
-        subprocess.Popen(['ngrok', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        subprocess.Popen([ngrok_command, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
         
         # Start ngrok in the background
-        subprocess.Popen(['ngrok', 'http', '8000'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            [ngrok_command, 'http', str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         
         # Wait a bit for ngrok to start
         time.sleep(3)
@@ -5459,6 +5468,11 @@ def start_ngrok():
 
 if __name__ == "__main__":
     import threading
+
+    server_port = int(os.environ.get("VNETRAFFIC_PORT", "8000"))
+    enable_ngrok = os.environ.get("VNETRAFFIC_ENABLE_NGROK", "1").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
     
     print("=" * 60)
     print("🚦 TRAFFIC VIOLATION DETECTION WEB SERVER v4.0")
@@ -5470,10 +5484,13 @@ if __name__ == "__main__":
     print(f"📁 Uploads: {UPLOAD_DIR}")
     print(f"📁 Functions: {config.BASE_DIR / 'functions'}")
     print("=" * 60)
-    print("🌐 Open: http://localhost:8000")
+    print(f"🌐 Open: http://localhost:{server_port}")
     print("=" * 60)
     
-    # Run ngrok in a separate thread so it doesn't block the server startup
-    threading.Thread(target=start_ngrok, daemon=True).start()
+    # Run ngrok in a separate thread so it doesn't block the server startup.
+    if enable_ngrok:
+        threading.Thread(target=start_ngrok, args=(server_port,), daemon=True).start()
+    else:
+        print("ℹ️ Ngrok disabled by VNETRAFFIC_ENABLE_NGROK=0")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=server_port, reload=False)

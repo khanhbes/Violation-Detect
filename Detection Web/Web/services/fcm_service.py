@@ -53,8 +53,10 @@ class FCMService:
             possible_paths = [
                 Path(__file__).parent.parent / "serviceAccountKey.json",
                 Path(__file__).parent / "serviceAccountKey.json",
-                Path(os.environ.get("FIREBASE_CREDENTIALS", "")),
             ]
+            env_credentials = os.environ.get("FIREBASE_CREDENTIALS", "").strip()
+            if env_credentials:
+                possible_paths.append(Path(env_credentials))
 
             cred_path = None
             for p in possible_paths:
