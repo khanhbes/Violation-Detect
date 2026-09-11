@@ -84,7 +84,7 @@ Các ảnh ứng dụng trong README đã được thay dữ liệu định danh
 
 - Windows 10/11 64-bit.
 - Python 3.10 trở lên. Python 3.11 hoặc 3.12 được khuyến nghị.
-- Git. Cài Git LFS trước khi clone vì video mẫu được quản lý bằng LFS.
+- Git và Git LFS. Các model AI được quản lý bằng LFS nên cần cài Git LFS trước khi clone.
 - Ít nhất 8 GB RAM và khoảng 4 GB dung lượng trống cho môi trường Python.
 
 GPU NVIDIA/CUDA không bắt buộc. Backend có thể chạy CPU nhưng xử lý video sẽ chậm hơn đáng kể.
@@ -112,7 +112,13 @@ cd "Violation-Detect"
 git lfs pull
 ```
 
-Nếu đã tải repo dạng ZIP, hãy giải nén vào đường dẫn ngắn, không chứa ký tự đặc biệt. Git clone vẫn được khuyến nghị để tải đúng file LFS.
+Lệnh `git lfs pull` tải đầy đủ ba model được phát hành cùng repository:
+
+- `yolo26_rbf.pt` — model mặc định.
+- `yolov12s_seg.pt` — model segmentation thay thế.
+- `yolov26s_seg.pt` — model segmentation thay thế.
+
+Các model nằm trong `Detection Web/assets/model/`. Nếu đã tải repository dạng ZIP, hãy giải nén vào đường dẫn ngắn, không chứa ký tự đặc biệt; tuy nhiên, clone bằng Git vẫn được khuyến nghị để các file LFS được tải đúng và đầy đủ.
 
 ### 2. Mở launcher
 
@@ -520,4 +526,4 @@ Nếu một credential từng bị commit, việc xóa file ở commit mới là
 
 Repository hiện chưa khai báo license mã nguồn mở. Bạn có thể đọc và chạy phục vụ học tập/nghiên cứu; không nên mặc định rằng mã nguồn được phép sử dụng thương mại hoặc phân phối lại.
 
-Khi đóng góp, không commit dữ liệu cá nhân, credential Firebase, ảnh biển số thật chưa ẩn danh hoặc output model dung lượng lớn. Hãy chạy kiểm tra Python và Flutter trước khi tạo pull request.
+Khi đóng góp, không commit dữ liệu cá nhân, credential Firebase hoặc ảnh biển số thật chưa ẩn danh. Model mới chỉ nên được thêm khi đã cấu hình Git LFS. Hãy chạy kiểm tra Python và Flutter trước khi tạo pull request.
